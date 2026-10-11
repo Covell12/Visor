@@ -79,3 +79,39 @@ a.list-row:hover { background: var(--surface); }
   .topnav { display: none; }
   .roster th:nth-child(3), .roster td:nth-child(3) { display: none; }
 }
+
+/* ---------- assignment forms ---------- */
+.preset-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px; }
+.choice.preset { text-align: left; padding: 14px; }
+.choice.preset.selected { border-color: var(--blue); background: var(--blue-soft); }
+.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; margin-top: 8px; }
+fieldset.field { border: 0; padding: 0; margin: 0 0 14px; grid-column: 1 / -1; }
+fieldset.field legend { font-size: 13px; font-weight: 600; margin-bottom: 6px; }
+.radio-row { display: flex; gap: 8px; align-items: flex-start; font-size: 14px; padding: 4px 0; cursor: pointer; }
+.radio-row input { margin-top: 3px; }
+details.more { border: 1.5px solid var(--line); border-radius: var(--r); padding: 10px 14px; margin: 8px 0 4px; }
+details.more summary { cursor: pointer; font-weight: 600; font-size: 14px; }
+details.more[open] summary { margin-bottom: 12px; }
+.dim { opacity: .55; }
+.linklike { background: none; border: 0; padding: 0; color: var(--blue-deep); text-decoration: underline; font-size: inherit; }
+.gb-tools { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
+.gb-pool { border: 1.5px dashed var(--line); border-radius: var(--r); padding: 10px; margin-bottom: 10px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.gb-pool .kicker { width: 100%; }
+.gb-groups { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
+.gb-group { padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+.gb-group-head { display: flex; gap: 6px; align-items: center; }
+.gb-members { display: flex; flex-wrap: wrap; gap: 6px; min-height: 34px; }
+.gchip { display: inline-flex; align-items: center; gap: 6px; background: var(--blue-soft); border-radius: 999px; padding: 4px 6px 4px 12px; font-size: 13px; font-weight: 600; cursor: grab; }
+.gchip select { border: 0; background: transparent; font-size: 11px; color: var(--ink-2); max-width: 70px; }
+
+/* ---------- assignment page ---------- */
+.head-meta { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 6px; }
+.instructions { white-space: normal; line-height: 1.65; margin-bottom: 14px; }
+.settings-table { overflow: hidden; }
+.st-row { display: grid; grid-template-columns: 170px 1fr; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--line); font-size: 14px; }
+.st-row:last-child { border-bottom: 0; }
+.st-k { color: var(--ink-2); font-weight: 600; }
+.group-row { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.group-row .grow { flex: 1; min-width: 200px; }
+.group-stats { display: flex; flex-direction: column; font-size: 13px; color: var(--ink-2); }
+@media (max-width: 720px) { .preset-row, .form-grid { grid-template-columns: 1fr; } .st-row { grid-template-columns: 1fr; gap: 2px; } }

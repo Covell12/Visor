@@ -30,6 +30,8 @@ const { sessionMiddleware, sign, verify } = require('./lib/session');
 const { IS_FIREBASE, IS_PROD } = require('./lib/platform');
 const { OAuth2Client } = require('google-auth-library');
 const classes = require('./lib/classes');
+const assignments = require('./lib/assignments');
+const { DEFAULT_AI_SITES } = require('./lib/sites');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -193,7 +195,10 @@ app.get('/api/config', (req, res) => {
     googleSignIn: googleSignInReady() ? GOOGLE.clientId : null,
     geminiReady: geminiReady(),
     // Google Classroom roster import: needs the Google client and the flag
-    classroomImport: CLASSROOM_IMPORT_READY()
+    classroomImport: CLASSROOM_IMPORT_READY(),
+    // Visor Classroom: writing assignment presets and the default AI-site list
+    writingPresets: assignments.PRESETS,
+    defaultAiSites: DEFAULT_AI_SITES
   });
 });
 
@@ -1396,6 +1401,125 @@ app.delete('/api/classes/:id', requireAuth, ah(async (req, res) => {
   await repo.withCore(c => { delete c.classes[got.cls.id]; });
   res.json({ ok: true });
 }));
+
+// ═══════════════════════════════════════════════════════════════
+// SECTION 11 — ASSIGNMENTS
+// ═══════════════════════════════════════════════════════════════
+//
+// Writing, Group project and Discussion assignments (lib/assignments.js),
+// stored as "assignment" records. Students only ever see published ones.
+
+// Load an assignment and check the caller: the class teacher, or an enrolled
+// student once it's published.
+async function assignmentFor(req, core, id = req.params.id) {
+  const a = await repo.getRecord('assignment', id);
+  if (!a) throw new HttpError(404, 'assignment not found');
+  const got = classes.classFor(core, meOrThrow(req, core), a.classId);
+  if (!got.isTeacher && !a.publishedAt) throw new HttpError(404, 'assignment not found');
+  return { a, ...got };
+}
+async function teacherAssignment(req, core, id) {
+  const got = await assignmentFor(req, core, id);
+  if (!got.isTeacher) throw new HttpError(403, 'only the class teacher can do that');
+  return got;
+}
+
+// Each student's document for a writing assignment, for the Submissions list.
+async function submissionRows(core, cls, a) {
+  const docs = await repo.listRecords('doc', { assignmentId: a.id });
+  return cls.studentIds.map(id => core.users[id]).filter(Boolean).map(u => {
+    const d = docs.find(x => x.studentId === u.id);
+    return {
+      student: publicUser(u), docId: d?.id || null, status: d?.status || 'not-started',
+      words: d?.stats?.words || 0, submittedAt: d?.submittedAt || null, returnedAt: d?.returnedAt || null,
+      updatedAt: d?.updatedAt || null, sessions: d?.stats?.sessions || 0, score: d?.feedback?.score ?? null
+    };
+  }).sort((x, y) => x.student.lastName.localeCompare(y.student.lastName) || x.student.firstName.localeCompare(y.student.firstName));
+}
+
+app.post('/api/classes/:id/assignments', requireAuth, ah(async (req, res) => {
+  const core = await repo.readCore();
+  const got = teacherClass(req, core);
+  const a = assignments.createAssignment(got.cls, req.body || {});
+  await repo.putRecord('assignment', a);
+  if (a.type === 'group') await syncGroupProjects(a, got.cls, got.me);
+  res.json({ assignment: await repo.getRecord('assignment', a.id) });
+}));
+
+app.get('/api/assignments/:id', requireAuth, ah(async (req, res) => {
+  const core = await repo.readCore();
+  const got = await assignmentFor(req, core);
+  const { a, cls } = got;
+  const classInfo = { id: cls.id, name: cls.name };
+  if (got.isTeacher) {
+    const out = { assignment: a, class: classInfo, isTeacher: true, describe: assignments.describeWriting(a.writing) };
+    if (a.type === 'writing') out.submissions = await submissionRows(core, cls, a);
+    if (a.type === 'group') out.groups = await groupRows(core, a);
+    if (a.type === 'discussion') out.discussions = await discussionRows(a);
+    out.students = cls.studentIds.map(id => publicUser(core.users[id])).filter(Boolean);
+    return res.json(out);
+  }
+  const out = { assignment: assignments.studentView(a), class: classInfo, isTeacher: false, describe: assignments.describeWriting(a.writing, classes.multiplierFor(cls, got.me.id)) };
+  if (a.type === 'writing') {
+    const d = (await repo.listRecords('doc', { assignmentId: a.id, studentId: got.me.id }))[0];
+    out.doc = d ? { id: d.id, status: d.status, words: d.stats?.words || 0, submittedAt: d.submittedAt || null, returnedAt: d.returnedAt || null } : null;
+  }
+  if (a.type === 'group') out.myGroup = await myGroupFor(core, a, got.me);
+  if (a.type === 'discussion') out.myStats = await myDiscussionStats(a, got.me);
+  res.json(out);
+}));
+
+app.patch('/api/assignments/:id', requireAuth, ah(async (req, res) => {
+  const core = await repo.readCore();
+  const got = await teacherAssignment(req, core);
+  const a = await repo.updateRecord('assignment', got.a.id, x => { assignments.patchAssignment(x, req.body || {}, got.cls); });
+  if (a.type === 'group') await syncGroupProjects(a, got.cls, got.me);
+  res.json({ assignment: await repo.getRecord('assignment', a.id) });
+}));
+
+app.post('/api/assignments/:id/publish', requireAuth, ah(async (req, res) => {
+  const core = await repo.readCore();
+  const got = await teacherAssignment(req, core);
+  const published = req.body?.published !== false;
+  const a = await repo.updateRecord('assignment', got.a.id, x => { x.publishedAt = published ? (x.publishedAt || now()) : null; x.updatedAt = now(); });
+  res.json({ assignment: a });
+}));
+
+// Copy to another of the teacher's classes (or the same one)
+app.post('/api/assignments/:id/duplicate', requireAuth, ah(async (req, res) => {
+  const core = await repo.readCore();
+  const got = await teacherAssignment(req, core);
+  const target = classes.classFor(core, got.me, req.body?.classId || got.cls.id);
+  if (!target.isTeacher) throw new HttpError(403, 'you can only copy into your own classes');
+  const copy = assignments.duplicateAssignment(got.a, target.cls);
+  await repo.putRecord('assignment', copy);
+  res.json({ assignment: copy });
+}));
+
+app.delete('/api/assignments/:id', requireAuth, ah(async (req, res) => {
+  const core = await repo.readCore();
+  const got = await teacherAssignment(req, core);
+  await deleteAssignmentRecords(core, got.a);
+  res.json({ ok: true });
+}));
+
+async function deleteAssignmentRecords(core, a) {
+  for (const d of await repo.listRecords('doc', { assignmentId: a.id })) await repo.deleteRecords('opchunk', { docId: d.id });
+  for (const k of ['doc', 'session', 'research', 'feedback']) await repo.deleteRecords(k, { assignmentId: a.id });
+  for (const disc of await repo.listRecords('discussion', { assignmentId: a.id })) {
+    for (const seg of disc.segments || []) if (seg.audio) await audioStorage.deleteAudio(seg.audio);
+  }
+  await repo.deleteRecords('discussion', { assignmentId: a.id });
+  for (const p of Object.values(core.projects).filter(p => p.assignmentId === a.id)) await deleteProjectEverything(p.id);
+  await repo.deleteRecord('assignment', a.id);
+}
+
+// Group projects and discussions arrive in SECTIONS 11 and 14 (phases 12, 13).
+async function syncGroupProjects() {}
+async function groupRows() { return []; }
+async function myGroupFor() { return null; }
+async function discussionRows() { return []; }
+async function myDiscussionStats() { return null; }
 
 // ═══════════════════════════════════════════════════════════════
 // SECTION 15 — PAGES, ERRORS, BOOT
