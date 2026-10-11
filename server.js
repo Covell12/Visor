@@ -1,8 +1,12 @@
-// Visor backend (v5)
+// Visor backend (v7, Visor Classroom)
 // Accounts + schools, projects, resources (audio with speaker identification,
 // document reports from the Visor extension or Google Drive), and the
-// Gemini-written analysis. The frontend lives in public/ and talks to this
-// over /api/*.
+// Gemini-written analysis. Visor Classroom adds classes, assignments, the
+// Visor Writer editor with its op log and writing sessions, the extension's
+// session API, and class discussions. The frontend lives in public/ and talks
+// to this over /api/*. Route sections only wire requests; the logic for the
+// classroom features lives in lib/ (classes, assignments, writing, sessions,
+// process, research, discussion, sites, cite).
 //
 // Runs two ways with the same code:
 //   • On Firebase: index.js wraps this app in a Cloud Function. Data goes in
@@ -25,6 +29,7 @@ const legal = require('./lib/legalPages');
 const { sessionMiddleware, sign, verify } = require('./lib/session');
 const { IS_FIREBASE, IS_PROD } = require('./lib/platform');
 const { OAuth2Client } = require('google-auth-library');
+const classes = require('./lib/classes');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -83,6 +88,9 @@ const googleReady = () => !!(GOOGLE.clientId && GOOGLE.apiKey && GOOGLE.appId);
 // Sign in with Google only needs the client ID (the same OAuth client used for Drive import).
 const googleSignInReady = () => !!GOOGLE.clientId;
 const googleClient = GOOGLE.clientId ? new OAuth2Client(GOOGLE.clientId) : null;
+// Google Classroom roster import (SECTION 10). Off unless the school's Google
+// project is set up for it: GOOGLE_CLIENT_ID plus CLASSROOM_IMPORT=1.
+const CLASSROOM_IMPORT_READY = () => !!GOOGLE.clientId && process.env.CLASSROOM_IMPORT === '1';
 async function verifyGoogleCredential(credential) {
   if (!googleClient) throw new HttpError(500, 'Google sign-in is not set up on this server.');
   if (!credential) throw new HttpError(400, 'Missing Google credential');
@@ -183,7 +191,9 @@ app.get('/api/config', (req, res) => {
     chunkBytes: audioStorage.CHUNK_BYTES,
     google: googleReady() ? { ...GOOGLE } : null,
     googleSignIn: googleSignInReady() ? GOOGLE.clientId : null,
-    geminiReady: geminiReady()
+    geminiReady: geminiReady(),
+    // Google Classroom roster import: needs the Google client and the flag
+    classroomImport: CLASSROOM_IMPORT_READY()
   });
 });
 
@@ -264,8 +274,22 @@ function publicUser(u, core) {
   return { id: u.id, email: u.email, firstName: u.firstName, lastName: u.lastName, name: `${u.firstName} ${u.lastName}`.trim(), role: u.role, orgId: u.orgId, org: publicOrg(org), avatarColor: u.avatarColor || null, tutorialSeen: !!u.tutorialSeen };
 }
 
+// Students: Visor is for schools, so a student either confirms they're 13 or
+// older, or was signed up by their school (a teacher invited their email to a
+// class). Anyone else is told to ask their teacher.
+const UNDER_13_MESSAGE = 'Ask your teacher to add you to their class.';
+function checkStudentAge(core, { role, email, over13 }) {
+  if (role === 'student' && over13 !== true && !classes.hasPendingInvite(core, email)) throw new HttpError(400, UNDER_13_MESSAGE);
+}
+// After an account is created or signs in: join any classes that invited its
+// email, and the class whose code was typed at sign-up.
+function joinClassesOnSignIn(core, user, classCode) {
+  classes.joinPendingInvites(core, user);
+  if (classCode && String(classCode).trim()) classes.joinByCode(core, user, classCode);
+}
+
 app.post('/api/auth/signup', ah(async (req, res) => {
-  const { email, password, role, schoolId, schoolName } = req.body || {};
+  const { email, password, role, schoolId, schoolName, classCode, over13 } = req.body || {};
   const firstName = cleanText(req.body?.firstName, NAME_MAX), lastName = cleanText(req.body?.lastName, NAME_MAX);
   const em = cleanText(email, 200).toLowerCase();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) return res.status(400).json({ error: 'Enter a valid email address' });
@@ -277,9 +301,11 @@ app.post('/api/auth/signup', ah(async (req, res) => {
   const { hash, salt } = hashPassword(password); // slow on purpose; done before taking the lock
   const out = await repo.withCore(core => {
     if (Object.values(core.users).some(u => u.email === em)) throw new HttpError(409, 'That email already has an account. Sign in instead.');
+    checkStudentAge(core, { role, email: em, over13 });
     const org = resolveSchoolChoice(core, { schoolId, schoolName });
     const user = { id: uid(), email: em, firstName, lastName, role, orgId: org ? org.id : null, passwordSalt: salt, passwordHash: hash, createdAt: now() };
     core.users[user.id] = user;
+    joinClassesOnSignIn(core, user, role === 'student' ? classCode : null);
     return { user: publicUser(user, core), id: user.id };
   });
   req.session.userId = out.id;
@@ -292,9 +318,16 @@ app.post('/api/auth/login', ah(async (req, res) => {
   const user = Object.values(core.users).find(u => u.email === String(email || '').trim().toLowerCase());
   if (user && !user.passwordHash && user.googleSub) return res.status(401).json({ error: 'This account uses Sign in with Google. Use the Google button instead.' });
   if (!user || typeof password !== 'string' || password.length > 200 || !verifyPassword(password, user)) return res.status(401).json({ error: 'Wrong email or password' });
+  await joinInvitesIfAny(core, user);
   req.session.userId = user.id;
   res.json({ user: publicUser(user, core) });
 }));
+
+// Only takes the core lock when this person actually has an invite waiting.
+async function joinInvitesIfAny(core, user) {
+  if (user.role !== 'student' || !classes.hasPendingInvite(core, user.email)) return;
+  await repo.withCore(c => { const u = c.users[user.id]; if (u) classes.joinPendingInvites(c, u); });
+}
 
 app.post('/api/auth/logout', (req, res) => { req.session = null; res.json({ ok: true }); });
 
@@ -319,13 +352,14 @@ app.post('/api/auth/google', ah(async (req, res) => {
       return u;
     });
   }
+  await joinInvitesIfAny(core, user);
   req.session.userId = user.id;
   res.json({ user: publicUser(user, core) });
 }));
 
 // Finishes account creation for a Google sign-in that had no existing account.
 app.post('/api/auth/google/signup', ah(async (req, res) => {
-  const { credential, role, schoolId, schoolName } = req.body || {};
+  const { credential, role, schoolId, schoolName, classCode, over13 } = req.body || {};
   const g = await verifyGoogleCredential(credential);
   if (!['teacher', 'student'].includes(role)) return res.status(400).json({ error: 'Pick Student or Teacher' });
   const out = await repo.withCore(core => {
@@ -334,9 +368,11 @@ app.post('/api/auth/google/signup', ah(async (req, res) => {
       if (!user.googleSub) { user.googleSub = g.sub; delete user.passwordHash; delete user.passwordSalt; }
       return { user: publicUser(user, core), id: user.id };
     }
+    checkStudentAge(core, { role, email: g.email, over13 });
     const org = resolveSchoolChoice(core, { schoolId, schoolName });
     user = { id: uid(), email: g.email, firstName: cleanText(g.firstName, NAME_MAX) || 'Student', lastName: cleanText(g.lastName, NAME_MAX), role, orgId: org ? org.id : null, googleSub: g.sub, createdAt: now() };
     core.users[user.id] = user;
+    joinClassesOnSignIn(core, user, role === 'student' ? classCode : null);
     return { user: publicUser(user, core), id: user.id };
   });
   req.session.userId = out.id;
@@ -622,7 +658,7 @@ function publicResource(r) {
 
 function newProjectCode(core) {
   const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  const taken = new Set(Object.values(core.projects).map(p => p.code));
+  const taken = new Set([...Object.values(core.projects).map(p => p.code), ...Object.values(core.classes || {}).map(c => c.joinCode)]);
   let code;
   do { code = Array.from(crypto.randomBytes(6)).map(b => alphabet[b % alphabet.length]).join(''); } while (taken.has(code));
   return code;
@@ -639,6 +675,7 @@ function publicProject(core, project, me, { resources, resourceCount } = {}) {
     id: project.id, name: project.name, code: isTeacher ? project.code : undefined,
     teacher: publicUser(core.users[project.teacherId]), students: project.studentIds.map(id => publicUser(core.users[id])).filter(Boolean),
     showAnalysis: !!project.showAnalysis, isTeacher, createdAt: project.createdAt,
+    classId: project.classId || null, assignmentId: project.assignmentId || null,
     hasAnalysis: !!project.lastAnalyzedAt, lastAnalyzedAt: project.lastAnalyzedAt || null,
     resourceCount: resources ? resources.length : (resourceCount || 0)
   };
@@ -1156,7 +1193,212 @@ app.get('/api/projects/:id/analysis', requireAuth, ah(async (req, res) => {
 }));
 
 // ═══════════════════════════════════════════════════════════════
-// SECTION 10 — PAGES, ERRORS, BOOT
+// SECTION 10 — CLASSES
+// ═══════════════════════════════════════════════════════════════
+//
+// A teacher's classes and rosters (lib/classes.js). Assignments, student
+// documents and everything else a class owns are generic records keyed by
+// classId, so a class page is one core read plus a few record lists.
+
+const meOrThrow = (req, core) => { const me = currentUser(req, core); if (!me) throw new HttpError(401, 'not signed in'); return me; };
+function classFor(req, core, id = req.params.id) {
+  return classes.classFor(core, meOrThrow(req, core), id);
+}
+const fullName = u => (u ? `${u.firstName} ${u.lastName}`.trim() : '');
+
+// Live sessions: not ended, and heard from in the last 3 minutes.
+const isLive = s => s.state !== 'ended' && Date.now() - Date.parse(s.lastBeat || s.startedAt || 0) < 3 * 60 * 1000;
+
+// Counts and upcoming work for a class card.
+async function classSummary(cls, isTeacher, meId) {
+  const assignments = (await repo.listRecords('assignment', { classId: cls.id })).filter(a => isTeacher || a.publishedAt);
+  const out = { assignmentCount: assignments.length, upcoming: [] };
+  const soon = assignments.filter(a => a.publishedAt && a.dueAt && Date.parse(a.dueAt) > Date.now() - 864e5)
+    .sort((a, b) => (a.dueAt < b.dueAt ? -1 : 1)).slice(0, 3);
+  out.upcoming = soon.map(a => ({ id: a.id, title: a.title, type: a.type, dueAt: a.dueAt }));
+  if (isTeacher) {
+    const sessions = await repo.listRecords('session', { classId: cls.id });
+    const docs = await repo.listRecords('doc', { classId: cls.id });
+    out.activeSessions = sessions.filter(isLive).length;
+    out.toReview = docs.filter(d => d.status === 'submitted').length;
+  } else {
+    const docs = await repo.listRecords('doc', { classId: cls.id, studentId: meId });
+    out.submitted = docs.filter(d => d.status === 'submitted' || d.status === 'returned').length;
+  }
+  return out;
+}
+
+function publicClass(core, cls, me) {
+  const isTeacher = cls.teacherId === me.id;
+  const base = { id: cls.id, name: cls.name, archived: !!cls.archived, createdAt: cls.createdAt, isTeacher, teacher: publicUser(core.users[cls.teacherId]), studentCount: cls.studentIds.length };
+  if (!isTeacher) return base;
+  return {
+    ...base,
+    joinCode: cls.joinCode, joinOpen: cls.joinOpen !== false,
+    students: cls.studentIds.map(id => publicUser(core.users[id])).filter(Boolean).sort((a, b) => a.lastName.localeCompare(b.lastName) || a.firstName.localeCompare(b.firstName)),
+    pendingInvites: cls.pendingInvites || [],
+    accommodations: cls.accommodations || {},
+    researchRetentionDays: cls.researchRetentionDays || 180,
+    discussionConsentAt: cls.discussionConsentAt || null
+  };
+}
+
+app.get('/api/classes', requireAuth, ah(async (req, res) => {
+  const core = await repo.readCore();
+  const me = meOrThrow(req, core);
+  const mine = Object.values(core.classes).filter(c => c.teacherId === me.id || c.studentIds.includes(me.id))
+    .sort((a, b) => Number(!!a.archived) - Number(!!b.archived) || (a.createdAt < b.createdAt ? 1 : -1));
+  const list = await Promise.all(mine.map(async c => ({ ...publicClass(core, c, me), ...(await classSummary(c, c.teacherId === me.id, me.id)) })));
+  res.json({ classes: list });
+}));
+
+app.post('/api/classes', requireAuth, requireTeacher, ah(async (req, res) => {
+  const out = await repo.withCore(core => { const me = meOrThrow(req, core); return publicClass(core, classes.createClass(core, me, req.body?.name), me); });
+  res.json({ class: out });
+}));
+
+// Join with a class code (students)
+app.post('/api/classes/join', requireAuth, ah(async (req, res) => {
+  const out = await repo.withCore(core => { const me = meOrThrow(req, core); return publicClass(core, classes.joinByCode(core, me, req.body?.code), me); });
+  res.json({ class: out });
+}));
+
+app.get('/api/classes/:id', requireAuth, ah(async (req, res) => {
+  const core = await repo.readCore();
+  const got = classFor(req, core);
+  const assignments = await classAssignmentsFor(got);
+  res.json({ class: { ...publicClass(core, got.cls, got.me), ...(await classSummary(got.cls, got.isTeacher, got.me.id)) }, assignments });
+}));
+
+function teacherClass(req, core) {
+  const got = classFor(req, core);
+  if (!got.isTeacher) throw new HttpError(403, 'only the class teacher can do that');
+  return got;
+}
+
+app.patch('/api/classes/:id', requireAuth, ah(async (req, res) => {
+  const out = await repo.withCore(core => { const got = teacherClass(req, core); classes.patchClass(got.cls, req.body || {}); return publicClass(core, got.cls, got.me); });
+  res.json({ class: out });
+}));
+
+app.post('/api/classes/:id/rotate-code', requireAuth, ah(async (req, res) => {
+  const out = await repo.withCore(core => { const got = teacherClass(req, core); classes.rotateCode(core, got.cls); return publicClass(core, got.cls, got.me); });
+  res.json({ class: out });
+}));
+
+// { userId } or { emails: [...] }
+app.post('/api/classes/:id/students', requireAuth, ah(async (req, res) => {
+  const out = await repo.withCore(core => {
+    const got = teacherClass(req, core);
+    const result = classes.addStudents(core, got.cls, req.body || {});
+    return { result, cls: publicClass(core, got.cls, got.me) };
+  });
+  res.json({ class: out.cls, ...out.result });
+}));
+
+app.delete('/api/classes/:id/students/:userId', requireAuth, ah(async (req, res) => {
+  const out = await repo.withCore(core => { const got = teacherClass(req, core); classes.removeStudent(got.cls, req.params.userId); return publicClass(core, got.cls, got.me); });
+  res.json({ class: out });
+}));
+
+app.delete('/api/classes/:id/invites', requireAuth, ah(async (req, res) => {
+  const out = await repo.withCore(core => { const got = teacherClass(req, core); classes.removeInvite(got.cls, req.body?.email); return publicClass(core, got.cls, got.me); });
+  res.json({ class: out });
+}));
+
+// The assignments on a class page (students only see published ones).
+async function classAssignmentsFor(got) {
+  const list = (await repo.listRecords('assignment', { classId: got.cls.id })).filter(a => got.isTeacher || a.publishedAt);
+  return list.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1)).map(a => ({ id: a.id, type: a.type, title: a.title, publishedAt: a.publishedAt || null, dueAt: a.dueAt || null, createdAt: a.createdAt }));
+}
+
+// Home page: what's happening now and what needs review (teachers), or a
+// to-do list across every class (students).
+app.get('/api/dashboard', requireAuth, ah(async (req, res) => {
+  const core = await repo.readCore();
+  const me = meOrThrow(req, core);
+  if (me.role === 'teacher') {
+    const mine = Object.values(core.classes).filter(c => c.teacherId === me.id && !c.archived);
+    const happeningNow = [], needsReview = [];
+    for (const cls of mine) {
+      const [assignments, sessions, docs] = await Promise.all([
+        repo.listRecords('assignment', { classId: cls.id }), repo.listRecords('session', { classId: cls.id }), repo.listRecords('doc', { classId: cls.id })
+      ]);
+      for (const a of assignments) {
+        const live = sessions.filter(s => s.assignmentId === a.id && isLive(s));
+        if (live.length) happeningNow.push({ assignmentId: a.id, title: a.title, classId: cls.id, className: cls.name, live: live.length, students: cls.studentIds.length });
+      }
+      for (const d of docs.filter(d => d.status === 'submitted' && d.studentId !== 'template')) {
+        const a = assignments.find(x => x.id === d.assignmentId);
+        needsReview.push({ docId: d.id, assignmentId: d.assignmentId, title: a?.title || 'Assignment', classId: cls.id, className: cls.name, student: fullName(core.users[d.studentId]), submittedAt: d.submittedAt });
+      }
+    }
+    needsReview.sort((a, b) => (a.submittedAt < b.submittedAt ? -1 : 1));
+    return res.json({ role: 'teacher', happeningNow, needsReview });
+  }
+  const todo = [];
+  for (const cls of Object.values(core.classes).filter(c => c.studentIds.includes(me.id) && !c.archived)) {
+    const [assignments, docs] = await Promise.all([repo.listRecords('assignment', { classId: cls.id }), repo.listRecords('doc', { classId: cls.id, studentId: me.id })]);
+    for (const a of assignments.filter(a => a.publishedAt)) {
+      const d = docs.find(x => x.assignmentId === a.id);
+      todo.push({ assignmentId: a.id, title: a.title, type: a.type, classId: cls.id, className: cls.name, dueAt: a.dueAt || null, status: a.type === 'writing' ? (d?.status || 'not-started') : null });
+    }
+  }
+  todo.sort((a, b) => (a.dueAt || '9999') < (b.dueAt || '9999') ? -1 : 1);
+  res.json({ role: 'student', todo });
+}));
+
+// Everything a class owns: assignments, student documents and their op logs,
+// sessions, research, discussions (and their recordings), feedback, and the
+// group projects its assignments created. `studentId` narrows it to one
+// student's data (the teacher's "delete this student's data").
+async function deleteClassRecords(core, cls, { studentId } = {}) {
+  const who = studentId ? { studentId } : {};
+  const docs = await repo.listRecords('doc', { classId: cls.id, ...who });
+  for (const d of docs) {
+    await repo.deleteRecords('opchunk', { docId: d.id });
+    await repo.deleteRecords('feedback', { docId: d.id });
+  }
+  await repo.deleteRecords('doc', { classId: cls.id, ...who });
+  await repo.deleteRecords('session', { classId: cls.id, ...who });
+  await repo.deleteRecords('research', { classId: cls.id, ...who });
+  if (studentId) return;
+  for (const disc of await repo.listRecords('discussion', { classId: cls.id })) {
+    for (const seg of disc.segments || []) if (seg.audio) await audioStorage.deleteAudio(seg.audio);
+  }
+  await repo.deleteRecords('discussion', { classId: cls.id });
+  for (const a of await repo.listRecords('assignment', { classId: cls.id })) await repo.deleteRecords('feedback', { assignmentId: a.id });
+  await repo.deleteRecords('assignment', { classId: cls.id });
+  for (const p of Object.values(core.projects).filter(p => p.classId === cls.id)) await deleteProjectEverything(p.id);
+}
+async function deleteProjectEverything(projectId) {
+  for (const r of await repo.listResources(projectId)) if (r.type === 'audio') await audioStorage.deleteAudio(r.audio);
+  await repo.deleteProjectData(projectId);
+  await repo.withCore(c => { delete c.projects[projectId]; });
+}
+
+// A teacher deletes one student's work in a class (documents, op logs,
+// sessions, research, feedback). The student stays on the roster.
+app.delete('/api/classes/:id/students/:userId/data', requireAuth, ah(async (req, res) => {
+  const core = await repo.readCore();
+  const got = teacherClass(req, core);
+  await deleteClassRecords(core, got.cls, { studentId: String(req.params.userId) });
+  res.json({ ok: true });
+}));
+
+// Deleting a class removes everything in it. The page asks the teacher to type
+// the class name first; the server checks it too.
+app.delete('/api/classes/:id', requireAuth, ah(async (req, res) => {
+  const core = await repo.readCore();
+  const got = teacherClass(req, core);
+  if (String(req.body?.confirmName || '').trim() !== got.cls.name) throw new HttpError(400, 'Type the class name exactly to delete it.');
+  await deleteClassRecords(core, got.cls);
+  await repo.withCore(c => { delete c.classes[got.cls.id]; });
+  res.json({ ok: true });
+}));
+
+// ═══════════════════════════════════════════════════════════════
+// SECTION 15 — PAGES, ERRORS, BOOT
 // ═══════════════════════════════════════════════════════════════
 
 // Privacy policy and terms (linked from Google's sign-in screen, so they must stay at these URLs)
@@ -1169,6 +1411,7 @@ if (process.env.VISOR_DEV_LOGIN === '1' && !IS_PROD) {
     const core = await repo.readCore();
     const u = Object.values(core.users).find(x => x.email === String(req.query.email || '').toLowerCase());
     if (!u) return res.status(404).send('no such user');
+    await joinInvitesIfAny(core, u);
     req.session.userId = u.id;
     res.redirect('/');
   }));

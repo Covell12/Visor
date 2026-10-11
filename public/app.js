@@ -174,6 +174,12 @@ function formError(id, msg) { const el = $(id); el.textContent = msg; el.classLi
 function pickRole(role) {
   selectedRole = role;
   document.querySelectorAll('.role-card').forEach(c => c.classList.toggle('selected', c.dataset.role === role));
+  $('suStudentExtras')?.classList.toggle('hidden', role !== 'student');
+}
+// Class code and the 13-or-older confirmation (students only)
+function studentSignupExtras() {
+  if (selectedRole !== 'student') return {};
+  return { classCode: ($('suClassCode')?.value || '').trim().toUpperCase(), over13: !!$('suOver13')?.checked };
 }
 
 /* ---- school picker: pick a school on Visor, name a new one, or leave blank ---- */
@@ -229,9 +235,9 @@ async function doSignup() {
   try {
     let r;
     if (googlePending) {
-      r = await api('/api/auth/google/signup', { method: 'POST', body: { credential: googlePending.credential, role: selectedRole, ...schoolChoice('suSchoolPicker') } });
+      r = await api('/api/auth/google/signup', { method: 'POST', body: { credential: googlePending.credential, role: selectedRole, ...schoolChoice('suSchoolPicker'), ...studentSignupExtras() } });
     } else {
-      const body = { email: $('suEmail').value.trim(), firstName: $('suFirst').value.trim(), lastName: $('suLast').value.trim(), password: $('suPassword').value, role: selectedRole, ...schoolChoice('suSchoolPicker') };
+      const body = { email: $('suEmail').value.trim(), firstName: $('suFirst').value.trim(), lastName: $('suLast').value.trim(), password: $('suPassword').value, role: selectedRole, ...schoolChoice('suSchoolPicker'), ...studentSignupExtras() };
       r = await api('/api/auth/signup', { method: 'POST', body });
     }
     me = r.user; googlePending = null; enterApp();
@@ -246,7 +252,7 @@ async function doSignin() {
     me = r.user; enterApp();
   } catch (e) { formError('signinError', e.message); }
 }
-async function signOut() { await api('/api/auth/logout', { method: 'POST' }); me = null; project = null; showAuth('signin'); }
+async function signOut() { await api('/api/auth/logout', { method: 'POST' }); me = null; project = null; if (location.pathname !== '/') history.pushState(null, '', '/'); showAuth('signin'); }
 document.addEventListener('keydown', e => {
   if (e.key !== 'Enter') return;
   if (!$('signinForm').classList.contains('hidden') && $('signinForm').contains(document.activeElement)) doSignin();
@@ -257,8 +263,10 @@ document.addEventListener('keydown', e => {
 async function boot() {
   try {
     await configReady;
+    // Visor Classroom: the extension's side panel embeds the editor without a cookie
+    if (window.VisorRouter && VisorRouter.isEmbed()) return VisorRouter.startEmbed();
     const r = await api('/api/me');
-    if (r.signedIn) { me = r.user; if (!r.geminiReady) toast('No Gemini key on the server yet. Transcription and analysis will fail until it is set.', 'err'); enterApp(); }
+    if (r.signedIn) { me = r.user; if (!r.geminiReady && me.role === 'teacher') toast('AI features are unavailable: this server has no Gemini access set up. Everything else works.', 'err'); enterApp(); }
     else showAuth('signin');
   } catch { showAuth('signin'); }
   mountSchoolPicker('suSchoolPicker', null);
@@ -271,7 +279,9 @@ function enterApp() {
   $('userBtn').innerHTML = `${avatarHtml(me, 'avatar-sm')}<span><div class="n">${esc(me.name)}</div><div class="r">${esc(me.role)}</div></span>`;
   $('newProjectBtn').classList.toggle('hidden', me.role !== 'teacher');
   $('emptyMainText').textContent = me.role === 'teacher' ? 'Create a project on the left to add students and resources.' : 'Your teacher adds you to projects. They will show up on the left.';
-  loadProjects();
+  // Visor Classroom: pages come from the address bar (router.js); the project
+  // view is the /project/:id route.
+  if (window.VisorRouter) VisorRouter.start(); else loadProjects();
   if (!me.tutorialSeen) setTimeout(openTutorial, 400);
 }
 
@@ -323,18 +333,18 @@ async function saveProfile() {
 /* ====================== tutorial ====================== */
 const TUTORIAL = {
   teacher: [
-    { icon: 'users', title: 'Welcome to Visor', text: 'Visor shows you who actually did the work on a group project. It listens to the group\'s recordings and reads their document history, then writes you a fair report. Here\'s the whole flow in four steps.' },
-    { icon: 'doc', title: '1. Create a project', text: 'Click <b>+ New</b> in the left sidebar and give the project a name your students will recognize. Every project gets a short code (the <b>#</b> chip in the header). Students use that code in the Visor extension to send document data.' },
-    { icon: 'users', title: '2. Add your students', text: 'On the <b>Members</b> tab, search by name or email. Students at your school show up when you search their name; anyone else, type their full email address. They need a Visor account first.' },
-    { icon: 'mic', title: '3. Resources come in', text: 'Students (or you) add two kinds of resources: <b>document data</b> from the Visor Chrome extension (or picked straight from Google Drive), and <b>recordings</b> of group meetings. Recordings are transcribed automatically and Visor asks who each voice is.' },
-    { icon: 'sparkle', title: '4. Run the analysis', text: 'On the <b>Analysis</b> tab, click <b>Run analysis</b>. You get workload percentages, who did what, and a bottom line. Students can\'t see it unless you turn on <b>Show analysis to students</b> in the project settings (gear icon).' }
+    { icon: 'school', title: '1. Create a class', text: 'Welcome to Visor Classroom. Start on <b>Home</b> with <b>Create class</b>. Each class gets a 6-character join code: put it on the board, or add students by email on the <b>Students</b> tab (anyone without an account joins automatically when they sign up). Set extra time for students who need it there too.' },
+    { icon: 'pen', title: '2. Make an assignment', text: 'On the class page, pick <b>Writing</b>, <b>Group project</b> or <b>Discussion</b>. For writing, the <b>In-class essay (locked)</b> preset is a timed session with pasting from outside sources off and AI sites blocked; <b>Homework essay (open)</b> records everything but blocks nothing. Publish it when you’re ready.' },
+    { icon: 'puzzle', title: '3. Students write in Visor', text: 'Students write in Visor’s own editor during a session. Leaving the tab pauses their writing and is recorded. For locked sessions they need the Visor Chrome extension, which also records their research, keeps them on allowed sites and adds citations with one click.' },
+    { icon: 'eye', title: '4. Watch live, then review', text: 'The assignment’s <b>Live</b> tab shows every student as they write: words, pauses, pastes, time left, with buttons to pause, message or add time. After they submit, open any essay to replay it keystroke by keystroke, read its research log, and see factual notes about how it was written.' },
+    { icon: 'sparkle', title: '5. Feedback, groups and discussions', text: 'Leave a comment and score, then <b>Return to student</b>. Group projects give each group its own project for Google Docs reports, recordings and an AI-written summary. Discussions turn a recording into measured talk time and turns per student. Visor shows what happened; you make the call.' }
   ],
   student: [
-    { icon: 'users', title: 'Welcome to Visor', text: 'Visor gives you credit for the work you actually do on group projects. Your teacher sees who wrote, who talked, and who coasted. Here\'s what you do.' },
-    { icon: 'doc', title: '1. Wait for your teacher', text: 'Your teacher adds you to a project. It shows up in <b>My projects</b> on the left. You don\'t need to do anything for this step.' },
-    { icon: 'puzzle', title: '2. Send document data', text: 'Install the Visor Chrome extension. Open your group\'s Google Doc or Slides, click the <b>Visor</b> button, and when it finishes click <b>Send to Website</b> with your project\'s code (ask your teacher). That\'s the main way Visor sees your work.' },
-    { icon: 'mic', title: '3. Record your meetings', text: 'On the <b>Resources</b> tab, upload a recording or hit <b>Record now</b> during a group session. Visor transcribes it and then asks "Who is this?" for each voice. Pick the right person and the recording becomes a script.' },
-    { icon: 'sparkle', title: '4. Your teacher runs the analysis', text: 'When the project is done, your teacher runs the analysis. If they share it, you\'ll see the <b>Analysis</b> tab with everyone\'s share of the work.' }
+    { icon: 'school', title: '1. Join your class', text: 'Welcome to Visor Classroom. Click <b>Join a class</b> on Home and type the code your teacher gives you (or your teacher adds you by email). Your assignments then show up in your <b>To do</b> list.' },
+    { icon: 'puzzle', title: '2. Connect the extension', text: 'Some sessions need the Visor Chrome extension. Install it, then click <b>Connect extension</b> on Home. During a session it records the searches and pages you use for research, and its <b>Cite this page</b> button adds a citation to your essay.' },
+    { icon: 'pen', title: '3. Write in a session', text: 'Open an assignment and click <b>Start writing session</b>. Visor records how your writing happens, not just the result. If you leave the Visor tab, writing pauses until you come back, and you see the same pause your teacher sees.' },
+    { icon: 'doc', title: '4. Cite and submit', text: 'Use <b>Insert citation</b> or the extension’s cite button to add sources; your Works Cited list builds itself. When you’re done, click <b>Submit</b>. Your teacher can return it with feedback and a score.' },
+    { icon: 'users', title: '5. Group projects and discussions', text: 'In group projects, the extension sends your group’s Google Doc history to Visor automatically, and you can add meeting recordings. In class discussions, your teacher may share your own talk time and turns with you.' }
   ]
 };
 let tut = { i: 0 };
@@ -379,6 +389,7 @@ function showEmptyMain() { $('emptyMain').classList.remove('hidden'); $('project
 
 async function selectProject(id) {
   clearInterval(pollTimer);
+  window.VisorRouter?.onProjectSelected(id);
   try {
     const r = await api(`/api/projects/${id}`);
     project = r.project; analysis = null;

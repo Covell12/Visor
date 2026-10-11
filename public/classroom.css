@@ -1,0 +1,81 @@
+/* Visor Classroom — styles for the class, assignment, writer, review and live
+   pages. Reuses the tokens and components in app.css (.btn, .card, .pill,
+   .tabs, .modal…); only what those don't cover lives here. */
+
+/* ---------- shell ---------- */
+a.btn { text-decoration: none; }
+.topbar .brand { text-decoration: none; color: inherit; }
+.topnav { display: flex; gap: 4px; margin-left: 18px; }
+.topnav a { padding: 7px 12px; border-radius: 999px; color: var(--ink-2); text-decoration: none; font-weight: 600; font-size: 14px; }
+.topnav a:hover { background: var(--blue-soft); color: var(--ink); }
+.topnav a.active { background: var(--blue-soft); color: var(--blue-deep); }
+.route-view { min-height: calc(100vh - 64px); }
+.page { max-width: 1100px; margin: 0 auto; padding: 26px 24px 70px; }
+.page h1 { font-size: 26px; margin: 0 0 2px; letter-spacing: -.01em; }
+.page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 20px; }
+.head-actions, .btn-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.btn-row { margin-top: 10px; }
+.crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 13px; color: var(--ink-2); margin-bottom: 10px; }
+.crumbs a { color: var(--ink-2); text-decoration: none; font-weight: 600; }
+.crumbs a:hover { color: var(--blue-deep); text-decoration: underline; }
+.crumbs .sep { color: var(--ink-3); }
+.loading-row { display: flex; justify-content: center; padding: 60px 0; }
+.home-section { margin-top: 30px; }
+.home-section .section-title { margin-bottom: 10px; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.check-row { display: flex; gap: 10px; align-items: flex-start; font-size: 14px; margin: 4px 0 16px; cursor: pointer; }
+.check-row input { margin-top: 3px; width: 16px; height: 16px; flex: none; }
+.input-sm { padding: 7px 10px; font-size: 13px; border-radius: 10px; }
+select.input { appearance: auto; }
+
+/* Visible focus for everything new (keyboard users) */
+.route-view a:focus-visible, .route-view button:focus-visible, .route-view select:focus-visible, .route-view input:focus-visible, .route-view textarea:focus-visible,
+.modal button:focus-visible, .modal a:focus-visible, .topnav a:focus-visible, .brand:focus-visible, .collapse .ch:focus-visible {
+  outline: 3px solid var(--blue-deep); outline-offset: 2px;
+}
+
+/* ---------- class cards / lists ---------- */
+.class-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }
+.class-card { display: block; padding: 18px; text-decoration: none; color: inherit; }
+.class-card.archived { opacity: .7; }
+.class-card-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+.class-name { font-weight: 700; font-size: 16.5px; }
+.class-meta { display: flex; flex-wrap: wrap; gap: 4px 12px; color: var(--ink-2); font-size: 13px; margin-top: 8px; }
+.class-upcoming { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 10px; display: flex; flex-direction: column; gap: 6px; font-size: 13.5px; }
+.class-upcoming .pill { font-size: 10px; padding: 2px 7px; }
+.live-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--red); box-shadow: 0 0 0 0 rgba(217,83,79,.5); animation: livePulse 1.6s infinite; vertical-align: middle; }
+.live-dot-text { color: var(--red); display: inline-flex; align-items: center; gap: 6px; }
+@keyframes livePulse { 0% { box-shadow: 0 0 0 0 rgba(217,83,79,.5); } 70% { box-shadow: 0 0 0 7px rgba(217,83,79,0); } 100% { box-shadow: 0 0 0 0 rgba(217,83,79,0); } }
+@media (prefers-reduced-motion: reduce) { .live-dot { animation: none; } }
+.happening { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; background: var(--red-soft); border-radius: var(--r-lg); padding: 12px 16px; margin-bottom: 18px; }
+.happening .kicker { color: var(--red); display: flex; align-items: center; gap: 8px; }
+.happening-item { display: flex; flex-direction: column; background: #fff; border-radius: var(--r); padding: 8px 14px; text-decoration: none; color: inherit; box-shadow: var(--shadow-sm); }
+.list-card { overflow: hidden; }
+.list-row { display: flex; align-items: center; gap: 12px; padding: 13px 16px; border-bottom: 1px solid var(--line); text-decoration: none; color: inherit; }
+.list-row:last-child { border-bottom: 0; }
+a.list-row:hover { background: var(--surface); }
+.list-row .grow { flex: 1; min-width: 0; }
+.list-row .due { white-space: nowrap; }
+.row-link { display: flex; justify-content: space-between; gap: 10px; padding: 14px 16px; text-decoration: none; color: inherit; }
+.create-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+
+/* ---------- roster ---------- */
+.roster { width: 100%; border-collapse: collapse; }
+.roster th { text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--ink-2); padding: 10px 14px; border-bottom: 1px solid var(--line); }
+.roster td { padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+.roster tr:last-child td { border-bottom: 0; }
+.roster-name { display: flex; align-items: center; gap: 10px; }
+.row-actions { white-space: nowrap; text-align: right; }
+.join-code-big { font-size: 30px; font-weight: 800; letter-spacing: .18em; }
+.class-students { align-items: stretch; }
+.tip-wrap { position: relative; display: inline-flex; }
+.tip-wrap .tip { display: none; position: absolute; bottom: calc(100% + 6px); left: 0; width: 260px; background: var(--ink); color: #fff; font-size: 12px; padding: 8px 10px; border-radius: 8px; z-index: 5; }
+.tip-wrap:hover .tip, .tip-wrap:focus-within .tip { display: block; }
+.danger-zone { border: 1.5px solid var(--red-soft); }
+
+/* ---------- small screens ---------- */
+@media (max-width: 720px) {
+  .page { padding: 18px 14px 60px; }
+  .topnav { display: none; }
+  .roster th:nth-child(3), .roster td:nth-child(3) { display: none; }
+}

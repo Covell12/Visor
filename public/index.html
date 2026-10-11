@@ -6,6 +6,7 @@
 <title>Visor</title>
 <link rel="icon" href="/favicon.png" />
 <link rel="stylesheet" href="/app.css" />
+<link rel="stylesheet" href="/classroom.css" />
 </head>
 <body>
 
@@ -14,13 +15,13 @@
   <div class="auth-brand">
     <div>
       <img class="logo-big" src="/logo.png" alt="Visor" />
-      <h1>See who actually<br>did the work.</h1>
-      <p>Visor turns group-project recordings and document history into a fair, evidence-based picture of who contributed what.</p>
+      <h1>Writing you can<br>see happen.</h1>
+      <p>Visor Classroom is where students write, research and discuss, and where teachers see the whole process: every session, every source, every voice.</p>
     </div>
     <div class="how">
-      <div><b>1</b><span>Teachers create a project and add their students.</span></div>
-      <div><b>2</b><span>Students upload meeting recordings and send in document data from the Visor extension.</span></div>
-      <div><b>3</b><span>Visor transcribes, identifies who said what, and writes the report.</span></div>
+      <div><b>1</b><span>Teachers create a class and give students the join code.</span></div>
+      <div><b>2</b><span>Students write in Visor's editor during a session; the extension records their research and adds citations.</span></div>
+      <div><b>3</b><span>Teachers watch live, replay any essay, and review group projects and class discussions.</span></div>
     </div>
     <div class="credit credit-light"><a href="/privacy" style="color:inherit;">Privacy</a> · <a href="/terms" style="color:inherit;">Terms</a></div>
   </div>
@@ -55,6 +56,10 @@
           <div class="field"><label>Last name</label><input id="suLast" class="input" type="text" autocomplete="family-name" /></div>
         </div>
         <div class="field"><label>Password</label><input id="suPassword" class="input" type="password" autocomplete="new-password" placeholder="At least 6 characters" /></div>
+        <div id="suStudentExtras" class="hidden">
+          <div class="field"><label for="suClassCode">Class code <span class="label-note">optional</span></label><input id="suClassCode" class="input mono" type="text" autocomplete="off" maxlength="6" placeholder="e.g. 7KQ2MX" style="text-transform:uppercase;" /><div class="hint">Your teacher gives you this. You can also join a class later.</div></div>
+          <label class="check-row"><input id="suOver13" type="checkbox" /> <span>I am 13 or older, or my school signed me up for Visor.</span></label>
+        </div>
         <div class="field">
           <label>School <span class="label-note">optional</span></label>
           <div id="suSchoolPicker" class="school-picker"></div>
@@ -63,11 +68,11 @@
         <div class="role-cards">
           <button class="role-card" data-role="student" onclick="pickRole('student')">
             <div class="t"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 10v6M2 10l10-5 10 5-10 5z"/><path d="M6 12v5c3 3 9 3 12 0v-5"/></svg>Student</div>
-            <div class="d">Join projects, upload recordings, send document data.</div>
+            <div class="d">Join classes, write essays, work on group projects.</div>
           </button>
           <button class="role-card" data-role="teacher" onclick="pickRole('teacher')">
             <div class="t"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>Teacher</div>
-            <div class="d">Create projects, add students, run the analysis.</div>
+            <div class="d">Create classes and assignments, watch sessions, review work.</div>
           </button>
         </div>
         <button class="btn btn-primary btn-lg" style="width:100%;justify-content:center;" onclick="doSignup()">Create account</button>
@@ -80,7 +85,10 @@
 <!-- ================= APP ================= -->
 <div id="appView" class="hidden">
   <header class="topbar">
-    <div class="brand"><img src="/logo.png" alt="" /> Visor</div>
+    <a class="brand" href="/" data-link><img src="/logo.png" alt="" /> Visor</a>
+    <nav class="topnav" aria-label="Main">
+      <a href="/" data-link data-nav="home">Home</a>
+    </nav>
     <div class="school" id="topSchool"></div>
     <div class="spacer"></div>
     <div class="user-menu">
@@ -159,11 +167,16 @@
       </div>
     </main>
   </div>
+
+  <!-- Visor Classroom pages (dashboard, class, assignment, writer, review…) render here -->
+  <div id="routeView" class="route-view hidden"></div>
 </div>
 
 <div id="modalRoot"></div>
 <div id="toastRoot"></div>
 
 <script src="/app.js"></script>
+<script src="/router.js"></script>
+<script src="/classes.js"></script>
 </body>
 </html>
