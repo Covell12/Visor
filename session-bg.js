@@ -150,7 +150,7 @@ async function sessionStart(payload, sender) {
   await setBadge(true);
   await enterSessionPanelMode();
   if (recording) await startResearchCapture();
-  if (state.settings.mode === 'locked') await lockdownOn(state);
+  if (state.settings.mode === 'locked' || state.settings.blockAiSites) await lockdownOn(state);
   addCiteMenu();
   chrome.alarms.create(FLUSH_ALARM, { periodInMinutes: 1 });
   await extBeat();
@@ -552,9 +552,74 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 });
 
 // ── Lockdown (Section 8.4) ─────────────────────────────────────────────────
-// Filled in with lockdown: declarativeNetRequest rules and tab bouncing.
-async function lockdownOn() {}
-async function lockdownOff() {}
+//
+// Locked sessions: declarativeNetRequest sends pages that aren't allowed to
+// blocked.html (lockdown.js builds the rules), and tabs opening the browser's
+// own extension and settings pages are sent back to the Visor tab. Open
+// sessions with "block AI sites" get only the AI-site rules. What an extension
+// can't stop (a second device, incognito unless the school turns it off) is
+// in docs/IT-GUIDE.md.
+
+async function clearRules() {
+  try {
+    const have = await chrome.declarativeNetRequest.getDynamicRules();
+    const ids = have.map((r) => r.id).filter((id) => id >= VisorLockdown.RULE_BASE && id < VisorLockdown.RULE_BASE + 1000);
+    if (ids.length) await chrome.declarativeNetRequest.updateDynamicRules({ removeRuleIds: ids });
+  } catch (_) {}
+}
+
+async function lockdownOn(state) {
+  await clearRules();
+  const rules = VisorLockdown.buildBlockRules(state.settings, { visorOrigin: state.origin, blockedPage: chrome.runtime.getURL('blocked.html') });
+  let ok = false;
+  if (rules.length) {
+    try { await chrome.declarativeNetRequest.updateDynamicRules({ addRules: rules }); ok = true; } catch (e) { console.warn('Visor lockdown rules failed:', e && e.message); }
+  }
+  await patchState((x) => { x.lockActive = ok && x.settings.mode === 'locked'; x.aiBlockActive = ok; });
+}
+
+async function lockdownOff() {
+  await clearRules();
+  await patchState((x) => { x.lockActive = false; x.aiBlockActive = false; });
+}
+
+// Send a tab back to the Visor tab (and say why on the blocked page)
+async function bounce(tabId, url) {
+  const s = await getState();
+  if (!s || !s.active) return;
+  try { await chrome.tabs.update(tabId, { url: `${chrome.runtime.getURL('blocked.html')}?u=${url}` }); } catch (_) {}
+  if (s.visorTabId != null) {
+    try { await chrome.tabs.update(s.visorTabId, { active: true }); } catch (_) {}
+    if (s.visorWindowId != null) chrome.windows.update(s.visorWindowId, { focused: true }).catch(() => {});
+  }
+}
+
+chrome.tabs.onUpdated.addListener(async (tabId, info) => {
+  if (!info.url) return;
+  const s = await getState();
+  if (!s || !s.active || !s.lockActive) return;
+  if (VisorLockdown.shouldBounce(info.url)) {
+    await withState((x) => { queueEvent(x, { type: 'blocked', url: capUrl(info.url), host: hostOf(info.url) }); });
+    bounce(tabId, info.url);
+  }
+});
+
+chrome.runtime.onMessage.addListener((msg, sender) => {
+  if (!msg) return false;
+  if (msg.type === 'VISOR_BLOCKED') {
+    // From blocked.html: the attempt is part of the session record
+    withState((x) => { queueEvent(x, { type: 'blocked', url: capUrl(msg.url), host: hostOf(msg.url) }); }).catch(() => {});
+  }
+  if (msg.type === 'VISOR_BACK_TO_WRITING') {
+    getState().then(async (s) => {
+      if (!s || s.visorTabId == null) return;
+      try { await chrome.tabs.update(s.visorTabId, { active: true }); } catch (_) {}
+      if (s.visorWindowId != null) chrome.windows.update(s.visorWindowId, { focused: true }).catch(() => {});
+      if (sender.tab && sender.tab.id !== s.visorTabId) chrome.tabs.remove(sender.tab.id).catch(() => {});
+    });
+  }
+  return false;
+});
 
 // ── Wiring ─────────────────────────────────────────────────────────────────
 
