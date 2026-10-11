@@ -30,17 +30,19 @@ phrases naturally in the description, then get your first twenty reviews.
 
 # 1. Store listing tab
 
-## Product name  *(45 max — this is 36)*
+## Product name  *(75 max — this is 48)*
 
-**Already applied to `manifest.json`.** The store takes the item name from the
+**Already applied to `manifest.json` (4.0.0).** The store takes the item name from the
 manifest, so it is not editable in the dashboard — changing it means re-zipping.
 
 ```
-Visor – Google Docs Revision History
+Visor — Writing Sessions & Google Docs History
 ```
 
-Brand first, then the two phrases people actually type. Was
-*"Visor – Writing Process Analyzer"* — accurate, but nobody searches for it.
+Since 4.0.0 the extension is also the companion to Visor Classroom (writing
+sessions, research, citations), so the name leads with that and keeps the Docs
+history phrase people search for. The 3.6 name was *"Visor — Who Wrote What:
+Google Docs History"*; the alternatives below are from before 4.0.0.
 
 **Alternatives**, if you want a different emphasis:
 
@@ -57,12 +59,12 @@ judgement call a reviewer can go either way on. If it gets flagged, `Visor –
 Doc Revision History, Replay & Pastes` keeps most of the search value with none
 of the trademark exposure.
 
-## Summary  *(132 max — this is 121)*
+## Summary  *(132 max — this is 127)*
 
 **Already applied to `manifest.json`.** Pre-fills the dashboard from there.
 
 ```
-Google Docs revision history: who wrote what, character-by-character replay, paste detection, and recovered deleted text.
+Visor Classroom companion: records research in writing sessions, cites pages in one click, shows who wrote what in Google Docs.
 ```
 
 Leads with the exact-match phrase, then the four things people search for by
@@ -74,9 +76,24 @@ The first two lines are what shows in search previews, so they repeat the core
 phrase and answer "what is this" immediately.
 
 ```
-Visor shows you the full revision history of a Google Doc — who wrote what, when they wrote it, what was pasted in, and what was deleted along the way.
+Visor is the companion to Visor Classroom, where students write essays in writing sessions their teacher starts, and it shows the full revision history of any Google Doc: who wrote what, when, what was pasted in, and what was deleted along the way.
 
-Open any Google Doc or Google Slides file you can edit, click Visor, and the document's entire edit history is reconstructed and replayed in your browser. No account, no API key, no sign-in.
+
+FOR VISOR CLASSROOM WRITING SESSIONS
+
+Connect the extension to your Visor account once. Then, only while a writing session is running (the Visor icon shows a red REC):
+
+• Your essay sits in Chrome's side panel next to the pages you're researching.
+• Cite this page (or Alt+Shift+C) reads the page's author, title and date and adds an MLA, APA or Chicago citation to your essay and its Works Cited.
+• The research you do for the essay is recorded for your teacher: your searches, the pages you visit and how long, and text you copy, so a paste can show where it came from.
+• In a locked, in-class session, sites your teacher didn't allow (and AI sites) show a "not allowed" page instead.
+
+Outside a session, none of that runs. Group projects: if your teacher linked your group's Google Doc, opening it sends its history (never its text) to your group's project.
+
+
+GOOGLE DOCS HISTORY
+
+Open any Google Doc or Google Slides file you can edit, click Visor, and the document's entire edit history is reconstructed and replayed in your browser. No API key, no sign-in needed for this part.
 
 
 SEE WHO WROTE WHAT
@@ -127,14 +144,14 @@ Visor reports one counted quantity: the share of characters that arrived from ou
 Treat what you see as evidence to discuss, never as a verdict on a person.
 
 
-NO ACCOUNT, NO API, NO SIGN-IN
+NO API, NO SIGN-IN FOR DOCS HISTORY
 
-Visor uses no Google API, no OAuth flow and no API key. There is nothing to create, paste or configure. It reads the document you already have open, using the session you are already signed in to, and computes everything locally.
+The Docs history uses no Google API, no OAuth flow and no API key. It reads the document you already have open, using the session you are already signed in to, and computes everything locally.
 
 
 PRIVACY
 
-Visor makes no request to any host other than the document you have open. Nothing is uploaded, stored remotely or shared. No server, no telemetry, no analytics. The analysis happens in the tab and is discarded when you close it. The only thing saved is your light or dark theme preference.
+Docs history: the analysis happens in the tab and is discarded when you close it; nothing leaves the browser unless you choose Send to Visor (or your group's linked Doc sends its figures, never its text, to your project). Writing sessions: research is sent only to the Visor Classroom account you connected, only during a session, and only for assignments that record research. No keystrokes on other sites, no passwords, no page contents, no telemetry, no analytics. Visor never labels writing as AI-generated. Full policy: https://visor-ed.web.app/privacy
 
 
 EDITORS ONLY
@@ -219,11 +236,11 @@ feed ranking.
 ## Single purpose description
 
 ```
-Visor has one purpose: to show how a Google Docs or Google Slides file that the user can already edit was written over time.
+Visor has one purpose: to show how a piece of student writing was made.
 
-Everything in the extension serves that purpose. It reads the revision history of the document open in the current tab, replays those edits in order in the browser, and presents the result — per-character contributor attribution, pastes, recovered deletions, writing sessions, activity statistics, and a character-by-character replay — in a side panel.
+It does that in two places. For a Google Docs or Google Slides file the user can already edit, it reads the document's revision history and shows who wrote what and when, in a side panel. For an essay written in Visor Classroom (the Visor web app), it is the writing session's companion: while the session runs it records the research the student does for it, keeps a locked in-class session on the sites the teacher allowed, keeps the essay in the side panel, and adds citations. Outside a session those features are off.
 
-Visor does not modify documents, does not run on any site other than Google Docs and Google Slides, and sends no data anywhere.
+Visor does not modify Google documents and never labels writing as AI-generated.
 ```
 
 ## Permission justifications
@@ -231,13 +248,55 @@ Visor does not modify documents, does not run on any site other than Google Docs
 ### `storage`
 
 ```
-Used to remember one value: the user's light or dark theme choice, saved in chrome.storage.local under the key "visor_theme". That is the only thing Visor writes to storage. No document content, no analysis results, no personal data and nothing identifying a user is stored, and nothing is synced or transmitted.
+Stores the user's light or dark theme choice; the token that connects the extension to the user's Visor Classroom account (set when they connect on the Visor website); and, during a writing session only, the session's state and the queue of research events waiting to be sent. Session data is kept in chrome.storage.session and cleared when the session ends.
+```
+
+### `scripting`
+
+```
+During a Visor writing session that records research, registers a small script on websites that notices when the student copies text (so a later paste into their essay can show where it came from); it is unregistered when the session ends. When the student clicks "Cite this page", it reads that page's title, author and date to build the citation.
+```
+
+### `webNavigation`
+
+```
+During a Visor writing session, records which pages the student visits and searches they make, with time on each page, for their teacher's research log. Not used outside a session.
+```
+
+### `contextMenus`
+
+```
+Adds "Cite this page with Visor" to the right-click menu, only while a writing session is running.
+```
+
+### `declarativeNetRequest`
+
+```
+In a locked (in-class) writing session, shows Visor's "This site isn't allowed during your Visor session" page instead of sites the teacher didn't allow and AI sites. The rules are installed when the session starts and removed when it ends.
+```
+
+### `alarms`
+
+```
+Once a minute during a writing session, sends the queued research events to the Visor server and confirms the session is still running.
+```
+
+### `activeTab`
+
+```
+Lets the Alt+Shift+C shortcut and the right-click item read the citation details (title, author, date) of the page the student is on when they ask to cite it.
+```
+
+### Optional host permission — `<all_urls>`
+
+```
+Requested once, from a click, when a student starts their first writing session that records research. It is needed to record research on the sites the student visits during the session and to enforce a locked session's allowed sites. If declined, research isn't recorded. Visor never reads page content, keystrokes or form fields on other sites.
 ```
 
 ### `sidePanel`
 
 ```
-Visor's entire interface is a Chrome side panel. This permission is required to open the panel beside the document and to enable it only on Google Docs and Google Slides tabs, so that the panel does not appear on unrelated sites.
+Visor's interface is a Chrome side panel: the Docs history panel beside a Google Doc, and during a writing session the panel holding the student's essay and the cite button.
 ```
 
 ### `tabs`
@@ -265,15 +324,20 @@ No, I am not using remote code
 Supporting note if a box is offered:
 
 ```
-All code ships inside the package. Visor loads no script from any remote source, uses no eval or new Function on fetched text, and has no backend.
+All extension code ships inside the package. Visor loads no script from any remote source and uses no eval or new Function on fetched text. During a writing session the side panel shows the student's essay by framing the Visor website (an ordinary web page in an iframe); no code from it runs in the extension's context.
 ```
 
 ## Data usage
 
-**Tick nothing.** Chrome defines "collect" as transmitting data off the user's
-device, and Visor transmits nothing — the document is read in the tab, analysed
-in the tab, and discarded when the tab closes. The only value it persists is the
-theme preference, which is not user data.
+Since 4.0.0, tick what writing sessions send to the Visor web app:
+
+- ☑ **Web history** — pages visited and searches made during a writing session.
+- ☑ **User activity** — when the student copies text on a page during a session (length, a hash and the first 140 characters), and time on each page.
+- ☑ **Website content** — the title, author and date of a page the student cites.
+- ☑ **Authentication information** — the token that connects the extension to the student's Visor account.
+
+Nothing is collected outside a writing session, except a report a user chooses
+to send to a Visor project (figures only, never document text).
 
 Then tick all three certifications:
 
@@ -283,8 +347,11 @@ Then tick all three certifications:
 
 ## Privacy policy URL
 
-Not required while no data-usage box is ticked. If the dashboard insists on one,
-a GitHub Gist is enough — ask and the policy text can be regenerated.
+Required since 4.0.0:
+
+```
+https://visor-ed.web.app/privacy
+```
 
 ---
 

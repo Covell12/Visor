@@ -1,6 +1,9 @@
 # Visor — Setup
 
-**Writing process analysis for Google Docs & Slides. No API, no account, no sign-in.**
+**Two things in one extension (v4.0.0):**
+
+1. **Google Docs & Slides history.** Writing process analysis for any Doc or Slides file you can edit. No API, no account, no sign-in. Everything below "Use" describes this part, and it works exactly as it did in v3.6.
+2. **Visor Classroom writing sessions.** The companion to the Visor web app: during a student's writing session it records their research, keeps a locked session on the allowed sites, holds their essay in the side panel, and cites pages in one click. See [Writing sessions (Visor Classroom)](#writing-sessions-visor-classroom). Outside a session none of it runs.
 
 ---
 
@@ -518,6 +521,53 @@ every position after the first omitted edit.
 
 ---
 
+## Writing sessions (Visor Classroom)
+
+### What it does, and when
+
+Nothing in this section happens unless a student has an **active writing session** in the Visor web app. When one starts:
+
+- The toolbar badge shows a red **REC**, titled "Visor session: research is being recorded".
+- The side panel becomes the session panel (`sessionpanel.html`): the assignment, a timer, **Cite this page**, and the student's own essay from the web app (`/write/<assignment>?embed=panel`, framed, with tokens handed over by `postMessage` and the origin checked both ways). On a Google Doc it has a **Doc history** link to the v3.6 panel.
+- If the assignment records research and the student allowed it, `research-capture.js` is registered on every site (it only listens for copies) and the service worker records searches (`research.js` knows Google, Bing, DuckDuckGo, Yahoo, YouTube, Scholar, Wikipedia, Ecosia, Brave and Perplexity), page visits with time on page, AI-site visits, citations and blocked attempts. Events queue in `chrome.storage.session` and go to the server every minute, 200 at a time.
+- In a **locked** session, `lockdown.js` builds declarativeNetRequest rules: Visor, Google sign-in and the allowed sites load; everything else goes to `blocked.html`. Tabs opening `chrome://extensions` or `chrome://settings` are sent back to the Visor tab. An open session with "block AI sites" gets only the AI-site rules.
+- A right-click item, **Cite this page with Visor**, appears.
+
+When the session ends (the student ends or submits it, the teacher ends it, the server says it's over, or the token stops working), the extension unregisters the capture script, clears the badge, removes its rules and the menu item, sends what's queued, and puts the side panel back exactly as v3.6 had it (Docs-only, per tab; the toolbar button opens the popup). `tests/test-session-panel-switch.js` checks that.
+
+Files: `config.js`, `site-bridge.js`, `session-bg.js` (loaded by `background.js`), `research.js`, `research-capture.js`, `cite.js`, `lockdown.js`, `sessionpanel.*`, `blocked.*`, `permission.*`.
+
+### Connecting
+
+The student signs in to the Visor web app and opens **Connect extension** (`/extension/connect`). The page asks the server for an extension token (30 days, revocable) and hands it to the extension through `site-bridge.js`. The extension sends it as `X-Visor-Token`; it never uses the site's cookie. Disconnect from the web app's Profile dialog.
+
+### Pointing it at a deployed Visor
+
+The extension talks only to the Visor addresses it lists, in **two places that must match**:
+
+1. `config.js` → `VISOR_WEB_ORIGINS` (and `VISOR_DEFAULT_ORIGIN`, used to format a citation when not connected).
+2. `manifest.json` → the `matches` of the content script whose `js` is `site-bridge.js`.
+
+They ship with `http://localhost:3000`, `https://visor-ed.web.app` and `https://visor-ed.firebaseapp.com`. For another address (a custom domain, a school's own copy), add it to both, raise the version, and reload or republish. `DEFAULT_AI_SITES` in `config.js` is a copy of the web app's `lib/sites.js`; keep them the same.
+
+### Permissions, and why (for the Chrome Web Store)
+
+| Permission | Why |
+|---|---|
+| `storage` | Keeps the student's connection token and, during a session, the session state and the queue of research events. |
+| `sidePanel` | Shows the Docs history panel, and during a session the panel with the student's essay and the cite button. |
+| `tabs` | Keeps the side panel on the right tab, finds the page a student wants to cite, and returns them to the Visor tab from a blocked page. |
+| `scripting` | Registers the copy listener on sites only while a research-recorded session runs, and reads a page's citation details when the student clicks Cite. |
+| `webNavigation` | During a session, notices page visits and searches so the research log has them, with time on each page. |
+| `contextMenus` | Adds "Cite this page with Visor" to the right-click menu, only during a session. |
+| `declarativeNetRequest` | In a locked session, sends sites the teacher didn't allow (and AI sites) to Visor's "not allowed" page. |
+| `alarms` | Sends queued research events and checks in with the server once a minute during a session. |
+| `activeTab` | Lets Alt+Shift+C and the right-click item read the citation details of the page the student is on. |
+| Optional `<all_urls>` | Requested once, with a click, when a research-recorded session first starts: needed to record research on the sites a student visits and to enforce a locked session's allowed sites. Declined: research isn't recorded (and a locked session won't start). |
+| Host `docs.google.com/document/*`, `/presentation/*` | Reads a Doc's or Slides deck's own edit history, as in v3.6. |
+
+`site-bridge.js` runs only on the Visor web app's own addresses.
+
 ## Packaging
 
 **Validate the manifest with Chrome itself before uploading.** A store upload
@@ -541,28 +591,29 @@ all three together is what broke the first upload.
 
 The folder is the package. Two things to know before zipping it:
 
-- **Exclude `*.md`.** `SETUP.md` and `COPY-FORM.md` are working documents, not
-  extension resources; every file in the ZIP is readable at
-  `chrome-extension://<id>/<name>`.
+- **Exclude `*.md`, `docs/` and `tests/`.** `SETUP.md`, `COPY-FORM.md`, the
+  IT guide and the tests are working documents, not extension resources; every
+  file in the ZIP is readable at `chrome-extension://<id>/<name>`.
 - **Icons are generated, not hand-drawn.** `icons/icon{16,48,128}.png` are cut
   from `logo.png` — square, transparent, at their declared sizes. They were
   once a single 320×300 file reused for all three, which the Web Store rejects.
   Regenerating them means rescaling from `logo.png`, never editing the icons in
   place.
 
-Visor declares no data collection in the store listing, and that is accurate:
-it transmits nothing, so no privacy-policy URL is required.
+Since 4.0.0 Visor sends data to the Visor web app (writing-session research,
+reports sent to a project), so the listing declares that data and links the web
+app's privacy policy (`https://visor-ed.web.app/privacy`). See
+`STORE-LISTING.md`.
 
 ## Privacy
 
-Visor makes no request to any host other than the document you have open.
+**Google Docs history** makes no request to any host other than the document you have open, unless you choose to send a report to a Visor project (Send to Visor), or you're connected and the Doc is linked to your group project (then its figures, never its text, go to that project automatically).
 
 - No Google APIs, no OAuth, no scopes, no consent screen
-- No accounts, no server, no telemetry, no analytics
-- Nothing is uploaded, stored remotely, or shared
+- No telemetry, no analytics
 - Analysis happens in the tab and is discarded when you close it
 
-The only host permission is `https://docs.google.com/*`.
+**Writing sessions** send research events to the Visor web app you connected, only while a session is active and only for assignments that record research: searches, pages visited and time on them, copies (length, a hash and the first 140 characters), AI-site visits, blocked attempts and citations. Never keystrokes on other sites, passwords, or page contents. The web app's privacy page (`/privacy`) has the details and retention.
 
 ---
 
