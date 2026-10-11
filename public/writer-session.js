@@ -168,10 +168,8 @@ async function wsStart() {
     if (window.VisorExt) {
       ext = await VisorExt.ping();
       if (ext.installed && ext.connected) {
-        if (w.researchTracking && !ext.hasHostPermission) {
-          const p = await VisorExt.requestPermission().catch(() => ({ granted: false }));
-          ext.hasHostPermission = !!p.granted;
-        }
+        // (Research permission is asked for with its own button on the start card,
+        // so this click's gesture is still good for full screen.)
         await VisorExt.startSession({ docId: WR.doc.id, assignmentId: a.id, sessionToken: null, settings: wsExtSettings() }).catch(() => {});
       }
     }

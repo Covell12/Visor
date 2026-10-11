@@ -310,9 +310,11 @@ function openProfile() {
       <div class="hint">This color shows on your icon, your name in transcripts, and your bar in the analysis.</div>
     </div>
     <div class="field"><label>School <span class="label-note">optional</span></label><div id="profSchoolPicker" class="school-picker"></div></div>
+    <div id="profExtras" class="prof-extras"></div>
     <div id="profErr" class="form-error hidden"></div>`,
     footer: `<button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="saveProfile()">Save</button>` });
   mountSchoolPicker('profSchoolPicker', me.org);
+  if (window.profileExtras) profileExtras($('profExtras')); // Visor Classroom: extension + "Download my data" (ext.js)
 }
 function profPreview() {
   const c = $('profColor').value; $('profPreview').style.background = c; $('profColorText').textContent = c;

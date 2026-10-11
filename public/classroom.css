@@ -184,3 +184,13 @@ body.embed .route-view { min-height: 100vh; }
 .wr-embed .wr-paper .ql-editor { padding: 18px 16px 40px; }
 .wr-embed .wr-paper .ql-editor.ql-blank::before { left: 16px; }
 @media (max-width: 720px) { .wr-paper .ql-editor { padding: 26px 20px 60px; } .wr-paper .ql-editor.ql-blank::before { left: 20px; } }
+
+/* ---------- extension connect, profile extras ---------- */
+.page.narrow { max-width: 640px; }
+.connect-card { text-align: left; }
+.connect-card h1 { margin: 10px 0 8px; }
+.connect-logo { height: 34px; }
+.connected-line { display: flex; align-items: center; gap: 8px; font-size: 16px; margin: 6px 0 10px; color: var(--green-deep); }
+.connected-line svg { width: 20px; height: 20px; }
+.prof-extras { border-top: 1px solid var(--line); margin-top: 6px; padding-top: 10px; }
+.prof-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 0; }

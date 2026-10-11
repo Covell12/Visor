@@ -146,6 +146,12 @@ const ah = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(n
 // ═══════════════════════════════════════════════════════════════
 
 app.set('trust proxy', 1);
+// The extension's side panel frames /write/… (Section 8.5). Only Visor itself
+// and extension pages may frame it; no X-Frame-Options (it can't express that).
+app.use((req, res, next) => {
+  if (!req.path.startsWith('/api/')) res.setHeader('Content-Security-Policy', "frame-ancestors 'self' chrome-extension:");
+  next();
+});
 app.use(express.json({ limit: '32mb' }));
 app.use(sessionMiddleware({ getSecret: getSessionSecret, maxAgeMs: 1000 * 60 * 60 * 24 * 14, secure: IS_PROD }));
 // On your computer this serves the page. On Firebase, Hosting serves public/
@@ -1839,8 +1845,114 @@ app.get('/api/write/:docId/ops', ah(async (req, res) => {
   res.json({ ops, from, to, seq: got.doc.seq, nextFrom: to < got.doc.seq ? to + 1 : null });
 }));
 
-// Extension API, research and citations (SECTION 13, phases 7–9)
-async function extUserFromHeader() { return null; }
+// ═══════════════════════════════════════════════════════════════
+// SECTION 13 — EXTENSION API
+// ═══════════════════════════════════════════════════════════════
+//
+// The Visor extension authenticates with its own token (X-Visor-Token),
+// issued on /extension/connect while the person is signed in. Firebase
+// Hosting only forwards the __session cookie, and extension pages can't rely
+// on third-party cookies, so a header it is. Tokens are signed with purpose
+// 'ext', last 30 days, and each one has an "exttoken" record so it can be
+// revoked. Every /api/ext/* route uses extAuth except /api/ext/token itself.
+
+const EXT_TOKEN_DAYS = 30;
+
+// Called from chrome-extension:// pages and the extension's service worker.
+// Never with credentials: the token is the only thing that authenticates.
+app.use('/api/ext', (req, res, next) => {
+  const origin = req.get('Origin') || '';
+  if (/^chrome-extension:\/\/[a-z]{32}$/.test(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Visor-Token, X-Visor-Session');
+    res.setHeader('Access-Control-Max-Age', '600');
+  }
+  if (req.method === 'OPTIONS') return res.sendStatus(204);
+  next();
+});
+
+// The user a valid X-Visor-Token belongs to, or null
+async function extUserFromHeader(req, core) {
+  const raw = req.get('X-Visor-Token');
+  if (!raw) return null;
+  const t = verify(await getSessionSecret(), String(raw), 'ext');
+  if (!t || !t.uid || !t.tid || !(t.exp > Date.now())) return null;
+  const rec = await repo.getRecord('exttoken', t.tid);
+  if (!rec || rec.studentId !== t.uid || rec.revokedAt) return null;
+  const u = core.users[t.uid];
+  return u ? Object.assign(u, { _extTid: t.tid }) : null;
+}
+const extAuth = ah(async (req, res, next) => {
+  const core = await repo.readCore();
+  const u = await extUserFromHeader(req, core);
+  if (!u) return res.status(401).json({ error: 'The Visor extension isn’t connected. Open Visor and connect it again.', reconnect: true });
+  req.extUser = u; req.core = core;
+  next();
+});
+
+// Issue a token for the signed-in person (cookie). The connect page hands it to the extension.
+app.post('/api/ext/token', requireAuth, ah(async (req, res) => {
+  const core = await repo.readCore();
+  const me = meOrThrow(req, core);
+  const tid = uid();
+  const iat = Date.now(), exp = iat + EXT_TOKEN_DAYS * 864e5;
+  await repo.putRecord('exttoken', { id: tid, studentId: me.id, createdAt: new Date(iat).toISOString(), expiresAt: new Date(exp).toISOString(), userAgent: String(req.get('User-Agent') || '').slice(0, 200) });
+  const token = sign(await getSessionSecret(), { uid: me.id, tid, iat, exp }, 'ext');
+  res.json({ token, user: { id: me.id, name: fullName(me), email: me.email, role: me.role }, expiresAt: new Date(exp).toISOString() });
+}));
+
+// Disconnect: revokes every extension token this person has
+app.delete('/api/ext/token', requireAuth, ah(async (req, res) => {
+  const n = await repo.deleteRecords('exttoken', { studentId: req.session.userId });
+  res.json({ ok: true, revoked: n });
+}));
+
+// For the Profile dialog: is an extension connected?
+app.get('/api/ext/token/status', requireAuth, ah(async (req, res) => {
+  const list = (await repo.listRecords('exttoken', { studentId: req.session.userId })).filter(t => Date.parse(t.expiresAt) > Date.now());
+  res.json({ connected: list.length > 0, tokens: list.length, latest: list.map(t => t.createdAt).sort().pop() || null });
+}));
+
+app.get('/api/ext/me', extAuth, (req, res) => {
+  const u = req.extUser;
+  res.json({ user: { id: u.id, name: fullName(u), email: u.email, role: u.role } });
+});
+
+// The student's own document, for extension calls that name a docId
+async function extDoc(req, docId) {
+  const doc = await repo.getRecord('doc', String(docId || ''));
+  if (!doc || doc.studentId !== req.extUser.id) throw new HttpError(404, 'document not found');
+  return doc;
+}
+
+// The extension confirms it's present before a session starts (Section 7.1, rule 4)
+app.post('/api/ext/session/ack', extAuth, ah(async (req, res) => {
+  const doc = await extDoc(req, req.body?.docId);
+  const ack = { userId: req.extUser.id, at: now(), version: String(req.body?.version || '').slice(0, 20), hasHostPermission: req.body?.hasHostPermission !== false };
+  await repo.updateRecord('doc', doc.id, d => { d.extAck = ack; });
+  res.json({ ok: true, ack });
+}));
+
+// The extension's own beat, every minute during a session: whether its
+// lockdown is on and whether it may record research. Tells it when the
+// session is over so it can stop recording.
+app.post('/api/ext/session/beat', extAuth, ah(async (req, res) => {
+  const doc = await extDoc(req, req.body?.docId);
+  const a = await repo.getRecord('assignment', doc.assignmentId);
+  const list = await sweepDocSessions(doc, a);
+  const s = list.find(x => x.state !== 'ended');
+  if (!s) return res.json({ active: false });
+  const lockActive = !!req.body?.lockActive, hasHostPermission = req.body?.hasHostPermission !== false;
+  const updated = await repo.updateRecord('session', s.id, x => {
+    const t = Date.now();
+    x.extension = { ...(x.extension || {}), lastBeat: new Date(t).toISOString(), lockActive, hasHostPermission, present: true, version: String(req.body?.version || x.extension?.version || '').slice(0, 20) };
+  });
+  res.json({ active: true, sessionId: updated.id, state: updated.state, deadlineAt: updated.deadlineAt, startedAt: updated.startedAt });
+}));
+
+// Research and citations (phases 8–9)
 async function researchCopiesFor() { return []; }
 
 // Group projects and discussions arrive in SECTIONS 11 and 14 (phases 12, 13).
