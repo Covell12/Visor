@@ -252,6 +252,7 @@ async function runAnalysis(force = false) {
     broadcast({ type: 'VISOR_PROGRESS', phase: 'done', value: 1 });
 
     renderHUD(analysis);
+    autoSendReport();
     return {
       state: 'ready',
       analysis: compactAnalysis(analysis),
@@ -349,6 +350,43 @@ function docMeta() {
   };
 }
 
+/**
+ * Visor Classroom: the report a group project receives (Section 8.7). The
+ * same figures the side panel shows, without any of the document's text:
+ * pasted and deleted passages stay here.
+ */
+function exportReport() {
+  const strip = (list) => (list || []).map(({ text, ...rest }) => rest);
+  return {
+    schema: 'visor-export/1',
+    meta: docMeta(),
+    scope: selectionLabel(),
+    exportedAt: new Date().toISOString(),
+    analysis: { ...analysis, pastes: strip(analysis.pastes).slice(0, 300), deletions: strip(analysis.deletions).slice(0, 300) }
+  };
+}
+
+// If this Doc is linked to one of the student's group projects, the service
+// worker sends each fresh analysis there (at most every 5 minutes). Nothing
+// is sent for documents that aren't linked, or when Visor isn't connected.
+function autoSendReport() {
+  if (!analysis || !visorAlive()) return;
+  try { chrome.runtime.sendMessage({ type: 'VISOR_AUTO_SEND', fileId: getFileId(), report: exportReport() }, () => void chrome.runtime.lastError); } catch (_) {}
+}
+
+// A linked group Doc is read when it's opened, so its project stays current
+// without anyone pressing the Visor button.
+function readIfLinked() {
+  if (!visorAlive() || analysis || running || !getFileId() || accessVerdict() === 'viewer') return;
+  try {
+    chrome.runtime.sendMessage({ type: 'VISOR_IS_LINKED', fileId: getFileId() }, (res) => {
+      if (chrome.runtime.lastError || !res || res.linked !== true) return;
+      if (!analysis && !running) runAnalysis();
+    });
+  } catch (_) {}
+}
+setTimeout(readIfLinked, 4000);
+
 /** Trim heavy fields before crossing the message boundary to the side panel. */
 function compactAnalysis(a) {
   return {
@@ -396,6 +434,11 @@ function replayPayload() {
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   switch (msg && msg.type) {
+    case 'VISOR_EXPORT':
+      // The side panel's "Send to Visor" box
+      sendResponse(analysis ? { ok: true, report: exportReport() } : { ok: false });
+      return false;
+
     case 'VISOR_STATUS':
       sendResponse({
         state: !getFileId() ? 'no-document'
@@ -1800,4 +1843,5 @@ visorInterval(() => {
   // reading until it is pressed.
   hudCollapsed = true;
   [200, 1200, 3000].forEach((t) => setTimeout(autoShowBar, t));
+  setTimeout(readIfLinked, 4000);
 }, 1000);

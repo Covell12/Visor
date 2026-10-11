@@ -1688,3 +1688,16 @@ details.v-note > summary::-webkit-details-marker { display: none; }
   font-weight: 500;
   color: var(--ink-3);
 }
+
+/* ── Send to Visor (Visor Classroom) ──────────────────────────────────── */
+.v-send-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.v-send-label { font-size: 12px; font-weight: 700; color: var(--ink-2); }
+.v-send-input { flex: 1; min-width: 120px; font: inherit; font-size: 13px; padding: 7px 10px; border-radius: 10px; border: 1px solid var(--hairline); background: var(--surface); color: var(--ink); }
+#send-code-input { text-transform: uppercase; letter-spacing: .12em; font-family: ui-monospace, Menlo, monospace; }
+.v-send-btn { font: inherit; font-size: 13px; font-weight: 700; padding: 7px 14px; border-radius: 999px; border: 0; background: var(--accent); color: #fff; cursor: pointer; }
+.v-send-btn:disabled { opacity: .55; cursor: default; }
+.v-send-btn:focus-visible, .v-send-input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.v-send-note, .v-send-status { margin: 8px 0 0; font-size: 12px; color: var(--ink-3); }
+.v-send-note:empty, .v-send-status:empty { display: none; }
+.v-send-status.is-ok { color: var(--good); font-weight: 600; }
+.v-send-status.is-err { color: var(--hot); }

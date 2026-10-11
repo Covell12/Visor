@@ -148,6 +148,23 @@
         </span>
       </button>
 
+      <!-- Visor Classroom: send this document's figures to a group project -->
+      <h3 class="v-section">Send to Visor</h3>
+      <div class="v-card glass v-send" id="send-box">
+        <div id="send-connected" class="v-send-row" hidden>
+          <label for="send-project" class="v-send-label">Project</label>
+          <select id="send-project" class="v-send-input"></select>
+          <button id="send-btn" class="v-send-btn">Send</button>
+        </div>
+        <div id="send-code" class="v-send-row" hidden>
+          <label for="send-code-input" class="v-send-label">Project code</label>
+          <input id="send-code-input" class="v-send-input" maxlength="6" autocomplete="off" placeholder="e.g. 7KQ2MX">
+          <button id="send-code-btn" class="v-send-btn">Send</button>
+        </div>
+        <p id="send-note" class="v-send-note"></p>
+        <p id="send-status" class="v-send-status" role="status" aria-live="polite"></p>
+      </div>
+
       <h3 class="v-section">Document growth</h3>
       <div class="v-card glass" id="growth-card">
         <div id="growth-chart" class="v-chart"></div>
@@ -378,6 +395,7 @@
     </div>
   </section>
 
+  <script src="config.js"></script>
   <script src="sidepanel.js"></script>
 </body>
 </html>

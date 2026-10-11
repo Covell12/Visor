@@ -216,6 +216,7 @@ async function handleBridge(msg, sender) {
     case 'CONNECT': {
       if (!p.token) return { ok: false, error: 'no token' };
       await chrome.storage.local.set({ [AUTH_KEY]: { token: String(p.token), user: p.user || null, origin: sender.origin, connectedAt: new Date().toISOString() } });
+      await chrome.storage.session.remove('visorLinked');
       return { ok: true };
     }
     case 'DISCONNECT': {
@@ -618,6 +619,99 @@ chrome.runtime.onMessage.addListener((msg, sender) => {
       if (sender.tab && sender.tab.id !== s.visorTabId) chrome.tabs.remove(sender.tab.id).catch(() => {});
     });
   }
+  return false;
+});
+
+// ── Group documents (Section 8.7) ──────────────────────────────────────────
+//
+// Works with or without a session. When the student is connected and a Google
+// Doc they open is linked to one of their group projects, each fresh analysis
+// the content script makes goes to that project (at most every 5 minutes per
+// document). The side panel's "Send to Visor" box sends on request, to a
+// project picked from a list (connected) or by project code (not connected,
+// the original code-based route).
+
+const LINKED_TTL_MS = 10 * 60 * 1000;
+const AUTO_SEND_EVERY_MS = 5 * 60 * 1000;
+
+async function linkedDocs(force) {
+  const auth = await getAuth();
+  if (!auth || !auth.token) return [];
+  const got = await chrome.storage.session.get('visorLinked');
+  const cache = got.visorLinked;
+  if (!force && cache && cache.origin === auth.origin && Date.now() - cache.at < LINKED_TTL_MS) return cache.docs;
+  try {
+    const r = await visorApi('/api/ext/linked-docs');
+    await chrome.storage.session.set({ visorLinked: { at: Date.now(), origin: auth.origin, docs: r.docs || [] } });
+    return r.docs || [];
+  } catch (e) {
+    if (e.status === 401) await chrome.storage.local.remove(AUTH_KEY);
+    return cache ? cache.docs : [];
+  }
+}
+
+async function sentLog() { return (await chrome.storage.local.get('visorSent')).visorSent || {}; }
+async function noteSent(fileId, names) {
+  const log = await sentLog();
+  log[fileId] = { at: Date.now(), to: names };
+  // keep the 50 most recent documents
+  const keep = Object.entries(log).sort((a, b) => b[1].at - a[1].at).slice(0, 50);
+  await chrome.storage.local.set({ visorSent: Object.fromEntries(keep) });
+}
+
+async function autoSend(msg) {
+  const fileId = msg.fileId || (msg.report && msg.report.meta && msg.report.meta.fileId);
+  if (!fileId || !msg.report) return { ok: false };
+  const linked = (await linkedDocs()).filter((d) => d.fileId === fileId);
+  if (!linked.length) return { ok: false, linked: false };
+  const last = (await sentLog())[fileId];
+  if (last && Date.now() - last.at < AUTO_SEND_EVERY_MS) return { ok: true, throttled: true };
+  try {
+    const r = await visorApi('/api/ext/ingest', { method: 'POST', body: { report: msg.report } });
+    await noteSent(fileId, r.sent.map((x) => x.project.name));
+    return { ok: true, sent: r.sent };
+  } catch (e) { return { ok: false, error: e.message }; }
+}
+
+// For the side panel's "Send to Visor" box
+async function sendState(fileId) {
+  const auth = await getAuth();
+  const last = fileId ? (await sentLog())[fileId] || null : null;
+  if (!auth || !auth.token) return { connected: false, lastSent: last };
+  let projects = [];
+  try { projects = (await visorApi('/api/ext/projects')).projects || []; } catch (e) { if (e.status === 401) return { connected: false, lastSent: last }; }
+  return { connected: true, user: auth.user, projects: projects.map((p) => ({ ...p, linked: !!fileId && p.fileId === fileId })), lastSent: last };
+}
+
+async function sendNow(msg) {
+  const report = msg.report;
+  const fileId = report && report.meta && report.meta.fileId;
+  if (!report) return { ok: false, error: 'Nothing to send yet.' };
+  try {
+    if (msg.code) {
+      // Not connected: the project code route (no sign-in needed)
+      const auth = await getAuth();
+      const base = (auth && auth.origin) || VisorConfig.VISOR_DEFAULT_ORIGIN;
+      const res = await fetch(`${base}/api/extension/ingest`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: String(msg.code).trim().toUpperCase(), report }) });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) return { ok: false, error: data.error || `Visor said ${res.status}` };
+      if (fileId) await noteSent(fileId, [data.project.name]);
+      return { ok: true, to: [data.project.name] };
+    }
+    const r = await visorApi('/api/ext/ingest', { method: 'POST', body: { report, projectId: msg.projectId || undefined } });
+    const names = r.sent.map((x) => x.project.name);
+    if (fileId) await noteSent(fileId, names);
+    return { ok: true, to: names };
+  } catch (e) { return { ok: false, error: e.message }; }
+}
+
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (!msg) return false;
+  const reply = (p) => { p.then(sendResponse, (e) => sendResponse({ ok: false, error: String((e && e.message) || e) })); return true; };
+  if (msg.type === 'VISOR_IS_LINKED') return reply(linkedDocs().then((docs) => ({ linked: docs.some((d) => d.fileId === msg.fileId) })));
+  if (msg.type === 'VISOR_AUTO_SEND') return reply(autoSend(msg));
+  if (msg.type === 'VISOR_SEND_STATE') return reply(sendState(msg.fileId));
+  if (msg.type === 'VISOR_SEND') return reply(sendNow(msg));
   return false;
 });
 

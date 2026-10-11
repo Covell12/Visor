@@ -128,6 +128,7 @@ async function analyze(force, attempt = 0) {
 // ── Render ───────────────────────────────────────────────────────────────────
 
 function render(a) {
+  refreshSendBox();
   renderMetrics(a);
   renderGrowth(a.growth);
   renderHeatmap(a.heatmap);
@@ -1101,6 +1102,9 @@ $('btn-rate').addEventListener('click', () => {
   });
 });
 $('btn-replay').addEventListener('click', () => ask('VISOR_OPEN_REPLAY'));
+$('send-btn').addEventListener('click', () => sendToVisor({ projectId: $('send-project').value }));
+$('send-code-btn').addEventListener('click', () => sendToVisor({ code: $('send-code-input').value }));
+$('send-code-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') sendToVisor({ code: $('send-code-input').value }); });
 
 // ── Formatting ───────────────────────────────────────────────────────────────
 
@@ -1622,3 +1626,52 @@ window.addEventListener('load', () => {
 
 chrome.tabs.onActivated.addListener(() => boot());
 boot();
+
+// ── Send to Visor (Visor Classroom) ─────────────────────────────────────────
+//
+// Sends this document's figures (never its text) to a project on the Visor
+// web app. Connected: pick one of your projects (linked ones first). Not
+// connected: type the project's code, as before.
+
+function bg(msg) {
+  return new Promise((resolve) => {
+    try { chrome.runtime.sendMessage(msg, (r) => resolve(chrome.runtime.lastError ? null : r)); }
+    catch (_) { resolve(null); }
+  });
+}
+const escHtml = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const sentAt = (ms) => new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+
+async function refreshSendBox() {
+  const st = await bg({ type: 'VISOR_SEND_STATE', fileId: meta && meta.fileId });
+  if (!st) return;
+  const projects = (st.projects || []).slice().sort((a, b) => Number(b.linked) - Number(a.linked));
+  const useList = st.connected && projects.length;
+  $('send-connected').hidden = !useList;
+  $('send-code').hidden = !!useList;
+  if (useList) {
+    $('send-project').innerHTML = projects.map((p) => `<option value="${escHtml(p.id)}">${escHtml(p.name)}${p.linked ? ' (this document)' : ''}</option>`).join('');
+  }
+  $('send-note').textContent = !st.connected ? 'Connect the extension on the Visor website to send without a code.'
+    : projects.some((p) => p.linked) ? 'This document is linked to your group project; Visor sends it automatically when you open it.' : '';
+  if (st.lastSent) setSendStatus(`Sent to ${st.lastSent.to.join(', ')} · ${sentAt(st.lastSent.at)}`, true);
+}
+
+function setSendStatus(text, ok) {
+  const el = $('send-status');
+  el.textContent = text;
+  el.className = `v-send-status ${ok ? 'is-ok' : ok === false ? 'is-err' : ''}`;
+}
+
+async function sendToVisor(target) {
+  if (target.code !== undefined && !String(target.code).trim()) return setSendStatus('Type the project code first.', false);
+  const btn = target.code !== undefined ? $('send-code-btn') : $('send-btn');
+  btn.disabled = true;
+  setSendStatus('Sending…');
+  const exp = await ask('VISOR_EXPORT');
+  if (!exp || !exp.ok) { btn.disabled = false; return setSendStatus('Read the document first, then send.', false); }
+  const r = await bg({ type: 'VISOR_SEND', report: exp.report, ...target });
+  btn.disabled = false;
+  if (!r || !r.ok) return setSendStatus((r && r.error) || 'Couldn’t reach Visor.', false);
+  setSendStatus(`Sent to ${r.to.join(', ')} · ${sentAt(Date.now())}`, true);
+}
