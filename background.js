@@ -1,15 +1,22 @@
 /* ============================================================================
  * Visor — Service Worker
  * ----------------------------------------------------------------------------
- * Deliberately almost empty.
+ * Two jobs.
  *
- * Visor makes no API calls, holds no credentials, and has no backend. All
- * reading and analysis happens in the content script, on the document's own
- * origin, in the user's own browser. This worker exists only to open the side
- * panel and to keep it pointed at the right tab.
+ * Google Docs history (as in v3.6): all reading and analysis happens in the
+ * content script, on the document's own origin, in the user's own browser.
+ * This worker opens the side panel and keeps it pointed at the right tab.
+ *
+ * Visor writing sessions (session-bg.js): only while a student has an active
+ * session in the Visor web app. Then this worker records research, runs the
+ * session side panel, the cite button and a locked session's lockdown, and
+ * talks to the Visor server with the token the student connected. Outside a
+ * session none of that runs, and the extension behaves exactly as v3.6 did.
  * ==========================================================================*/
 
 'use strict';
+
+importScripts('config.js', 'session-bg.js');
 
 const DOC_URL = /^https:\/\/docs\.google\.com\/(document|presentation)\/d\//;
 
@@ -18,6 +25,20 @@ chrome.runtime.onInstalled.addListener(() => {
 });
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  // Visor writing sessions: the web app (through site-bridge.js), the session
+  // panel and the permission window.
+  if (msg && msg.channel === 'visor-bridge') {
+    sessionReady.then(() => handleBridge(msg, sender)).then(sendResponse, (e) => sendResponse({ ok: false, error: String((e && e.message) || e) }));
+    return true;
+  }
+  if (msg && msg.type === 'VISOR_PANEL_STATE') {
+    panelState().then(sendResponse, () => sendResponse({ active: false }));
+    return true;
+  }
+  if (msg && msg.type === 'VISOR_PERMISSION_RESULT') {
+    permissionAnswered(!!msg.granted).then(() => sendResponse({ ok: true }));
+    return true;
+  }
   if (msg && msg.type === 'OPEN_SIDE_PANEL') {
     // The popup has no sender.tab, so it names the tab explicitly. Both routes
     // must come through here, or the panel opens without being recorded as
@@ -28,10 +49,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       panelEnabled.delete(tabId);
       // Must precede open(): a tab whose stored options say enabled:false has
       // no panel for open() to show.
+      // During a writing session the panel is the session panel, even on a
+      // Google Doc (it links to this document's history).
       chrome.sidePanel
-        .setOptions({ tabId, path: 'sidepanel.html', enabled: true })
+        .setOptions({ tabId, path: sessionPanelOn ? 'sessionpanel.html' : 'sidepanel.html', enabled: true })
         .catch(() => {});
-      panelEnabled.set(tabId, true);
+      panelEnabled.set(tabId, sessionPanelOn ? 'session' : true);
 
       // Report what actually happened. open() must be called inside the user's
       // gesture, and after the laptop sleeps this worker is dead — the click
@@ -75,6 +98,13 @@ const panelEnabled = new Map();   // tabId -> last value we set
 let openedFor = null;
 
 async function syncPanel(tabId, url) {
+  // A writing session puts the session panel on every tab (session-bg.js)
+  if (sessionPanelOn) {
+    if (panelEnabled.get(tabId) === 'session') return;
+    panelEnabled.set(tabId, 'session');
+    try { await chrome.sidePanel.setOptions({ tabId, path: 'sessionpanel.html', enabled: true }); } catch (_) { panelEnabled.delete(tabId); }
+    return;
+  }
   const enabled = DOC_URL.test(url || '') && tabId === openedFor;
   if (panelEnabled.get(tabId) === enabled) return;
   panelEnabled.set(tabId, enabled);

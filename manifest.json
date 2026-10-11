@@ -1,14 +1,22 @@
 {
   "manifest_version": 3,
-  "name": "Visor — Who Wrote What: Google Docs History",
+  "name": "Visor — Writing Sessions & Google Docs History",
   "short_name": "Visor",
-  "version": "3.6",
-  "description": "Free and unlimited. See who wrote what in any Google Doc: contributions, replay, paste detection, and recovered deleted text.",
+  "version": "4.0.0",
+  "description": "Visor Classroom companion: records research in writing sessions, cites pages in one click, shows who wrote what in Google Docs.",
   "minimum_chrome_version": "116",
   "permissions": [
     "storage",
     "sidePanel",
-    "tabs"
+    "tabs",
+    "scripting",
+    "webNavigation",
+    "contextMenus",
+    "declarativeNetRequest",
+    "alarms"
+  ],
+  "optional_host_permissions": [
+    "<all_urls>"
   ],
   "host_permissions": [
     "https://docs.google.com/document/*",
@@ -42,15 +50,34 @@
         "content.css"
       ],
       "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "http://localhost:3000/*",
+        "https://visor-ed.web.app/*",
+        "https://visor-ed.firebaseapp.com/*"
+      ],
+      "js": [
+        "site-bridge.js"
+      ],
+      "run_at": "document_start"
     }
   ],
   "action": {
-    "default_title": "Visor — Who Wrote What: Google Docs History",
+    "default_title": "Visor — Writing Sessions & Google Docs History",
     "default_popup": "popup.html",
     "default_icon": {
       "16": "icons/icon16.png",
       "48": "icons/icon48.png",
       "128": "icons/icon128.png"
+    }
+  },
+  "commands": {
+    "cite-page": {
+      "suggested_key": {
+        "default": "Alt+Shift+C"
+      },
+      "description": "Cite this page with Visor"
     }
   },
   "icons": {
@@ -70,6 +97,18 @@
       ],
       "matches": [
         "https://docs.google.com/*"
+      ]
+    },
+    {
+      "resources": [
+        "blocked.html",
+        "blocked.js",
+        "blocked.css",
+        "logo.png",
+        "config.js"
+      ],
+      "matches": [
+        "<all_urls>"
       ]
     }
   ]
