@@ -87,6 +87,8 @@ const VisorRouter = (() => {
     render,
     // Called by app.js once someone is signed in
     start() { started = true; render(); },
+    // Signed out: end the current page (its timers and listeners)
+    stop() { started = false; if (cleanup) { try { cleanup(); } catch {} cleanup = null; } },
     // The side panel loads /write/:id?embed=panel with no cookie: it skips the
     // normal sign-in and waits for the extension to hand it a token.
     isEmbed: () => new URLSearchParams(location.search).get('embed') === 'panel' && /^\/write\//.test(location.pathname),

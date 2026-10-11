@@ -32,7 +32,9 @@ function renderLiveBoard(el, data) {
   </div>`;
   livePoll();
   const timer = setInterval(livePoll, 5000);
-  const tick = setInterval(liveRender, 1000);
+  // Between polls only the clocks move; rebuilding the table every second
+  // swallowed clicks on its buttons
+  const tick = setInterval(liveTick, 1000);
   return () => { clearInterval(timer); clearInterval(tick); lb = null; };
 }
 
@@ -49,6 +51,19 @@ async function livePoll() {
 
 function liveFilter(f) { lb.filter = f; lb.el.querySelectorAll('.seg button').forEach(b => b.setAttribute('aria-pressed', b.dataset.f === f)); liveRender(); }
 function liveSort(s) { lb.sort = s; liveRender(); }
+
+function liveTick() {
+  if (!lb || !lb.fetchedAt) return;
+  const since = Date.now() - lb.fetchedAt;
+  document.querySelectorAll('#liveTable [data-tick]').forEach(el => {
+    const base = Number(el.dataset.base), kind = el.dataset.tick;
+    if (kind === 'down') el.textContent = vcClock(Math.max(0, base - since));
+    else if (kind === 'dur') el.textContent = vcDur(base + since);
+    else if (kind === 'left') el.textContent = `Left: ${vcClock(base + since)}`;
+    else if (kind === 'offline') el.textContent = `Offline ${vcClock(base + since)}`;
+    else el.textContent = vcClock(base + since);
+  });
+}
 
 function liveRender() {
   if (!lb || !$('liveTable')) return;
@@ -71,17 +86,18 @@ function liveRender() {
       const [label, pill] = LIVE_STATUS[r.status] || [r.status, 'pill-gray'];
       const paused = r.pausedMs != null ? r.pausedMs + since : null;
       const statusText = r.status === 'left' ? `Left: ${vcClock(paused)}` : r.status === 'offline' ? `Offline ${vcClock(paused)}` : label;
+      const live = ['writing', 'left', 'offline'].includes(r.status);
       const reason = r.reason && (r.status === 'left' || r.status === 'ended') ? `<div class="tiny muted">${esc(REASON_TEXT[r.reason] || r.reason)}</div>` : '';
       const tl = r.timeLeftMs != null ? Math.max(0, r.timeLeftMs - (r.status === 'writing' || r.status === 'left' || r.status === 'offline' ? since : 0)) : null;
       const sess = r.sessionMs != null ? r.sessionMs + (['writing', 'left', 'offline', 'paused'].includes(r.status) ? since : 0) : null;
       return `<tr class="${r.attention.length ? 'attn' : ''}">
         <td><div class="roster-name">${avatarHtml(r.student, 'avatar-sm')}<span><b>${esc(r.student.name)}</b>${r.attention.length ? `<div class="tiny attn-text">${I.alert}${esc(r.attention.join(' · '))}</div>` : ''}</span></div></td>
-        <td><span class="pill ${pill}">${esc(statusText)}</span>${reason}</td>
-        <td class="mono">${sess != null ? vcClock(sess) : '—'}</td>
-        <td class="mono ${tl != null && tl < 300000 ? 'low' : ''}">${tl != null ? vcClock(tl) : '—'}</td>
+        <td><span class="pill ${pill}" ${r.status === 'left' || r.status === 'offline' ? `data-tick="${r.status}" data-base="${paused}"` : ''}>${esc(statusText)}</span>${reason}</td>
+        <td class="mono" ${sess != null && (live || r.status === 'paused') ? `data-tick="up" data-base="${sess}"` : ''}>${sess != null ? vcClock(sess) : '—'}</td>
+        <td class="mono ${tl != null && tl < 300000 ? 'low' : ''}" ${tl != null && live ? `data-tick="down" data-base="${tl}"` : ''}>${tl != null ? vcClock(tl) : '—'}</td>
         <td class="mono">${r.words.toLocaleString()}</td>
         <td class="mono">${r.pastes}${r.outsidePasteChars ? `<div class="tiny muted">${r.outsidePasteChars.toLocaleString()} ch outside</div>` : ''}</td>
-        <td class="mono">${r.awayMs ? vcDur(r.awayMs + (r.status === 'left' || r.status === 'offline' ? since : 0)) : '—'}</td>
+        <td class="mono" ${r.status === 'left' || r.status === 'offline' ? `data-tick="dur" data-base="${r.awayMs}"` : ''}>${r.awayMs ? vcDur(r.awayMs + (r.status === 'left' || r.status === 'offline' ? since : 0)) : '—'}</td>
         <td>${r.status === 'writing' || r.status === 'left' || r.status === 'offline' || r.status === 'paused' ? yes(r.ext, 'Extension') : '<span class="muted">—</span>'}</td>
         ${mode === 'locked' ? `<td>${r.lock == null ? '<span class="muted">—</span>' : yes(r.lock, 'Lockdown')}</td>` : ''}
         <td class="small">${r.lastActivity ? esc(timeAgo(r.lastActivity)) : '—'}</td>

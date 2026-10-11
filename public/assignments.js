@@ -14,8 +14,9 @@ const STYLE_NAME = { mla: 'MLA 9', apa: 'APA 7', chicago: 'Chicago' };
 let af = null; // { classId, type, a (existing or null), groups, students }
 
 async function openAssignmentForm(classId, type, existing = null) {
-  let students = cp?.cls?.students;
-  if (!students && existing) { try { students = (await api(`/api/assignments/${existing.id}`)).students; } catch {} }
+  // The roster of this assignment's class (not whichever class page was open last)
+  let students = cp?.cls?.id === classId ? cp.cls.students : null;
+  if (!students) { try { students = (await api(`/api/classes/${classId}`)).class.students; } catch {} }
   af = { classId, type, a: existing, students: students || [], groups: JSON.parse(JSON.stringify(existing?.group?.groups || [])) };
   const a = existing || { title: '', instructions: '', dueAt: null, writing: CFG.writingPresets?.homework?.writing, discussion: { date: null, shareOwnStats: false } };
   const titles = { writing: 'writing assignment', group: 'group project', discussion: 'discussion' };
@@ -104,6 +105,9 @@ function collectWriting() {
 
 // publish: true = save and publish, false = save as draft, null = edit (keep as is)
 async function saveAssignment(publish) {
+  // A date or time box left half-filled reads as empty: say so instead of saving "no date"
+  const half = [...document.querySelectorAll('.modal input[type=datetime-local]')].find(i => i.validity.badInput);
+  if (half) { formError('afErr', 'One of the dates is only partly filled in. Finish it or clear it.'); half.focus(); return; }
   const body = { type: af.type, title: $('afTitle').value, instructions: $('afInstr').value, dueAt: fromLocalInput($('afDue').value) };
   if (af.type === 'writing') body.writing = collectWriting();
   if (af.type === 'group') body.group = { groups: af.groups };

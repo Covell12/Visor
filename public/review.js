@@ -130,7 +130,8 @@ function rvProcess(body) {
     <h3 class="section-title rv-h">Edit history</h3>
     <div class="tiny muted" style="margin-bottom:8px;">The same analysis the Visor extension gives for a Google Doc, run on this essay’s own edit log. It judges pastes by their size alone; where it differs, the paste figures above (from Visor’s own editor) are the exact ones.${report.engine.matchesDoc ? '' : ' (The rebuilt text differs from the saved essay; the figures above are still exact.)'}</div>
     <div class="card card-pad" id="rvEngine"></div>`;
-  embedDocumentView($('rvEngine'), report.engine.report);
+  if (report.engine.report) embedDocumentView($('rvEngine'), report.engine.report);
+  else $('rvEngine').innerHTML = '<div class="muted small">No edits yet.</div>';
 }
 
 /* ---------- Research ---------- */
@@ -143,7 +144,9 @@ function rvResearch(body) {
   const want = { all: () => true, search: e => e.type === 'search', pages: e => e.type === 'visit', ai: e => e.type === 'ai-site' || e.type === 'lock-violation', copy: e => e.type === 'copy', cite: e => e.type === 'cite' }[rv.filter];
   // A visit's time on the page comes from its matching "leave"
   const dwell = new Map();
-  evs.forEach((e, i) => { if (e.type !== 'visit') return; const l = evs.slice(i + 1).find(x => x.type === 'leave' && x.url === e.url); if (l) dwell.set(e, l.dwellMs); });
+  // A page's title is often still loading when it opens; the "leave" has the real one
+  const titled = new Map();
+  evs.forEach((e, i) => { if (e.type !== 'visit') return; const l = evs.slice(i + 1).find(x => x.type === 'leave' && x.url === e.url); if (l) { dwell.set(e, l.dwellMs); if (l.title && l.title !== l.url) titled.set(e, l.title); } });
   const pastedFrom = new Set(report.pastes.filter(p => p.origin).map(p => p.origin.copiedAt));
   const shown = all.filter(want);
   const groups = new Map();
@@ -151,7 +154,7 @@ function rvResearch(body) {
   const line = e => {
     const time = `<span class="mono tiny muted">${esc(vcTime(new Date(e.t).toISOString()))}</span>`;
     if (e.type === 'search') return `<div class="rl rl-search">${time}<span class="rl-kind">Search</span><b>${esc(e.query)}</b><span class="tiny muted">${esc(e.engine)}</span></div>`;
-    if (e.type === 'visit') return `<div class="rl">${time}<span class="rl-kind">Page</span><a href="${esc(e.url)}" target="_blank" rel="noopener noreferrer">${esc(e.title || e.host)}</a><span class="tiny muted">${esc(e.host || '')}${dwell.has(e) ? ` · ${vcDur(dwell.get(e))}` : ''}</span></div>`;
+    if (e.type === 'visit') return `<div class="rl">${time}<span class="rl-kind">Page</span><a href="${esc(e.url)}" target="_blank" rel="noopener noreferrer">${esc(titled.get(e) || (e.title && e.title !== e.url ? e.title : '') || e.host)}</a><span class="tiny muted">${esc(e.host || '')}${dwell.has(e) ? ` · ${vcDur(dwell.get(e))}` : ''}</span></div>`;
     if (e.type === 'copy') return `<div class="rl">${time}<span class="rl-kind">Copied</span><span class="small">“${esc(e.copy?.preview || '')}${(e.copy?.len || 0) > 140 ? '…' : ''}”</span><span class="tiny muted">${(e.copy?.len || 0).toLocaleString()} ch from ${esc(e.host || '')}</span>${pastedFrom.has(new Date(e.t).toISOString()) ? '<span class="pill pill-blue">pasted into the essay</span>' : ''}</div>`;
     if (e.type === 'cite') return `<div class="rl">${time}<span class="rl-kind">Cited</span><span>${esc(e.title || e.url)}</span></div>`;
     if (e.type === 'ai-site') return `<div class="rl rl-ai">${time}<span class="rl-kind">AI site</span><b>${esc(e.host)}</b><span class="pill ${e.blocked ? 'pill-gray' : 'pill-amber'}">${e.blocked ? 'blocked' : 'visited'}</span></div>`;
@@ -209,5 +212,8 @@ function rvPrint(withSummary) {
       <h2>Sessions</h2><ul>${report.sessions.map(s => `<li>${esc(vcDateTime(s.startedAt))}: ${vcDur(s.durationMs)}, ${vcDur(s.activeMs)} active, ${vcDur(s.awayMs)} away${s.wpm ? `, ${s.wpm} wpm` : ''}</li>`).join('')}</ul>
       <p class="print-foot">Measured by Visor from the essay’s edit log and writing sessions. These are measurements to discuss, not a judgment.</p>
     </article>` : ''}`;
+  // Only this print shows the print layout; Cmd+P on its own prints the page as it is
+  document.body.classList.add('printing');
+  window.addEventListener('afterprint', () => document.body.classList.remove('printing'), { once: true });
   setTimeout(() => window.print(), 50);
 }

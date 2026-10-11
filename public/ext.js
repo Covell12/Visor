@@ -32,7 +32,8 @@ const VisorExt = (() => {
     installedVersion,
     async ping() {
       const r = await send('PING');
-      return r.timeout ? { installed: false } : { installed: true, version: r.version, connected: !!r.connected, user: r.user || null, hasHostPermission: !!r.hasHostPermission, lockActive: !!r.lockActive, session: r.session || null };
+      // timeout: not installed or turned off; gone: turned off or reloaded since this page loaded
+      return r.timeout || r.gone ? { installed: false, gone: !!r.gone } : { installed: true, version: r.version, connected: !!r.connected, user: r.user || null, hasHostPermission: !!r.hasHostPermission, lockActive: !!r.lockActive, session: r.session || null };
     },
     connect: (token, user) => send('CONNECT', { token, user }),
     disconnect: () => send('DISCONNECT'),
@@ -42,7 +43,9 @@ const VisorExt = (() => {
     endSession: docId => send('SESSION_END', { docId }),
     openPanel: docId => send('OPEN_PANEL', { docId }, 3000).then(r => (r.timeout ? { ok: false, error: 'The Visor extension didn’t answer.' } : r)),
     // Opens the extension's own small window asking to allow research recording
-    requestPermission: () => send('REQUEST_PERMISSION', {}, 120000).then(r => ({ granted: !!r.granted }))
+    // The answer can be lost if the extension's worker slept while the window
+    // was open, so the permission itself is checked again afterwards
+    requestPermission: () => send('REQUEST_PERMISSION', {}, 120000).then(async r => (r.granted ? { granted: true } : { granted: !!(await send('PING')).hasHostPermission }))
   };
 })();
 window.VisorExt = VisorExt;

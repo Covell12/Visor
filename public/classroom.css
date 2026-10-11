@@ -295,7 +295,8 @@ body.embed .route-view { min-height: 100vh; }
 .rp-scrub:focus-visible { outline: 3px solid var(--blue-deep); outline-offset: 3px; }
 .rp-fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 999px; background: var(--grad); opacity: .55; }
 .rp-knob { position: absolute; top: 50%; width: 16px; height: 16px; margin: -8px 0 0 -8px; border-radius: 50%; background: #fff; border: 3px solid var(--blue-deep); }
-.rp-bands { position: absolute; inset: 0; }
+.rp-bands { position: absolute; inset: 0; z-index: 2; }   /* above the fill, so markers can be hovered */
+.rp-fill, .rp-knob { pointer-events: none; }
 .rp-sess { position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--ink); opacity: .55; }
 .rp-pause { position: absolute; top: 0; bottom: 0; background: repeating-linear-gradient(135deg, rgba(227,155,46,.8) 0 3px, rgba(227,155,46,.35) 3px 6px); border-radius: 2px; }
 .rp-ticks { position: absolute; left: 0; right: 0; bottom: 0; height: 10px; }
@@ -316,10 +317,11 @@ body.embed .route-view { min-height: 100vh; }
 /* ---------- print / save as PDF ---------- */
 .print-area { display: none; }
 @media print {
-  body { background: #fff !important; }
-  #appView > .topbar, #appView > .shell, #routeView > .page, #modalRoot, #toastRoot, #authView { display: none !important; }
-  #routeView { min-height: 0; }
-  .print-area { display: block !important; }
+  body.printing { background: #fff !important; }
+  body.printing #appView > .topbar, body.printing #appView > .shell, body.printing #routeView > .page, body.printing #modalRoot, body.printing #toastRoot, body.printing #authView { display: none !important; }
+  body.printing #routeView { min-height: 0; }
+  body.printing .print-area { display: block !important; }
+  .print-essay .ql-editor, .print-essay .ql-editor p, .print-essay .ql-editor li { line-height: 2; }
   .print-essay { font-family: "Iowan Old Style", Georgia, serif; font-size: 12pt; line-height: 2; color: #000; }
   .print-essay header { margin-bottom: 18pt; line-height: 1.6; }
   .print-name { font-weight: 700; }

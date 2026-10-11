@@ -40,9 +40,11 @@ async function copyText(text, label = 'Copied') {
   try { await navigator.clipboard.writeText(text); toast(label); } catch { toast(text); }
 }
 
-// Escape closes a dialog that has a close button
+// Escape closes a dialog that has a close button, unless it's a form (a
+// stray Escape shouldn't throw away a half-written assignment)
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape' && $('modalRoot')?.querySelector('.mh .btn-icon')) closeModal();
+  const root = $('modalRoot');
+  if (e.key === 'Escape' && root?.querySelector('.mh .btn-icon') && !root.querySelector('.modal input:not([type=checkbox]):not([type=radio]), .modal textarea')) closeModal();
 });
 
 /* ====================== home ====================== */
@@ -132,7 +134,7 @@ function renderStudentHome(el, list, dash, projects) {
     </section>
     ${projects.some(p => !p.classId) ? projectsSection(projects, list.length > 0) : ''}
   </div>`;
-  if (window.VisorExt) VisorExt.ping().then(p => { const b = $('extStatusBtn'); if (b && p.installed) b.innerHTML = `${I.puzzle}${p.connected ? 'Extension connected ✓' : 'Connect extension'}`; });
+  if (window.VisorExt) VisorExt.ping().then(p => { const b = $('extStatusBtn'); if (b && p.installed) b.innerHTML = `${I.puzzle}${p.connected && p.user?.id === me.id ? 'Extension connected ✓' : 'Connect extension'}`; });
 }
 
 function openCreateClass() {
@@ -223,7 +225,7 @@ function classStudentsHtml() {
       </tr>`).join('')}</tbody></table></div>`
     : `<div class="card"><div class="empty"><div class="ic">${I.users}</div><h4>No students yet</h4><p>Share the join code, or add students by email above.</p></div></div>`;
   const invites = (c.pendingInvites || []).length ? `<h3 class="section-title" style="margin-top:22px;">Invited, not signed up yet</h3>
-    <div class="card list-card">${c.pendingInvites.map(i => `<div class="list-row"><span class="grow mono small">${esc(i.email)}</span><span class="tiny muted">invited ${esc(timeAgo(i.invitedAt))}</span><button class="btn-icon" aria-label="Cancel invite for ${esc(i.email)}" onclick="removeInvite('${esc(i.email)}')">${I.x}</button></div>`).join('')}</div>
+    <div class="card list-card">${c.pendingInvites.map(i => `<div class="list-row"><span class="grow mono small">${esc(i.email)}</span><span class="tiny muted">invited ${esc(timeAgo(i.invitedAt))}</span><button class="btn-icon" aria-label="Cancel invite for ${esc(i.email)}" data-email="${esc(i.email)}" onclick="removeInvite(this.dataset.email)">${I.x}</button></div>`).join('')}</div>
     <div class="tiny muted" style="margin-top:6px;">They join this class automatically when they create their Visor account with that email.</div>` : '';
   const gc = CFG.classroomImport
     ? `<button class="btn btn-ghost btn-sm" onclick="importFromClassroom()">${I.school}Import from Google Classroom</button>`

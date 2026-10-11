@@ -176,3 +176,26 @@ test('offline time reported after reconnecting becomes an offline pause', () => 
   assert.ok(!s.events.some(e => e.type === 'made-up'));
   assert.ok(s.events.some(e => e.type === 'online'));
 });
+
+test('switching tabs is "left the tab", even though the window blur arrives first', () => {
+  const s = start();
+  beat(s, 10, { focused: false, visible: true });     // blur
+  beat(s, 10.2, { focused: false, visible: false });  // then hidden
+  S.evaluateFocus(s, sec(15));
+  assert.strictEqual(s.pauses[0].reason, 'left-tab');
+  beat(s, 20, {});
+  assert.strictEqual(s.pauses.length, 1);
+});
+
+test('offline time is one pause, even if the server already opened one while beats were missing', () => {
+  const s = start();
+  beat(s, 10, {});
+  // No beats while offline: a read 40 s later sees the surface gone quiet and opens a pause
+  S.evaluateFocus(s, sec(50));
+  assert.strictEqual(s.pauses.length, 1);
+  // Back online: the page reports its offline stretch
+  beat(s, 60, { offlinePause: { from: sec(12), to: sec(58) } });
+  assert.strictEqual(s.pauses.length, 1);
+  assert.strictEqual(s.pauses[0].reason, 'offline');
+  assert.ok(s.pauses[0].to);
+});

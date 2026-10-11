@@ -85,7 +85,7 @@ let modalOnClose = null;
 function openModal({ title, sub = '', body = '', footer = '', wide = false, onClose = null, closable = true }) {
   modalOnClose = onClose;
   $('modalRoot').innerHTML = `
-    <div class="overlay" onclick="if(event.target===this)${closable ? 'closeModal()' : ''}">
+    <div class="overlay" onmousedown="this._downOnBackdrop=event.target===this" onclick="if(event.target===this&&this._downOnBackdrop){${closable ? 'closeModal()' : ''}}">
       <div class="modal ${wide ? 'wide' : ''}">
         <div class="mh"><div><h3>${title}</h3>${sub ? `<p>${sub}</p>` : ''}</div>${closable ? `<button class="btn-icon" onclick="closeModal()">${I.x}</button>` : ''}</div>
         <div class="mb" id="modalBody">${body}</div>
@@ -252,7 +252,18 @@ async function doSignin() {
     me = r.user; enterApp();
   } catch (e) { formError('signinError', e.message); }
 }
-async function signOut() { await api('/api/auth/logout', { method: 'POST' }); me = null; project = null; if (location.pathname !== '/') history.pushState(null, '', '/'); showAuth('signin'); }
+async function signOut() {
+  await api('/api/auth/logout', { method: 'POST' });
+  me = null; project = null;
+  window.VisorRouter?.stop(); // page timers (dashboard poll, live board) stop with the session
+  if (location.pathname !== '/') history.pushState(null, '', '/');
+  // Nothing of the last person's sign-in or sign-up stays in the forms
+  for (const id of ['siEmail', 'siPassword', 'suEmail', 'suFirst', 'suLast', 'suPassword', 'suClassCode']) { const el = $(id); if (el) el.value = ''; }
+  if ($('suOver13')) $('suOver13').checked = false;
+  selectedRole = null; document.querySelectorAll('.role-card').forEach(c => c.classList.remove('selected'));
+  $('suStudentExtras')?.classList.add('hidden');
+  showAuth('signin');
+}
 document.addEventListener('keydown', e => {
   if (e.key !== 'Enter') return;
   if (!$('signinForm').classList.contains('hidden') && $('signinForm').contains(document.activeElement)) doSignin();
@@ -737,10 +748,10 @@ function showExtensionData() {
       <div style="font-weight:700;margin-bottom:6px;">The easy way</div>
       <ol style="margin:0;padding-left:20px;font-size:14px;line-height:1.7;">
         <li>Open the Doc or Slides file in Chrome and click the <b>Visor</b> button.</li>
-        <li>When the analysis finishes, click <b>Send to Website</b>.</li>
+        <li>When the analysis finishes, open the <b>Overview</b> tab and use <b>Send to Visor</b>.</li>
         <li>Enter this project's code${code ? `: <span class="code-chip" style="padding:3px 10px;">${esc(code)}</span>` : ' (ask your teacher for it)'}.</li>
       </ol>
-      <div class="muted small" style="margin-top:8px;">The <b>Send to Website</b> box is on the extension's Overview tab, under Live replay. It shows up here automatically, and re-sending the same file just updates it.</div>
+      <div class="muted small" style="margin-top:8px;">The <b>Send to Visor</b> box is on the extension's Overview tab, under Live replay. Connected students pick the project from a list; otherwise they type this code. If the teacher linked the group's Doc to a group project, the extension sends it automatically. Re-sending the same file just updates it.</div>
     </div>
     <div class="field"><label>Or paste the report JSON</label><textarea id="extJson" class="input mono" style="font-size:12px;min-height:110px;" placeholder='{ "schema": "visor-export-v1", "meta": { … }, "analysis": { … } }'></textarea></div>
     <div id="extErr" class="form-error hidden"></div>`,
@@ -1010,7 +1021,7 @@ function dvRender() {
 }
 
 // Shown where a report was sent by an older extension and lacks this part
-const dvResend = what => `<div class="callout amber dv-note">${what} arrives with reports sent from Visor extension 3.1 or newer. Open the document in Chrome and click <b>Send to Website</b> again to fill this in.</div>`;
+const dvResend = what => `<div class="callout amber dv-note">${what} arrives with reports sent from Visor extension 3.1 or newer. Open the document in Chrome and use <b>Send to Visor</b> again to fill this in.</div>`;
 
 /* ---------- Overview ---------- */
 function dvOverview(rep) {

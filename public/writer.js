@@ -41,6 +41,8 @@ function srcForInputType(type, composing) {
 VisorRouter.add('/write/:id', async (el, { id }, query) => {
   Object.assign(WR, { assignmentId: id, embed: query.get('embed') === 'panel', events: [], offline: null, offlinePause: null, queue: [], seq: 0, confirmedText: '', copied: new Set(), copiedHashes: new Set(), hashWaits: [], pendingSrc: null, lastBeforeInput: null, composing: false, saving: false, lastLock: undefined, banner: null, data: null, session: null, token: null, lease: null });
   WR.surf = WR.embed ? 'panel' : 'tab';
+  WR.surfaceId = wsSurfaceId(WR.embed);
+  WR.startError = null; WR.extOther = null; WR.refreshSig = null;
   el.innerHTML = `<div class="page"><div class="loading-row"><span class="spinner"></span></div></div>`;
   if (WR.embed) {
     // The side panel hands this page the student's tokens (no cookie here)
@@ -56,10 +58,16 @@ VisorRouter.add('/write/:id', async (el, { id }, query) => {
   WR.serverOffset = Date.parse(WR.data.serverNow) - Date.now();
   writerRender(el);
   wsInstall();
-  if (window.VisorExt && !WR.embed) VisorExt.ping().then(p => { WR.extPresent = !!(p.installed && p.connected); WR.extKnown = true; WR.extInfo = p; writerRefresh(); });
+  if (window.VisorExt && !WR.embed) VisorExt.ping().then(p => { wsNoteExt(p); writerRefresh(); wsRearmExtension(p); });
   if (wsActive()) { writerCheckStoredQueue(); wsBeat(); }
   else writerCheckStoredQueue();
-  return () => { wsUninstall(); writerFlush({ unload: true }); if (document.fullscreenElement) document.exitFullscreen().catch(() => {}); document.body.classList.remove('writing', 'embed'); };
+  return () => {
+    wsUninstall(); writerFlush({ unload: true });
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+    document.body.classList.remove('writing', 'embed');
+    // A citation arriving after leaving the editor must not land in it
+    WR.data = null; WR.quill = null; WR.token = null;
+  };
 });
 
 async function writerFetch() {
@@ -151,6 +159,14 @@ function writerSetupQuill() {
   }
 
   root.addEventListener('beforeinput', e => { WR.lastBeforeInput = { type: e.inputType, at: performance.now() }; });
+  // Cmd/Ctrl+Z and Cmd/Ctrl+Shift+Z (Ctrl+Y) go to Quill's history through its
+  // own key bindings, with no input event: label those edits undo / redo
+  root.addEventListener('keydown', e => {
+    if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
+    const k = e.key.toLowerCase();
+    if (k === 'z') WR.pendingSrc = { src: e.shiftKey ? 'redo' : 'undo', it: e.shiftKey ? 'historyRedo' : 'historyUndo', until: performance.now() + 100 };
+    else if (k === 'y' && e.ctrlKey) WR.pendingSrc = { src: 'redo', it: 'historyRedo', until: performance.now() + 100 };
+  }, true);
   root.addEventListener('compositionstart', () => { WR.composing = true; });
   root.addEventListener('compositionend', () => { WR.composing = false; WR.lastBeforeInput = { type: 'insertCompositionText', at: performance.now() }; });
 
@@ -421,12 +437,18 @@ function writerToggleSerif(force) {
   try { localStorage.setItem('visor-serif', on ? '1' : '0'); } catch {}
 }
 
-// Re-draw everything that depends on the session state
-function writerRefresh() {
+// Re-draw everything that depends on the session state. The header and the
+// start card are only rebuilt when something they show changed (beats arrive
+// every 10 seconds; rebuilding each time blanked the timer and closed the
+// Instructions).
+function writerRefresh(force) {
   if (!WR.data || !$('wrStatus')) return;
   const a = WR.data.assignment, w = a.writing, doc = WR.doc;
   const active = wsActive();
   const status = doc.status;
+  const sig = JSON.stringify([active, status, doc.submittedAt, doc.reopened, !!doc.feedback, !!WR.session, WR.session?.state === 'ended', WR.extPresent, WR.extOther, WR.extInfo?.installed, WR.extInfo?.hasHostPermission, WR.data.timeLeftMs, WR.data.windowProblem, WR.startError, WR.starting]);
+  if (!force && sig === WR.refreshSig) { writerSetSaved(WR.offline ? 'offline' : WR.queue.length ? 'unsaved' : 'saved'); writerUpdateCounts(); writerApplyLock(); return; }
+  WR.refreshSig = sig;
   // Status line
   const extOk = WR.extPresent;
   $('wrStatus').innerHTML = active
@@ -467,7 +489,8 @@ function writerRenderIntro() {
   const needsExt = w.mode === 'locked' || w.requireExtension;
   const extLine = !needsExt || WR.embed ? '' : WR.extPresent
     ? `<div class="wr-ext ok">${I.check}<span>Visor extension: connected</span></div>`
-    : `<div class="wr-ext missing">${I.puzzle}<span>${WR.extInfo?.installed ? '<a href="/extension/connect" data-link>Connect the Visor extension</a> to start' : 'Install the Visor extension, then <a href="/extension/connect" data-link>connect it</a> to start'}.</span></div>`;
+    : WR.extOther ? `<div class="wr-ext missing">${I.puzzle}<span>The Visor extension in this browser is connected to ${esc(WR.extOther)}. <a href="/extension/connect" data-link>Connect it to your account</a> to start.</span></div>`
+      : `<div class="wr-ext missing">${I.puzzle}<span>${WR.extInfo?.installed ? '<a href="/extension/connect" data-link>Connect the Visor extension</a> to start' : 'Install the Visor extension, then <a href="/extension/connect" data-link>connect it</a> to start'}.</span></div>`;
   const needsPerm = !WR.embed && (w.researchTracking || w.mode === 'locked') && WR.extPresent && WR.extInfo && !WR.extInfo.hasHostPermission;
   const permLine = needsPerm ? `<div class="wr-ext missing">${I.alert}<span>${w.mode === 'locked' ? 'Locked sessions need' : 'This assignment records research, which needs'} your OK for the extension to see the pages you visit during the session. <button class="btn btn-ghost btn-sm" onclick="extAllowResearch()">Allow research recording</button></span></div>` : '';
   const outOfTime = WR.data.timeLeftMs != null && WR.data.timeLeftMs <= 5000;
@@ -479,9 +502,9 @@ function writerRenderIntro() {
     <div class="wr-describe">${esc(WR.data.describe)}</div>
     ${extLine}${permLine}${timeNote}
     ${blocked ? `<div class="callout amber" style="margin-top:10px;">${esc(blocked)}</div>` : ''}
-    <div id="wrStartErr" class="form-error hidden" style="margin-top:12px;"></div>
+    <div id="wrStartErr" class="form-error ${WR.startError ? '' : 'hidden'}" style="margin-top:12px;">${esc(WR.startError || '')}</div>
     <div class="btn-row" style="margin-top:14px;">
-      <button class="btn btn-primary btn-lg" id="wrStartBtn" onclick="wsStart()" ${blocked ? 'disabled' : ''}>${I.pen}${ended ? 'Start a new session' : 'Start writing session'}</button>
+      <button class="btn btn-primary btn-lg" id="wrStartBtn" onclick="wsStart()" ${blocked || WR.starting ? 'disabled' : ''}>${WR.starting ? '<span class="spinner spinner-sm"></span> Starting…' : `${I.pen}${ended ? 'Start a new session' : 'Start writing session'}`}</button>
       ${ended && !WR.embed ? `<button class="btn btn-ghost btn-lg" onclick="wsSubmit()">Submit</button>` : ''}
     </div>
     ${w.mode === 'locked' && !WR.embed ? '<div class="tiny muted" style="margin-top:8px;">The session runs in full screen. Leaving full screen or the Visor tab pauses your writing.</div>' : ''}
@@ -493,7 +516,7 @@ const LOCK_TEXT = {
   'left-window': ['Session paused: you left the Visor window.', 'Writing is turned off while you’re away.'],
   'exit-fullscreen': ['Session paused: you left full screen.', 'Locked sessions run in full screen.'],
   offline: ['Offline: your writing is saved on this device.', 'Writing turns back on when the connection does.'],
-  'ext-missing': ['Visor’s extension was turned off.', 'Turn it back on to keep writing.'],
+  'ext-missing': ['Visor’s extension was turned off.', 'Turn it back on, then reload this page to keep writing.'],
   teacher: ['Your teacher paused the session.', 'Writing turns back on when they resume it.']
 };
 

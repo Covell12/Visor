@@ -359,3 +359,35 @@ test('time limits: extra time is applied, and time-up submits automatically', as
   r = await stu.post(`/api/write/${doc.id}/sessions`, { surfaceId: 't2', surf: 'tab' });
   assert.strictEqual(r.status, 409, 'no new session once submitted');
 });
+
+test('a paste made before its copy reached the server is matched on review; the panel uses the extension’s account', async () => {
+  const teacher = client(), stu = client();
+  await teacher.post('/api/auth/signup', { email: 'mt@school.test', password: 'secret12', firstName: 'Max', lastName: 'Teacher', role: 'teacher' });
+  const cls = (await teacher.post('/api/classes', { name: 'Late copies' })).data.class;
+  await stu.post('/api/auth/signup', { email: 'ms@school.test', password: 'secret12', firstName: 'Mo', lastName: 'Student', role: 'student', over13: true, classCode: cls.joinCode });
+  const a = (await teacher.post(`/api/classes/${cls.id}/assignments`, { type: 'writing', title: 'Copies', writing: { mode: 'open' } })).data.assignment;
+  await teacher.post(`/api/assignments/${a.id}/publish`, {});
+  const X = { 'X-Visor-Token': (await stu.post('/api/ext/token')).data.token };
+
+  // The side panel: the teacher's cookie in this browser, the student's extension token
+  let r = await teacher.get(`/api/write/${a.id}?surf=panel`, X);
+  assert.strictEqual(r.status, 200, 'the extension token decides whose editor this is');
+  assert.strictEqual(r.data.user.name, 'Mo Student');
+  const doc = r.data.doc;
+
+  const s = (await stu.post(`/api/write/${doc.id}/sessions`, { surfaceId: 't', surf: 'tab' })).data;
+  const H = { 'X-Visor-Session': s.token };
+  const copied = 'Adolescents need eight to ten hours of sleep each night.';
+  // The paste arrives first…
+  r = await stu.post(`/api/write/${doc.id}/ops`, { baseSeq: 0, ops: [{ k: 'i', at: 0, s: copied, t: Date.now(), src: 'paste', paste: { hash: sha(norm(copied)), internal: false } }], surfaceId: 't' }, H);
+  assert.strictEqual(r.data.pastes[0].origin, null);
+  // …then the copy (the extension sends research in batches)
+  await stu.post('/api/ext/research', { sessionToken: s.token, docId: doc.id, events: [{ type: 'copy', t: Date.now() - 5000, url: 'https://www.sleepfoundation.org/teens', title: 'Teens and Sleep', copy: { hash: sha(norm(copied)), len: copied.length, preview: copied } }] }, X);
+  r = await teacher.get(`/api/review/${doc.id}`);
+  assert.strictEqual(r.data.report.pastes[0].kind, 'research');
+  assert.strictEqual(r.data.report.pastes[0].origin.url, 'https://www.sleepfoundation.org/teens');
+  // New research makes a new report (it isn't cached by op count alone)
+  await stu.post('/api/ext/research', { sessionToken: s.token, docId: doc.id, events: [{ type: 'search', t: Date.now(), url: 'https://www.google.com/search?q=teen+sleep', query: 'teen sleep', engine: 'google' }] }, X);
+  r = await teacher.get(`/api/review/${doc.id}`);
+  assert.ok(r.data.report.research.searches.some(x => x.query === 'teen sleep'));
+});

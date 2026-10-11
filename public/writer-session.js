@@ -13,7 +13,7 @@
 // Everything about the open writer page. writer.js adds the editor parts.
 const WR = {
   assignmentId: null, embed: false, surf: 'tab',
-  surfaceId: (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2)).slice(0, 18),
+  surfaceId: null,        // per browser tab, kept across reloads (see wsSurfaceId)
   data: null,            // GET /api/write/:assignmentId
   doc: null, session: null, token: null, lease: null, extToken: null,
   serverOffset: 0,       // server time − local time
@@ -26,6 +26,36 @@ const WR = {
 };
 
 const serverNow = () => Date.now() + WR.serverOffset;
+
+// This tab's surface id. sessionStorage keeps it across a reload of the same
+// tab, so reloading doesn't hand the editing lease to "another" tab; a new tab
+// or the side panel gets its own.
+function wsSurfaceId(embed) {
+  const key = embed ? 'visor-surface-panel' : 'visor-surface';
+  try { const have = sessionStorage.getItem(key); if (have) return have; } catch {}
+  const id = (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2)).slice(0, 18);
+  try { sessionStorage.setItem(key, id); } catch {}
+  return id;
+}
+
+// The extension counts only if it's connected to the account using this page
+// (a shared computer can have it connected to someone else)
+function extIsMine(p) {
+  if (!p || !p.installed || !p.connected) return false;
+  return !p.user || !WR.data?.user || p.user.id === WR.data.user.id;
+}
+function wsNoteExt(p) {
+  WR.extInfo = p; WR.extKnown = true;
+  WR.extPresent = extIsMine(p);
+  WR.extOther = p && p.installed && p.connected && !WR.extPresent ? (p.user?.name || 'another account') : null;
+}
+// The extension lost its record of this session (it was reloaded, or Chrome
+// restarted) or is recording another document: tell it again.
+function wsRearmExtension(p) {
+  if (!window.VisorExt || WR.embed || !wsActive() || !WR.token || !extIsMine(p)) return;
+  if (p.session && p.session.docId === WR.doc.id) return;
+  VisorExt.startSession({ docId: WR.doc.id, assignmentId: WR.data.assignment.id, sessionToken: WR.token, settings: wsExtSettings() }).catch(() => {});
+}
 const wsActive = () => WR.session && WR.session.state !== 'ended';
 const isLeaseHolder = () => !!(WR.lease && WR.lease.surfaceId === WR.surfaceId && WR.session && WR.lease.sessionId === WR.session.id);
 
@@ -45,6 +75,12 @@ async function wapi(path, { method = 'GET', body, keepalive = false } = {}) {
   try { data = await r.json(); } catch {}
   if (!r.ok) { const e = new Error(data.error || `Request failed (${r.status})`); e.status = r.status; e.data = data; throw e; }
   return data;
+}
+
+// The last teacher message shown, remembered across reloads so it isn't shown twice
+function wsSeenMessage(id) {
+  const key = `visor-msg:${WR.session?.id || ''}`;
+  try { if (id) sessionStorage.setItem(key, id); return sessionStorage.getItem(key); } catch { if (id) WR.seenMessage = id; return WR.seenMessage; }
 }
 
 function wsNoteEvent(type, detail = {}) { WR.events.push({ type, t: Date.now(), ...detail }); }
@@ -104,7 +140,7 @@ function wsOnBeat(r) {
   const wasHolder = isLeaseHolder();
   WR.session = { ...WR.session, ...r };
   WR.lease = r.lease;
-  if (r.teacherMessage && r.teacherMessage.id !== WR.seenMessage) { WR.seenMessage = r.teacherMessage.id; writerBanner(`Message from your teacher: ${r.teacherMessage.text}`, 'teacher'); }
+  if (r.teacherMessage && r.teacherMessage.id !== wsSeenMessage()) { wsSeenMessage(r.teacherMessage.id); writerBanner(`Message from your teacher: ${r.teacherMessage.text}`, 'teacher'); }
   if (r.ended) return wsSessionEnded(r);
   // Someone else (the side panel, another tab) took the lease: become a mirror
   if (wasHolder && !isLeaseHolder()) { writerFlush(); }
@@ -155,6 +191,7 @@ async function wsStart() {
   const btn = $('wrStartBtn');
   const a = WR.data.assignment, w = a.writing;
   const setBtn = (html, disabled) => { if (btn) { btn.innerHTML = html; btn.disabled = disabled; } };
+  WR.startError = null; WR.starting = true;
   formError('wrStartErr', '');
   setBtn('<span class="spinner spinner-sm"></span> Starting…', true);
   try {
@@ -167,18 +204,20 @@ async function wsStart() {
     let ext = { installed: false };
     if (window.VisorExt) {
       ext = await VisorExt.ping();
-      if (ext.installed && ext.connected) {
+      wsNoteExt(ext);
+      if (extIsMine(ext)) {
         // (Research permission is asked for with its own button on the start card,
         // so this click's gesture is still good for full screen.)
         await VisorExt.startSession({ docId: WR.doc.id, assignmentId: a.id, sessionToken: null, settings: wsExtSettings() }).catch(() => {});
       }
     }
-    WR.extPresent = !!(ext.installed && ext.connected); WR.extKnown = true;
     const r = await wapi(`/api/write/${WR.doc.id}/sessions`, { method: 'POST', body: { surfaceId: WR.surfaceId, surf: WR.surf, extPresent: WR.extPresent, extVersion: ext.version || null, fullscreen: WR.embed ? true : fullscreen } });
+    WR.starting = false;
     await wsAdopt(r);
   } catch (e) {
-    setBtn(`${I.pen}Start writing session`, false);
-    formError('wrStartErr', e.message);
+    // Kept on WR so it survives the redraw that leaving full screen causes
+    WR.starting = false; WR.startError = e.message;
+    writerRefresh(true);
     if (document.fullscreenElement && !wsActive()) document.exitFullscreen().catch(() => {});
   }
 }
@@ -262,7 +301,10 @@ function wsResume() {
 function wsInstall() {
   const on = (target, ev, fn, opts) => { target.addEventListener(ev, fn, opts); WR.listeners.push([target, ev, fn, opts]); };
   const changed = () => { writerRefresh(); wsBeat(); };
-  on(window, 'focus', changed); on(window, 'blur', changed);
+  on(window, 'focus', changed);
+  // Losing focus (often to the side panel) sends what's typed right away, so a
+  // lease handoff doesn't strand the last keystrokes
+  on(window, 'blur', () => { changed(); writerFlush(); });
   on(document, 'visibilitychange', () => { changed(); if (document.visibilityState === 'hidden') writerFlush({ unload: false }); });
   on(document, 'fullscreenchange', changed);
   on(window, 'online', () => { if (WR.offline) { wsBeat(); writerFlush(); } });
@@ -308,7 +350,8 @@ async function wsCheckExtension() {
   if (!window.VisorExt || !wsActive() || WR.embed) return;
   const p = await VisorExt.ping();
   const was = WR.extPresent;
-  WR.extPresent = !!(p.installed && p.connected); WR.extKnown = true; WR.extInfo = p;
+  wsNoteExt(p);
   if (was && !WR.extPresent) { wsNoteEvent('ext-missing', { detail: 'turned-off' }); writerRefresh(); wsBeat(); }
-  if (!was && WR.extPresent) { wsNoteEvent('ext-back'); VisorExt.startSession({ docId: WR.doc.id, assignmentId: WR.data.assignment.id, sessionToken: WR.token, settings: wsExtSettings() }).catch(() => {}); writerRefresh(); wsBeat(); }
+  if (!was && WR.extPresent) { wsNoteEvent('ext-back'); writerRefresh(); wsBeat(); }
+  wsRearmExtension(p);
 }

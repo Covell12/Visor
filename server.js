@@ -1544,7 +1544,9 @@ function liveRow(u, doc, s, a, t) {
     row.sessionId = s.id;
     row.sessionMs = t - Date.parse(s.startedAt);
     row.timeLeftMs = s.deadlineAt ? Date.parse(s.deadlineAt) - t : null;
-    row.ext = !!s.extension?.present; row.lock = s.mode === 'locked' ? !!s.extension?.lockActive : null;
+    // The lockdown only counts while the extension is actually there (its last
+    // report can say "on" long after it was turned off)
+    row.ext = !!s.extension?.present; row.lock = s.mode === 'locked' ? !!(s.extension?.present && s.extension?.lockActive) : null;
     row.lastActivity = [s.lastBeat, doc?.updatedAt].filter(Boolean).sort().pop();
     row.lateBeat = t - Date.parse(s.lastBeat) > LATE_BEAT_MS;
     row.aiSite = (s.events || []).some(e => e.type === 'ai-site');
@@ -1664,11 +1666,14 @@ async function deleteAssignmentRecords(core, a) {
 const WSESS = 'wsess';
 
 // Who's asking: the cookie, or the extension's token (the side panel embed).
+// The extension's token wins when both are present: the side panel's editor
+// belongs to whoever connected the extension, even if someone else is signed
+// in to the site in this browser.
 async function writerUser(req, core) {
-  const fromCookie = currentUser(req, core);
-  if (fromCookie) return fromCookie;
   const ext = await extUserFromHeader(req, core);
   if (ext) return ext;
+  const fromCookie = currentUser(req, core);
+  if (fromCookie) return fromCookie;
   throw new HttpError(401, 'not signed in');
 }
 
@@ -2059,16 +2064,30 @@ async function allOps(docId) {
 }
 
 // The process report, cached on the document until its next op
+// The cache key: new ops, research arriving later, session changes and
+// sources all make a new report
+function processKey(doc, sessions, researchChunks) {
+  return [PROCESS_VERSION, doc.seq, (doc.sources || []).length, doc.status,
+    sessions.map(s => `${s.id}:${(s.events || []).length}:${(s.pauses || []).length}:${s.state}`).join(','),
+    researchChunks.reduce((n, c) => n + (c.events || []).length, 0)].join('|');
+}
+
 async function processReportFor(core, doc, a) {
-  if (doc.process && doc.process.seq === doc.seq && doc.process.v === PROCESS_VERSION) return doc.process;
-  const [ops, sessions, researchChunks, classDocs] = await Promise.all([
-    allOps(doc.id), repo.listRecords('session', { docId: doc.id }), repo.listRecords('research', { docId: doc.id }),
-    repo.listRecords('doc', { classId: doc.classId, studentId: doc.studentId })
-  ]);
+  const [sessions, researchChunks] = await Promise.all([repo.listRecords('session', { docId: doc.id }), repo.listRecords('research', { docId: doc.id })]);
+  const key = processKey(doc, sessions, researchChunks);
+  if (doc.process && doc.process.key === key) return doc.process;
+  const [ops, classDocs] = await Promise.all([allOps(doc.id), repo.listRecords('doc', { classId: doc.classId, studentId: doc.studentId })]);
+  // A paste made before its copy reached the server (the extension sends
+  // copies within seconds, research otherwise every minute) is matched now
+  const unmatched = ops.filter(o => o.paste && !o.paste.origin && !o.paste.internal);
+  if (unmatched.length) {
+    const copies = research.copiesFrom(await repo.listRecords('research', { studentId: doc.studentId, assignmentId: doc.assignmentId }));
+    research.matchPasteOrigins(unmatched, copies, { studentId: doc.studentId });
+  }
   // This student's usual pace in this class, from their other essays' reports
   const others = classDocs.filter(d => d.id !== doc.id && d.stats?.processWpm).map(d => d.stats.processWpm).sort((x, y) => x - y);
   const baselineWpm = others.length ? others[Math.floor(others.length / 2)] : null;
-  const report = { v: PROCESS_VERSION, ...processLib.build({ doc, ops, sessions, researchChunks, studentName: fullName(core.users[doc.studentId]), title: a?.title, baselineWpm }) };
+  const report = { v: PROCESS_VERSION, key, ...processLib.build({ doc, ops, sessions, researchChunks, studentName: fullName(core.users[doc.studentId]), title: a?.title, baselineWpm }) };
   await repo.updateRecord('doc', doc.id, d => {
     if (d.seq !== report.seq) return;
     d.process = report;
@@ -2076,7 +2095,7 @@ async function processReportFor(core, doc, a) {
   });
   return report;
 }
-const PROCESS_VERSION = 2;
+const PROCESS_VERSION = 3;
 
 app.get('/api/review/:docId', ah(async (req, res) => {
   const got = await teacherDocFor(req);
@@ -2407,9 +2426,14 @@ const teacherOf = (core, cls) => { const t = core.users[cls.teacherId]; return t
 // Segments that have been "transcribing" longer than a job may run were cut off
 async function reconcileDiscussion(d) {
   const stale = (d.segments || []).filter(s => s.status === 'transcribing' && !discussionJobs.has(`${d.id}:${s.k}`) && Date.now() - Date.parse(s.startedAt || 0) > DISC_STALE_MS);
-  if (!stale.length) return d;
+  // A recording that hasn't sent a part in 15 minutes (parts come every 10)
+  // was cut off: its page closed or the computer slept
+  const lastPart = Math.max(Date.parse(d.createdAt), ...(d.segments || []).map(s => Date.parse(s.uploadedAt || 0)));
+  const abandoned = d.recording && Date.now() - lastPart > 15 * 60 * 1000;
+  if (!stale.length && !abandoned) return d;
   return repo.updateRecord('discussion', d.id, x => {
     for (const s of x.segments) if (stale.some(t => t.k === s.k) && s.status === 'transcribing') { s.status = 'error'; s.error = 'Transcription was interrupted before it finished. Try again.'; }
+    if (abandoned) x.recording = false;
     x.status = discussionStatus(x);
   });
 }

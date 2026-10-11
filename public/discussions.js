@@ -53,7 +53,11 @@ async function discConfirmConsent() {
   catch (e) { toast(e.message, 'err'); }
 }
 async function discShare(on) {
-  try { await api(`/api/assignments/${dq.data.assignment.id}`, { method: 'PATCH', body: { discussion: { shareOwnStats: on } } }); toast(on ? 'Students can see their own numbers' : 'Only you see the results'); }
+  try {
+    const r = await api(`/api/assignments/${dq.data.assignment.id}`, { method: 'PATCH', body: { discussion: { shareOwnStats: on } } });
+    dq.data.assignment = r.assignment; if (ap?.data) ap.data.assignment = r.assignment;
+    toast(on ? 'Students can see their own numbers' : 'Only you see the results');
+  }
   catch (e) { toast(e.message, 'err'); }
 }
 
@@ -81,7 +85,19 @@ async function discSendSegment(did, blob, { k, duration, last, filename, onProgr
 
 /* ---- the recorder: 10-minute segments ---- */
 let drec = null; // { did, stream, recorder, k, segStart, start, timer, uploads: [], stopping }
-function recStopAll() { if (drec) { try { drec.recorder?.state === 'recording' && drec.recorder.stop(); } catch {} drec.stream?.getTracks().forEach(t => t.stop()); clearInterval(drec.timer); clearTimeout(drec.rotate); drec = null; } }
+// Leaving the page while recording: the part being recorded is saved as the last one
+function recStopAll() {
+  if (!drec) return;
+  const r = drec;
+  r.stopping = true;
+  clearInterval(r.timer); clearTimeout(r.rotate);
+  try { if (r.recorder?.state === 'recording') r.recorder.stop(); } catch {}
+  // Microphone off once the last part is in hand
+  setTimeout(() => { r.stream?.getTracks().forEach(t => t.stop()); }, 500);
+  Promise.allSettled(r.uploads).then(() => api(`/api/discussions/${r.did}/finish`, { method: 'POST' }).catch(() => {}));
+  drec = null;
+  if ($('modalRoot')?.querySelector('#drecStop')) closeModal();
+}
 
 async function discRecord() {
   let stream;
@@ -105,24 +121,25 @@ async function discRecord() {
 
 // One MediaRecorder per segment: each stop gives a complete, playable file
 function discStartSegment() {
-  const k = drec.k;
+  const r = drec;   // this recording, even after drec is cleared
+  const k = r.k;
   const chunks = [];
-  const rec = new MediaRecorder(drec.stream, drec.mime ? { mimeType: drec.mime } : undefined);
+  const rec = new MediaRecorder(r.stream, r.mime ? { mimeType: r.mime } : undefined);
   const segStart = Date.now();
   rec.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
   rec.onstop = () => {
     const blob = new Blob(chunks, { type: rec.mimeType || 'audio/webm' });
-    const last = drec.stopping;
+    const last = r.stopping;
     const ext = (blob.type || '').includes('mp4') ? 'm4a' : 'webm';
-    const job = discSendSegment(drec.did, blob, { k, duration: (Date.now() - segStart) / 1000, last, filename: `discussion-part-${k + 1}.${ext}` })
+    const job = discSendSegment(r.did, blob, { k, duration: (Date.now() - segStart) / 1000, last, filename: `discussion-part-${k + 1}.${ext}` })
       .then(() => { discUploadsNote(`Part ${k + 1} saved.`); })
       .catch(e => { discUploadsNote(`Part ${k + 1} didn’t upload: ${e.message}`); throw e; });
-    drec.uploads.push(job);
-    if (!last) { drec.k += 1; discStartSegment(); if ($('drecParts')) $('drecParts').textContent = `Part ${drec.k + 1} recording · parts are saved every 10 minutes`; }
+    r.uploads.push(job);
+    if (!last) { r.k += 1; discStartSegment(); if ($('drecParts')) $('drecParts').textContent = `Part ${r.k + 1} recording · parts are saved every 10 minutes`; }
   };
   rec.start(1000);
-  drec.recorder = rec;
-  drec.rotate = setTimeout(() => { if (drec && !drec.stopping && rec.state === 'recording') rec.stop(); }, DISC_SEGMENT_MS);
+  r.recorder = rec;
+  r.rotate = setTimeout(() => { if (!r.stopping && rec.state === 'recording') rec.stop(); }, DISC_SEGMENT_MS);
 }
 function discUploadsNote(t) { const el = $('drecUploads'); if (el) el.textContent = t; }
 
@@ -180,7 +197,8 @@ function discRender() {
   const an = d.analysis;
   el.innerHTML = `<div class="disc-head"><button class="btn btn-ghost btn-sm" onclick="discList()">← All recordings</button>
       <h2 class="section-title" style="margin:0;flex:1;">${esc(d.title)}</h2>${discPill(d.status)}
-      ${d.status === 'identify' || d.status === 'ready' ? `<button class="btn btn-ghost btn-sm" onclick="discWizard()">${I.users}${d.status === 'identify' ? 'Name the voices' : 'Fix names'}</button>` : ''}
+      ${d.speakers.length && d.status !== 'transcribing' && d.status !== 'recording' ? `<button class="btn btn-ghost btn-sm" onclick="discWizard()">${I.users}${d.speakers.some(s => !s.assignedName) ? 'Name the voices' : 'Fix names'}</button>` : ''}
+      ${d.status === 'recording' && !drec ? `<button class="btn btn-ghost btn-sm" onclick="discFinish()">Stop waiting for more parts</button>` : ''}
       ${['identify', 'ready', 'error'].includes(d.status) && d.transcript.length ? `<button class="btn btn-primary btn-sm" onclick="discAnalyze(this)">${an ? 'Analyze again' : 'Analyze'}</button>` : ''}
       <button class="btn-icon" aria-label="Delete this recording" title="Delete" onclick="discDelete()">${I.trash}</button></div>
     <div class="disc-segs">${d.segments.map(s => `<div class="disc-seg"><b>Part ${s.k + 1}</b>${s.durationSec ? `<span class="mono tiny">${discSec(s.durationSec)}</span>` : ''}
@@ -239,6 +257,11 @@ async function discAnalyze(btn) {
   btn.disabled = true; btn.innerHTML = `<span class="spinner spinner-sm"></span> Working…`;
   try { const r = await api(`/api/discussions/${dq.open.id}/analyze`, { method: 'POST' }); dq.open = r.discussion; discRender(); }
   catch (e) { toast(e.message, 'err'); btn.disabled = false; btn.textContent = 'Analyze'; }
+}
+// A recording whose page closed before it finished: use the parts that arrived
+async function discFinish() {
+  try { const r = await api(`/api/discussions/${dq.open.id}/finish`, { method: 'POST' }); dq.open = r.discussion; discOpen(dq.open.id); }
+  catch (e) { toast(e.message, 'err'); }
 }
 async function discRetry(k) {
   try { const r = await api(`/api/discussions/${dq.open.id}/segments/${k}/retranscribe`, { method: 'POST' }); dq.open = r.discussion; discOpen(dq.open.id); }
