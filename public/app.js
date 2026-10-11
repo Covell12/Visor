@@ -986,6 +986,14 @@ function openExtensionDetail(r) {
   dvRender();
 }
 
+// Visor Classroom: the same view inside a page instead of a dialog (the review
+// page's Process tab renders a student essay's engine analysis with it)
+function embedDocumentView(el, rep) {
+  dv = { r: { id: null }, rep, tab: 'overview', sort: { pastes: 'recent', deletions: 'recent' } };
+  el.innerHTML = `<div class="tabs dv-tabs" id="dvTabs"></div><div id="dvBody"></div>`;
+  dvRender();
+}
+
 function dvTabsFor(rep) {
   const isExt = rep.source === 'visor-extension', isDrive = rep.source === 'drive';
   return DV_TABS.filter(([k]) => k === 'overview' || k === 'people' || (k === 'timeline' && (isExt || isDrive)) || ((k === 'evidence' || k === 'signal') && isExt));

@@ -165,6 +165,48 @@ test('the classroom flow, end to end', async t => {
   assert.strictEqual(row.status, 'submitted');
   assert.strictEqual(row.docId, doc.id);
 
+  // 8. the teacher's process report and live board
+  r = await teacher.get(`/api/review/${doc.id}`);
+  assert.strictEqual(r.status, 200);
+  const rep = r.data.report;
+  assert.strictEqual(rep.engine.matchesDoc, true, 'the engine rebuilds the essay exactly from the op log');
+  assert.strictEqual(rep.totals.sessions, 1);
+  assert.strictEqual(rep.totals.pauses, 1);
+  assert.strictEqual(rep.pastes[0].kind, 'research');
+  assert.strictEqual(rep.pastes[0].origin.url, 'https://www.cdc.gov/sleep/');
+  assert.ok(rep.survival.pct['pasted-research'] > 0 && rep.survival.pct.template > 0);
+  assert.ok(rep.research.searches.some(x => x.query === 'teen sleep'));
+  for (const n of rep.notes) assert.ok(!/\bAI\b|cheat|plagiar/i.test(n.text), n.text);
+  r = await teacher.get(`/api/assignments/${a.id}/live`);
+  assert.strictEqual(r.status, 200);
+  const samRow = r.data.rows.find(x => x.student.email === 'sam@school.test');
+  assert.strictEqual(samRow.status, 'submitted');
+  assert.strictEqual(samRow.words, 10);
+  assert.strictEqual(r.data.rows.find(x => x.student.email === 'kim@school.test').status, 'not-started');
+  r = await sam.get(`/api/review/${doc.id}`);
+  assert.strictEqual(r.status, 403, 'the review page is the teacher’s');
+  r = await sam.get(`/api/assignments/${a.id}/live`);
+  assert.strictEqual(r.status, 403);
+
+  // the teacher returns it with feedback and reopens it; the student can write again
+  r = await teacher.post(`/api/review/${doc.id}/feedback`, { comment: 'Good start.', score: 8, outOf: 10, returnToStudent: true, reopen: true });
+  assert.strictEqual(r.data.doc.status, 'returned');
+  r = await sam.get(`/api/write/${a.id}`);
+  assert.strictEqual(r.data.doc.feedback.comment, 'Good start.');
+  r = await sam.post(`/api/write/${doc.id}/sessions`, { surfaceId: 'tab-3', surf: 'tab' });
+  assert.strictEqual(r.status, 200, 'a reopened document takes new sessions');
+  // the teacher's live controls reach the student's next beat
+  r = await teacher.post(`/api/assignments/${a.id}/live/action`, { action: 'message', studentIds: [samRow.student.id], message: 'Ten minutes left' });
+  assert.strictEqual(r.data.changed, 1);
+  r = await teacher.post(`/api/assignments/${a.id}/live/action`, { action: 'pause-all' });
+  const H3 = { 'X-Visor-Session': (await sam.get(`/api/write/${a.id}`)).data.token };
+  r = await sam.post(`/api/write/${doc.id}/beat`, { surfaceId: 'tab-3', surf: 'tab', focused: true, visible: true }, H3);
+  assert.strictEqual(r.data.teacherMessage.text, 'Ten minutes left');
+  assert.strictEqual(r.data.pause.reason, 'teacher');
+  await teacher.post(`/api/assignments/${a.id}/live/action`, { action: 'end-all-submit' });
+  r = await sam.get(`/api/write/${a.id}`);
+  assert.strictEqual(r.data.doc.status, 'submitted');
+
   // 9. another student can't read the first student's doc or its op log
   r = await kim.get(`/api/write/${doc.id}/ops`);
   assert.strictEqual(r.status, 403);

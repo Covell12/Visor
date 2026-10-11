@@ -36,6 +36,7 @@ const writing = require('./lib/writing');
 const sessionsLib = require('./lib/sessions');
 const research = require('./lib/research');
 const citeFormat = require('./lib/cite');
+const processLib = require('./lib/process');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -1513,6 +1514,112 @@ app.delete('/api/assignments/:id', requireAuth, ah(async (req, res) => {
   res.json({ ok: true });
 }));
 
+// ---- Live session board (Section 7.9) ----
+
+const LATE_BEAT_MS = 30 * 1000;
+function liveRow(u, doc, s, a, t) {
+  const row = { student: publicUser(u), docId: doc?.id || null, status: 'not-started', reason: null, awayMs: doc?.stats?.awayMs || 0, words: doc?.stats?.words || 0, pastes: doc?.stats?.pastes || 0, outsidePasteChars: doc?.stats?.externalPasteChars || 0, biggestPaste: doc?.stats?.biggestPaste || 0, sessionMs: null, timeLeftMs: null, ext: null, lock: null, lastActivity: doc?.updatedAt || null, lateBeat: false, aiSite: false, sessionId: null, teacherPaused: false };
+  if (doc?.status === 'submitted') row.status = 'submitted';
+  else if (doc?.status === 'returned' && !doc.reopened) row.status = 'returned';
+  if (s && s.state !== 'ended') {
+    const open = sessionsLib.openPause(s);
+    row.sessionId = s.id;
+    row.sessionMs = t - Date.parse(s.startedAt);
+    row.timeLeftMs = s.deadlineAt ? Date.parse(s.deadlineAt) - t : null;
+    row.ext = !!s.extension?.present; row.lock = s.mode === 'locked' ? !!s.extension?.lockActive : null;
+    row.lastActivity = [s.lastBeat, doc?.updatedAt].filter(Boolean).sort().pop();
+    row.lateBeat = t - Date.parse(s.lastBeat) > LATE_BEAT_MS;
+    row.aiSite = (s.events || []).some(e => e.type === 'ai-site');
+    row.teacherPaused = !!s.teacherPaused;
+    if (open) {
+      row.reason = open.reason; row.pausedMs = t - Date.parse(open.from);
+      row.awayMs += open.reason === 'teacher' ? 0 : row.pausedMs;
+      row.status = open.reason === 'teacher' ? 'paused' : open.reason === 'offline' ? 'offline' : 'left';
+    } else row.status = 'writing';
+  } else if (s && row.status === 'not-started') {
+    row.status = 'ended'; row.reason = s.endReason;
+    row.sessionMs = Date.parse(s.endedAt || s.lastBeat) - Date.parse(s.startedAt);
+  } else if (doc && row.status === 'not-started' && doc.status === 'in-progress') row.status = 'ended';
+  // Needs attention: away over a minute, extension missing in a locked
+  // session, an AI site, or a big paste from outside Visor's view
+  row.attention = [
+    (row.status === 'left' || row.status === 'offline') && row.pausedMs > 60000 ? 'away over a minute' : null,
+    row.status !== 'submitted' && s && s.state !== 'ended' && s.mode === 'locked' && !row.ext ? 'extension missing' : null,
+    row.aiSite ? 'AI site visited' : null,
+    row.biggestPaste >= 200 && row.outsidePasteChars >= 200 ? 'large paste from outside' : null,
+    row.lateBeat ? 'not heard from in 30 s' : null
+  ].filter(Boolean);
+  return row;
+}
+
+app.get('/api/assignments/:id/live', requireAuth, ah(async (req, res) => {
+  const core = await repo.readCore();
+  const got = await teacherAssignment(req, core);
+  const { a, cls } = got;
+  const t = Date.now();
+  const docs = await repo.listRecords('doc', { assignmentId: a.id });
+  // The board's poll also sweeps: quiet sessions time out, time limits end
+  let sessions = await repo.listRecords('session', { assignmentId: a.id });
+  for (const d of docs.filter(d => sessions.some(s => s.docId === d.id && s.state !== 'ended'))) await sweepDocSessions(d, a);
+  sessions = await repo.listRecords('session', { assignmentId: a.id });
+  const freshDocs = await repo.listRecords('doc', { assignmentId: a.id });
+  const rows = cls.studentIds.map(id => core.users[id]).filter(Boolean).map(u => {
+    const doc = freshDocs.find(d => d.studentId === u.id);
+    const mine = sessions.filter(s => s.studentId === u.id).sort((x, y) => (x.startedAt < y.startedAt ? 1 : -1));
+    return liveRow(u, doc, mine.find(s => s.state !== 'ended') || mine[0] || null, a, t);
+  }).sort((x, y) => x.student.lastName.localeCompare(y.student.lastName));
+  res.json({ rows, serverNow: new Date(t).toISOString(), mode: a.writing?.mode, timeLimitMin: a.writing?.timeLimitMin || null });
+}));
+
+// { action, studentIds?, minutes?, message? }
+// One student: end, pause, resume, add-time, message. Everyone: pause-all,
+// resume-all, end-all-submit, extend-all (studentIds omitted).
+app.post('/api/assignments/:id/live/action', requireAuth, ah(async (req, res) => {
+  const core = await repo.readCore();
+  const got = await teacherAssignment(req, core);
+  const { a, cls } = got;
+  const { action, minutes, message } = req.body || {};
+  const ACTIONS = ['end', 'pause', 'resume', 'add-time', 'message', 'pause-all', 'resume-all', 'end-all-submit', 'extend-all'];
+  if (!ACTIONS.includes(action)) throw new HttpError(400, 'Unknown action');
+  const all = action.endsWith('-all') || action === 'end-all-submit';
+  const who = all ? cls.studentIds : (Array.isArray(req.body?.studentIds) ? req.body.studentIds.map(String) : []).filter(id => cls.studentIds.includes(id));
+  if (!who.length) throw new HttpError(400, 'Pick at least one student');
+  const live = (await repo.listRecords('session', { assignmentId: a.id })).filter(s => s.state !== 'ended' && who.includes(s.studentId));
+  const t = Date.now();
+  let changed = 0;
+  for (const s0 of live) {
+    let ended = false;
+    const s = await repo.updateRecord('session', s0.id, x => {
+      if (x.state === 'ended') return;
+      if (action === 'end' || action === 'end-all-submit') { sessionsLib.endSession(x, 'teacher', t); ended = true; }
+      else if (action === 'pause' || action === 'pause-all') sessionsLib.teacherPause(x, t);
+      else if (action === 'resume' || action === 'resume-all') sessionsLib.teacherResume(x, t);
+      else if (action === 'add-time' || action === 'extend-all') sessionsLib.addTime(x, minutes, t);
+      else if (action === 'message') sessionsLib.teacherMessage(x, message, t);
+    });
+    if (ended) await afterSessionEnded(s, a);
+    if ((action === 'add-time' || action === 'extend-all') && s) {
+      const m = Math.max(1, Math.min(240, Math.round(Number(minutes) || 0)));
+      await repo.updateRecord('doc', s.docId, d => { d.extraTimeMs = (d.extraTimeMs || 0) + m * 60000; });
+    }
+    changed++;
+  }
+  // Extra time also counts for students who aren't writing right now
+  if (action === 'add-time' || action === 'extend-all') {
+    const m = Math.max(1, Math.min(240, Math.round(Number(minutes) || 0)));
+    for (const d of (await repo.listRecords('doc', { assignmentId: a.id })).filter(d => who.includes(d.studentId) && !live.some(s => s.docId === d.id))) {
+      await repo.updateRecord('doc', d.id, x => { x.extraTimeMs = (x.extraTimeMs || 0) + m * 60000; }); changed++;
+    }
+  }
+  if (action === 'end-all-submit') {
+    for (const d of (await repo.listRecords('doc', { assignmentId: a.id })).filter(d => who.includes(d.studentId) && d.status === 'in-progress')) {
+      await repo.updateRecord('doc', d.id, x => { x.status = 'submitted'; x.submittedAt = new Date(t).toISOString(); x.lease = null; x.reopened = false; x.submittedBy = 'teacher'; });
+      changed++;
+    }
+  }
+  res.json({ ok: true, changed });
+}));
+
 async function deleteAssignmentRecords(core, a) {
   for (const d of await repo.listRecords('doc', { assignmentId: a.id })) await repo.deleteRecords('opchunk', { docId: d.id });
   for (const k of ['doc', 'session', 'research', 'feedback']) await repo.deleteRecords(k, { assignmentId: a.id });
@@ -1913,6 +2020,82 @@ app.delete('/api/write/:docId/sources/:sourceId', ah(async (req, res) => {
   const s = await activeSessionOf(got.doc.id);
   if (s) await repo.updateRecord('session', s.id, x => sessionsLib.addEvent(x, { t: Date.now(), type: 'source-edit', sourceId: req.params.sourceId, detail: 'deleted' }));
   res.json({ sources: doc.sources });
+}));
+
+// ---- Teacher review (Section 7.8) ----
+
+async function teacherDocFor(req) {
+  const core = await repo.readCore();
+  const got = await docFor(req, core);
+  if (!got.isTeacher) throw new HttpError(403, 'Only the class teacher can review this.');
+  return { ...got, core };
+}
+
+// Every op of a document, in order
+async function allOps(docId) {
+  const chunks = await repo.listRecords('opchunk', { docId });
+  return chunks.sort((a, b) => a.no - b.no).flatMap(c => c.ops || []);
+}
+
+// The process report, cached on the document until its next op
+async function processReportFor(core, doc, a) {
+  if (doc.process && doc.process.seq === doc.seq && doc.process.v === PROCESS_VERSION) return doc.process;
+  const [ops, sessions, researchChunks, classDocs] = await Promise.all([
+    allOps(doc.id), repo.listRecords('session', { docId: doc.id }), repo.listRecords('research', { docId: doc.id }),
+    repo.listRecords('doc', { classId: doc.classId, studentId: doc.studentId })
+  ]);
+  // This student's usual pace in this class, from their other essays' reports
+  const others = classDocs.filter(d => d.id !== doc.id && d.stats?.processWpm).map(d => d.stats.processWpm).sort((x, y) => x - y);
+  const baselineWpm = others.length ? others[Math.floor(others.length / 2)] : null;
+  const report = { v: PROCESS_VERSION, ...processLib.build({ doc, ops, sessions, researchChunks, studentName: fullName(core.users[doc.studentId]), title: a?.title, baselineWpm }) };
+  await repo.updateRecord('doc', doc.id, d => {
+    if (d.seq !== report.seq) return;
+    d.process = report;
+    d.stats = { ...(d.stats || {}), processWpm: report.typing.wpm || d.stats?.processWpm || null };
+  });
+  return report;
+}
+const PROCESS_VERSION = 2;
+
+app.get('/api/review/:docId', ah(async (req, res) => {
+  const got = await teacherDocFor(req);
+  const { doc, a, cls, core } = got;
+  const report = await processReportFor(core, doc, a);
+  const sessions = (await repo.listRecords('session', { docId: doc.id })).sort((x, y) => (x.startedAt < y.startedAt ? -1 : 1));
+  // Prev / next student in roster order, among students who have a document
+  const docs = await repo.listRecords('doc', { assignmentId: doc.assignmentId });
+  const order = cls.studentIds.map(id => core.users[id]).filter(Boolean).sort((x, y) => x.lastName.localeCompare(y.lastName) || x.firstName.localeCompare(y.firstName))
+    .map(u => docs.find(d => d.studentId === u.id)).filter(Boolean);
+  const i = order.findIndex(d => d.id === doc.id);
+  const navOf = d => (d ? { docId: d.id, name: fullName(core.users[d.studentId]) } : null);
+  res.json({
+    doc: { ...docView(doc), feedback: doc.feedback || null },
+    student: publicUser(core.users[doc.studentId]),
+    assignment: { id: a.id, title: a.title, writing: a.writing, instructions: a.instructions },
+    class: { id: cls.id, name: cls.name },
+    nav: { prev: navOf(order[i - 1]), next: navOf(order[i + 1]), position: i + 1, of: order.length },
+    sessions: sessions.map(s => ({ ...sessionsLib.clientView(s, Date.now()), pauses: s.pauses, events: s.events, extension: s.extension, opsFrom: s.opsFrom, opsTo: s.opsTo })),
+    report
+  });
+}));
+
+// Feedback and score; "Return to student" (and optionally let them write again)
+app.post('/api/review/:docId/feedback', ah(async (req, res) => {
+  const got = await teacherDocFor(req);
+  const b = req.body || {};
+  const comment = typeof b.comment === 'string' ? b.comment.slice(0, 10000) : '';
+  const score = b.score === '' || b.score == null ? null : Number(b.score);
+  const outOf = b.outOf === '' || b.outOf == null ? null : Number(b.outOf);
+  if (score != null && !Number.isFinite(score)) throw new HttpError(400, 'The score must be a number');
+  if (outOf != null && (!Number.isFinite(outOf) || outOf <= 0)) throw new HttpError(400, '“Out of” must be a positive number');
+  const feedback = { comment, score, outOf, at: now(), by: got.me.id };
+  await repo.putRecord('feedback', { id: got.doc.id, docId: got.doc.id, studentId: got.doc.studentId, assignmentId: got.doc.assignmentId, classId: got.doc.classId, ...feedback, updatedAt: now() });
+  const doc = await repo.updateRecord('doc', got.doc.id, d => {
+    d.feedback = feedback;
+    if (b.returnToStudent) { d.status = 'returned'; d.returnedAt = now(); d.reopened = !!b.reopen; }
+    else if (b.reopen === false && d.status === 'returned') d.reopened = false;
+  });
+  res.json({ doc: { ...docView(doc), feedback: doc.feedback } });
 }));
 
 // The op log, for replay: the class teacher, or the student for their own doc.
