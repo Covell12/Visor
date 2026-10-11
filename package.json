@@ -6,6 +6,9 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
+    "test": "node --test \"test/*.test.js\"",
+    "sync-engine": "node scripts/sync-engine.js",
+    "predeploy": "node scripts/sync-engine.js",
     "deploy": "firebase deploy",
     "logs": "firebase functions:log"
   },
