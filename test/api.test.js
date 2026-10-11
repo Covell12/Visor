@@ -213,3 +213,65 @@ test('the classroom flow, end to end', async t => {
   r = await kim.post(`/api/write/${doc.id}/sessions`, { surfaceId: 'x' });
   assert.strictEqual(r.status, 403);
 });
+
+test('group projects: one project per group, linked Docs, extension ingest', async () => {
+  const teacher = client(), ana = client(), ben = client(), cal = client();
+  await teacher.post('/api/auth/signup', { email: 'gt@school.test', password: 'secret12', firstName: 'Gia', lastName: 'Teacher', role: 'teacher' });
+  const cls = (await teacher.post('/api/classes', { name: 'History 9' })).data.class;
+  const ids = {};
+  for (const [c, first] of [[ana, 'Ana'], [ben, 'Ben'], [cal, 'Cal']]) {
+    const r = await c.post('/api/auth/signup', { email: `${first.toLowerCase()}@school.test`, password: 'secret12', firstName: first, lastName: 'Student', role: 'student', over13: true, classCode: cls.joinCode });
+    ids[first] = r.data.user.id;
+  }
+  const docUrl = 'https://docs.google.com/document/d/1AbCdEfGhIjKlMnOpQrStUvWxYz/edit';
+  let r = await teacher.post(`/api/classes/${cls.id}/assignments`, { type: 'group', title: 'Civil rights project', group: { groups: [
+    { name: 'Group 1', studentIds: [ids.Ana, ids.Ben], docUrl },
+    { name: 'Group 2', studentIds: [ids.Cal] }
+  ] } });
+  assert.strictEqual(r.status, 200);
+  const a = r.data.assignment;
+  assert.strictEqual(a.group.projectIds.length, 2);
+  assert.strictEqual(a.group.groups[0].fileId, '1AbCdEfGhIjKlMnOpQrStUvWxYz');
+  r = await teacher.post(`/api/classes/${cls.id}/assignments`, { type: 'group', title: 'Bad', group: { groups: [{ name: 'G', studentIds: [], docUrl: 'https://example.com/doc' }] } });
+  assert.strictEqual(r.status, 400, 'only Google Docs or Slides links');
+  await teacher.post(`/api/assignments/${a.id}/publish`, {});
+
+  // The existing project view, with a breadcrumb back to the class
+  r = await ana.get(`/api/projects/${a.group.projectIds[0]}`);
+  assert.strictEqual(r.data.project.name, 'Civil rights project – Group 1');
+  assert.deepStrictEqual(r.data.project.students.map(s => s.firstName).sort(), ['Ana', 'Ben']);
+  assert.strictEqual(r.data.project.breadcrumb.className, 'History 9');
+  r = await cal.get(`/api/projects/${a.group.projectIds[0]}`);
+  assert.strictEqual(r.status, 403, 'other groups’ projects are closed');
+  r = await ana.get(`/api/assignments/${a.id}`);
+  assert.strictEqual(r.data.myGroup.name, 'Group 1');
+  r = await teacher.get(`/api/assignments/${a.id}`);
+  assert.deepStrictEqual(r.data.groups.map(g => g.resourceCount), [0, 0]);
+
+  // Renaming a group keeps its project
+  const groups = a.group.groups.map(g => ({ ...g, name: g.name === 'Group 1' ? 'Team Rosa' : g.name }));
+  r = await teacher.patch(`/api/assignments/${a.id}`, { group: { groups } });
+  assert.deepStrictEqual(r.data.assignment.group.projectIds, a.group.projectIds);
+
+  // The extension: linked Docs, then an analysis sent with the student's token
+  const X = { 'X-Visor-Token': (await ana.post('/api/ext/token')).data.token };
+  r = await ana.get('/api/ext/linked-docs', X);
+  assert.deepStrictEqual(r.data.docs.map(d => d.fileId), ['1AbCdEfGhIjKlMnOpQrStUvWxYz']);
+  const report = { schema: 'visor-export/1', meta: { fileId: '1AbCdEfGhIjKlMnOpQrStUvWxYz', kind: 'document', title: 'Civil Rights Draft', url: docUrl }, exportedAt: new Date().toISOString(),
+    analysis: { contributors: [{ id: 'u1', name: 'Ana Student', inserted: 900, deleted: 50, mutations: 300, typedChars: 850, share: 0.75 }, { id: 'u2', name: 'Ben Student', inserted: 300, deleted: 10, mutations: 90, typedChars: 300, share: 0.25 }], totals: { mutations: 390, finalWords: 210, inserted: 1200, deleted: 60 }, sessions: [], pastes: [], deletions: [] } };
+  r = await ana.post('/api/ext/ingest', { report }, X);
+  assert.strictEqual(r.status, 200);
+  assert.strictEqual(r.data.sent[0].project.name, 'Civil rights project – Team Rosa');
+  r = await ana.post('/api/ext/ingest', { report: { ...report, meta: { ...report.meta, fileId: 'notlinked' } } }, X);
+  assert.strictEqual(r.status, 404);
+  r = await teacher.get(`/api/projects/${a.group.projectIds[0]}`);
+  assert.strictEqual(r.data.project.resources.length, 1);
+  assert.strictEqual(r.data.project.resources[0].report.source, 'visor-extension');
+
+  // The old code-based route still works for anyone with the project code
+  const code = r.data.project.code;
+  r = await cal.post('/api/extension/ingest', { code, report: { ...report, meta: { ...report.meta, fileId: 'other-doc', title: 'Notes' } } });
+  assert.strictEqual(r.status, 200);
+  r = await teacher.get(`/api/projects/${a.group.projectIds[0]}`);
+  assert.strictEqual(r.data.project.resources.length, 2);
+});

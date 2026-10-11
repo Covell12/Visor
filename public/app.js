@@ -407,7 +407,10 @@ function renderProject() {
   $('emptyMain').classList.add('hidden'); $('projectView').classList.remove('hidden');
   const p = project;
   $('projName').textContent = p.name;
-  $('projMeta').innerHTML = `<span>Teacher: ${esc(p.teacher?.name || '—')}</span><span>${p.students.length} student${p.students.length !== 1 ? 's' : ''}</span>`;
+  $('projMeta').innerHTML = `<span>Teacher: ${esc(p.teacher?.name || '—')}</span><span>${p.students.length} student${p.students.length !== 1 ? 's' : ''}</span>${p.docUrl ? `<span><a href="${esc(p.docUrl)}" target="_blank" rel="noopener">Group’s Google Doc ↗</a></span>` : ''}`;
+  // Visor Classroom: a group project links back to its class and assignment
+  const bc = $('projCrumbs');
+  if (bc) bc.innerHTML = p.breadcrumb && window.crumbs ? crumbs([['Home', '/'], [p.breadcrumb.className, `/class/${p.breadcrumb.classId}`], ...(p.breadcrumb.assignmentId ? [[p.breadcrumb.assignmentTitle, `/a/${p.breadcrumb.assignmentId}?tab=groups`]] : []), [p.name]]) : '';
 
   const actions = [];
   if (p.isTeacher && !p.isDemo) {
@@ -1356,10 +1359,13 @@ function renderAnalysis() {
     <div class="card stat"><div class="kicker">Fairness</div><div class="v">${a.fairnessScore ?? '—'}<small>/100</small></div><div class="d">100 = perfectly even split</div></div>
   </div>`;
 
-  if (ai?.executiveSummary) h += `<div class="card card-pad rise" style="margin-bottom:14px;background:linear-gradient(180deg,#F5FBFD,#fff);"><div class="kicker" style="margin-bottom:6px;display:flex;align-items:center;gap:6px;">${I.sparkle} The short version</div><div style="font-size:15.5px;line-height:1.6;">${esc(ai.executiveSummary)}</div></div>`;
+  // Visor Classroom: the measured numbers come first, then everything Gemini wrote, each labelled
+  h += measuredSection(a);
+  h += habitsSection(a);
+  if (ai?.executiveSummary) h += `<div class="card card-pad rise" style="margin-bottom:14px;background:linear-gradient(180deg,#F5FBFD,#fff);"><div class="kicker" style="margin-bottom:6px;display:flex;align-items:center;gap:6px;">${I.sparkle} The short version ${AI_LABEL}</div><div style="font-size:15.5px;line-height:1.6;">${esc(ai.executiveSummary)}</div></div>`;
 
   if (ai?.workload?.length) {
-    h += `<div class="card card-pad rise" style="margin-bottom:14px;"><div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:18px;"><h3 class="section-title">Estimated workload</h3><span class="tiny muted mono">from every source</span></div><div class="workload">`;
+    h += `<div class="card card-pad rise" style="margin-bottom:14px;"><div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:18px;"><h3 class="section-title">Estimated workload ${AI_LABEL}</h3><span class="tiny muted mono">from every source</span></div><div class="workload">`;
     ai.workload.forEach((w, i) => {
       const c = (a.contributors || []).find(x => x.name.toLowerCase().replace(/[^a-z0-9]/g, '') === w.name.toLowerCase().replace(/[^a-z0-9]/g, ''));
       h += `<div class="wl" style="--c:${personColor(projectPerson(w.name), i)}"><div class="role-ic">${roleIcon(w.role)}</div><div>
@@ -1373,19 +1379,18 @@ function renderAnalysis() {
     h += `</div></div>`;
   }
 
-  h += habitsSection(a);
 
-  if (ai?.whoDidWhat?.length) h += `<div class="card card-pad rise" style="margin-bottom:14px;"><h3 class="section-title" style="margin-bottom:8px;">Who did what</h3>${ai.whoDidWhat.map(t => `<div class="task"><div>${esc(t.task)}</div><div class="o">${esc(t.owner)}</div>${srcPill(t.source)}</div>`).join('')}</div>`;
+  if (ai?.whoDidWhat?.length) h += `<div class="card card-pad rise" style="margin-bottom:14px;"><h3 class="section-title" style="margin-bottom:8px;">Who did what ${AI_LABEL}</h3>${ai.whoDidWhat.map(t => `<div class="task"><div>${esc(t.task)}</div><div class="o">${esc(t.owner)}</div>${srcPill(t.source)}</div>`).join('')}</div>`;
 
-  if (ai?.recordingInsights?.length) h += `<div class="rise" style="margin-bottom:14px;"><h3 class="section-title" style="margin-bottom:10px;">From the recordings</h3><div class="stack">${ai.recordingInsights.map(r => `<div class="card card-pad"><div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;">${srcPill('recording')}<b>${esc(r.title)}</b></div><div style="font-size:14.5px;">${esc(r.summary)}</div>${r.speakers?.length ? `<div class="chips" style="margin-top:10px;">${r.speakers.map(s => `<span class="pill pill-gray">${esc(s.name)} · ${s.share}% of talk time</span>`).join('')}</div>` : ''}</div>`).join('')}</div></div>`;
+  if (ai?.recordingInsights?.length) h += `<div class="rise" style="margin-bottom:14px;"><h3 class="section-title" style="margin-bottom:10px;">From the recordings ${AI_LABEL}</h3><div class="stack">${ai.recordingInsights.map(r => `<div class="card card-pad"><div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;">${srcPill('recording')}<b>${esc(r.title)}</b></div><div style="font-size:14.5px;">${esc(r.summary)}</div>${r.speakers?.length ? `<div class="chips" style="margin-top:10px;">${r.speakers.map(s => `<span class="pill pill-gray">${esc(s.name)} · ${s.share}% of talk time</span>`).join('')}</div>` : ''}</div>`).join('')}</div></div>`;
 
   if (ai && (ai.groupDynamics || ai.concerns?.length)) {
     h += `<div class="two-col rise" style="margin-bottom:14px;">`;
-    if (ai.groupDynamics) h += `<div class="card card-pad"><div class="kicker" style="margin-bottom:6px;">How the group worked</div><div style="font-size:14.5px;">${esc(ai.groupDynamics)}</div></div>`;
-    if (ai.concerns?.length) h += `<div class="callout amber"><div class="kicker" style="color:var(--amber);">Worth a look</div><ul>${ai.concerns.map(c => `<li>${esc(c)}</li>`).join('')}</ul></div>`;
+    if (ai.groupDynamics) h += `<div class="card card-pad"><div class="kicker" style="margin-bottom:6px;">How the group worked ${AI_LABEL}</div><div style="font-size:14.5px;">${esc(ai.groupDynamics)}</div></div>`;
+    if (ai.concerns?.length) h += `<div class="callout amber"><div class="kicker" style="color:var(--amber);">Worth a look ${AI_LABEL}</div><ul>${ai.concerns.map(c => `<li>${esc(c)}</li>`).join('')}</ul></div>`;
     h += `</div>`;
   }
-  if (ai?.bottomLine) h += `<div class="callout dark rise" style="margin-bottom:14px;"><div class="kicker">Bottom line</div><div style="font-size:15.5px;margin-top:4px;">${esc(ai.bottomLine)}</div></div>`;
+  if (ai?.bottomLine) h += `<div class="callout dark rise" style="margin-bottom:14px;"><div class="kicker">Bottom line ${AI_LABEL}</div><div style="font-size:15.5px;margin-top:4px;">${esc(ai.bottomLine)}</div></div>`;
 
   if (a.perResource?.length) {
     h += `<div class="rise"><h3 class="section-title" style="margin-bottom:10px;">By resource</h3><div class="stack">` + a.perResource.map(pr => {
@@ -1398,6 +1403,23 @@ function renderAnalysis() {
   }
   if (!ai) h += `<div class="callout amber rise">The report text could not be written (see above). The numbers are from the raw data.</div>`;
   content.innerHTML = h;
+}
+
+// Every AI-written passage says so (Visor Classroom, Section 0 rule 5)
+const AI_LABEL = '<span class="ai-label">AI-written summary</span>';
+
+// Per-member numbers counted from the sources, no AI involved: shown above
+// Gemini's summary, labelled "Measured".
+function measuredSection(a) {
+  const rows = (a.contributors || []).filter(c => c.isMember !== false);
+  if (!rows.length) return '';
+  return `<div class="card card-pad rise" style="margin-bottom:14px;">
+    <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:12px;"><h3 class="section-title">Measured</h3><span class="tiny muted">counted from the documents and recordings, not written by AI</span></div>
+    <div class="hb-wrap"><table class="hb"><thead><tr><th>Person</th><th>Share of document writing</th><th>Edits</th><th>Words added</th><th>Words removed</th><th>In recordings</th></tr></thead>
+    <tbody>${rows.map((c, i) => `<tr><td><div class="hb-name"><span class="avatar avatar-sm" style="background:${personColor(projectPerson(c.name), i)}">${initials(c.name)}</span><span>${esc(c.name)}</span></div></td>
+      <td class="mono">${c.extPct ?? 0}%</td><td class="mono">${fmtN(c.extRevisions)}</td><td class="mono">${fmtN(c.extWordsAdded)}</td><td class="mono">${fmtN(c.extWordsRemoved)}</td><td>${c.inRecordings ? 'yes' : '—'}</td></tr>`).join('')}</tbody></table></div>
+    ${a.silentMembers?.length ? `<div class="small muted" style="margin-top:8px;">No activity in any source: ${a.silentMembers.map(esc).join(', ')}.</div>` : ''}
+  </div>`;
 }
 
 // How each person wrote, from the extension's edit-by-edit figures, across all documents

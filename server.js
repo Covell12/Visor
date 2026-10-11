@@ -699,7 +699,14 @@ function publicProject(core, project, me, { resources, resourceCount } = {}) {
   return out;
 }
 async function fullProject(core, project, me) {
-  return publicProject(core, project, me, { resources: await projectResources(project) });
+  const out = publicProject(core, project, me, { resources: await projectResources(project) });
+  // Visor Classroom: a group project links back to its class and assignment
+  if (project.classId && own(core.classes, project.classId)) {
+    const a = project.assignmentId ? await repo.getRecord('assignment', project.assignmentId) : null;
+    out.breadcrumb = { classId: project.classId, className: core.classes[project.classId].name, assignmentId: a?.id || null, assignmentTitle: a?.title || null };
+    out.docUrl = project.docUrl || null;
+  }
+  return out;
 }
 
 app.get('/api/projects', requireAuth, ah(async (req, res) => {
@@ -2260,6 +2267,46 @@ app.post('/api/ext/cite/format', (req, res) => {
   res.json({ text: f.text, html: f.html, inText: f.inText, check: f.check, style });
 });
 
+// ---- Group documents (Section 8.7) ----
+// Projects this person belongs to (as student or teacher)
+const projectsOf = (core, u) => Object.values(core.projects).filter(p => p.teacherId === u.id || p.studentIds.includes(u.id));
+
+// Google Docs linked to the person's group projects: [{ fileId, projectId, title }]
+app.get('/api/ext/linked-docs', extAuth, (req, res) => {
+  const list = projectsOf(req.core, req.extUser).filter(p => p.fileId).map(p => ({ fileId: p.fileId, projectId: p.id, title: p.name }));
+  res.json({ docs: list });
+});
+
+// The person's projects, for the side panel's "Send to Visor" list
+app.get('/api/ext/projects', extAuth, (req, res) => {
+  const list = projectsOf(req.core, req.extUser).sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1)).slice(0, 100).map(p => ({ id: p.id, name: p.name, fileId: p.fileId || null }));
+  res.json({ projects: list });
+});
+
+// A report from the extension, signed in: { report, projectId? }. Without a
+// projectId it goes to every project of this person's that links this Doc.
+// (The code-based /api/extension/ingest still works for anyone not connected.)
+app.post('/api/ext/ingest', extAuth, ah(async (req, res) => {
+  const norm = normalizeReport(req.body?.report);
+  if (!norm) throw new HttpError(400, 'report is missing or not in a recognized shape');
+  const mine = projectsOf(req.core, req.extUser);
+  let targets;
+  if (req.body?.projectId) {
+    const p = mine.find(x => x.id === req.body.projectId);
+    if (!p) throw new HttpError(404, 'You’re not in that project.');
+    targets = [p];
+  } else {
+    targets = norm.fileId ? mine.filter(p => p.fileId === norm.fileId) : [];
+    if (!targets.length) throw new HttpError(404, 'This document isn’t linked to any of your projects.');
+  }
+  const out = [];
+  for (const p of targets) {
+    const r = await upsertDocumentResource(p, norm, req.extUser.id, fullName(req.extUser));
+    out.push({ project: { id: p.id, name: p.name }, resource: { id: r.id, title: r.title } });
+  }
+  res.json({ ok: true, sent: out });
+}));
+
 // Copy events this student made for this assignment, for paste origins
 async function researchCopiesFor(studentId, assignmentId) {
   const chunks = await repo.listRecords('research', { studentId, assignmentId });
@@ -2267,10 +2314,42 @@ async function researchCopiesFor(studentId, assignmentId) {
   return research.copiesFrom(chunks).filter(c => c.t >= since);
 }
 
-// Group projects and discussions arrive in SECTIONS 11 and 14 (phases 12, 13).
-async function syncGroupProjects() {}
-async function groupRows() { return []; }
-async function myGroupFor() { return null; }
+// ---- Group projects (Section 9) ----
+// Each group of a group-project assignment is an ordinary project (SECTIONS
+// 7–9 unchanged), tagged with its class and assignment and the group's
+// linked Google Doc. Saving the assignment creates or updates them; a group
+// removed from the assignment keeps its project (and anything in it).
+async function syncGroupProjects(a, cls, teacher) {
+  const groups = a.group?.groups || [];
+  const ids = await repo.withCore(core => {
+    return groups.map(g => {
+      let p = g.projectId ? own(core.projects, g.projectId) : null;
+      if (!p) {
+        p = { id: uid(), orgId: teacher.orgId || null, teacherId: cls.teacherId, studentIds: [], code: newProjectCode(core), showAnalysis: false, createdAt: now() };
+        core.projects[p.id] = p;
+      }
+      Object.assign(p, { name: `${a.title} – ${g.name}`.slice(0, 120), studentIds: [...g.studentIds], classId: cls.id, assignmentId: a.id, groupId: g.id, fileId: g.fileId || null, docUrl: g.docUrl || '' });
+      return p.id;
+    });
+  });
+  await repo.updateRecord('assignment', a.id, x => {
+    x.group.groups = groups.map((g, i) => ({ ...g, projectId: ids[i] }));
+    x.group.projectIds = ids;
+  });
+}
+async function groupRows(core, a) {
+  const groups = a.group?.groups || [];
+  const counts = await repo.countResources(groups.map(g => g.projectId).filter(Boolean));
+  return groups.map(g => {
+    const p = g.projectId ? own(core.projects, g.projectId) : null;
+    return { id: g.id, name: g.name, students: g.studentIds.map(id => publicUser(core.users[id])).filter(Boolean), docUrl: g.docUrl, fileId: g.fileId, projectId: p ? p.id : null, resourceCount: p ? counts[p.id] || 0 : 0, lastAnalyzedAt: p?.lastAnalyzedAt || null };
+  });
+}
+async function myGroupFor(core, a, me) {
+  const g = (await groupRows(core, a)).find(x => x.students.some(s => s.id === me.id));
+  return g || null;
+}
+// Discussions arrive in SECTION 14
 async function discussionRows() { return []; }
 async function myDiscussionStats() { return null; }
 
