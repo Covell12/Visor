@@ -161,7 +161,7 @@ async function sessionStart(payload, sender) {
 async function sessionEnd(reason) {
   const s = await getState();
   if (s && s.active) {
-    await closeCurrentVisit(s, Date.now());
+    await withState((x) => closeCurrentVisit(x, Date.now())).catch(() => {});
     await flushResearch().catch(() => {});
   }
   await stopResearchCapture();
@@ -266,11 +266,182 @@ async function permissionAnswered(granted) {
 }
 
 // ── Research capture (Section 8.3) ─────────────────────────────────────────
-// Filled in with research capture: visit / leave / search / copy / AI sites.
-async function startResearchCapture() {}
-async function stopResearchCapture() {}
-async function closeCurrentVisit() {}
-async function flushResearch() {}
+//
+// Only while a session is active and its assignment records research, and only
+// with the optional <all_urls> permission. Events:
+//   visit   a page became the one the student is looking at
+//   leave   it stopped being that page (with how long it was open: dwellMs)
+//   search  a search on one of the engines research.js knows (deduplicated over 10 s)
+//   copy    20+ characters copied from a page (hash, length, first 140 characters)
+//   ai-site a visit to a site on the assignment's AI list (blocked or not)
+//   blocked / cite  (from the lockdown and the cite button)
+// They queue in session storage and go to the server every minute, 200 at a time.
+
+const CAPTURE_ID = 'visor-research';
+const QUEUE_MAX = 5000;
+const SEARCH_DEDUPE_MS = 10_000;
+
+// Session state changes one at a time: events arrive faster than storage writes
+let stateChain = Promise.resolve();
+function withState(fn) {
+  const run = stateChain.then(async () => {
+    const s = await getState();
+    if (!s || !s.active) return null;
+    const out = await fn(s);
+    await setState(s);
+    return out;
+  });
+  stateChain = run.catch(() => {});
+  return run;
+}
+
+const hostOf = (url) => { try { return new URL(url).hostname.toLowerCase(); } catch (_) { return ''; } };
+const capUrl = (url) => String(url || '').slice(0, 2000);
+
+function queueEvent(s, ev) {
+  s.researchQueue = s.researchQueue || [];
+  if (s.researchQueue.length >= QUEUE_MAX) s.researchQueue.shift();
+  s.researchQueue.push({ t: Date.now(), ...ev });
+}
+
+async function startResearchCapture() {
+  try {
+    const have = await chrome.scripting.getRegisteredContentScripts({ ids: [CAPTURE_ID] });
+    if (!have.length) {
+      await chrome.scripting.registerContentScripts([{ id: CAPTURE_ID, js: ['cite.js', 'research-capture.js'], matches: ['<all_urls>'], runAt: 'document_idle', allFrames: false, persistAcrossSessions: false }]);
+    }
+  } catch (_) { /* no permission: nothing recorded */ }
+  // Pages already open don't get registered scripts until they reload
+  const tabs = await chrome.tabs.query({}).catch(() => []);
+  for (const t of tabs) {
+    if (!VisorResearch.isRecordable(t.url || '', VisorConfig.VISOR_WEB_ORIGINS)) continue;
+    chrome.scripting.executeScript({ target: { tabId: t.id }, files: ['cite.js', 'research-capture.js'] }).catch(() => {});
+  }
+  await focusChanged();
+}
+
+async function stopResearchCapture() {
+  await chrome.scripting.unregisterContentScripts({ ids: [CAPTURE_ID] }).catch(() => {});
+}
+
+// The page the student is looking at changed: close the old visit, open the new one
+async function closeCurrentVisit(s, now) {
+  const cur = s.current;
+  if (!cur) return;
+  let title = cur.title;
+  try { const t = await chrome.tabs.get(cur.tabId); if (t && t.url === cur.url && t.title) title = t.title; } catch (_) {}
+  queueEvent(s, { type: 'leave', url: cur.url, host: cur.host, title: String(title || '').slice(0, 300), dwellMs: Math.max(0, now - cur.since), t: now });
+  s.current = null;
+}
+function openVisit(s, tab, now) {
+  if (!tab || !VisorResearch.isRecordable(tab.url || '', VisorConfig.VISOR_WEB_ORIGINS)) return;
+  s.current = { tabId: tab.id, url: capUrl(tab.url), host: hostOf(tab.url), title: String(tab.title || '').slice(0, 300), since: now };
+  queueEvent(s, { type: 'visit', url: s.current.url, host: s.current.host, title: s.current.title, t: now });
+}
+
+// Which tab the student is looking at right now (focused window, active tab)
+async function lookingAt() {
+  try {
+    const win = await chrome.windows.getLastFocused({ populate: true });
+    if (!win || !win.focused) return null;
+    return (win.tabs || []).find((t) => t.active) || null;
+  } catch (_) { return null; }
+}
+
+async function focusChanged() {
+  const tab = await lookingAt();
+  await withState(async (s) => {
+    if (!s.recording) return;
+    const now = Date.now();
+    if (s.current && tab && s.current.tabId === tab.id && s.current.url === capUrl(tab.url)) return;
+    await closeCurrentVisit(s, now);
+    if (tab) openVisit(s, tab, now);
+  });
+}
+
+// A main-frame navigation committed: a new page (and maybe a search)
+async function navigated(details) {
+  if (details.frameId !== 0) return;
+  await withState(async (s) => {
+    if (!s.recording) return;
+    const now = Date.now();
+    const search = VisorResearch.parseSearch(details.url);
+    if (search) {
+      const last = s.lastSearch;
+      if (!(last && last.engine === search.engine && last.query === search.query && now - last.t < SEARCH_DEDUPE_MS)) {
+        queueEvent(s, { type: 'search', url: capUrl(details.url), host: hostOf(details.url), query: search.query, engine: search.engine, t: now });
+      }
+      s.lastSearch = { ...search, t: now };
+    }
+  });
+  const tab = await lookingAt();
+  if (tab && tab.id === details.tabId) await focusChanged();
+}
+
+// Before a main-frame navigation: AI sites are recorded even when the lockdown
+// is about to redirect them to blocked.html (so the commit never shows them).
+async function beforeNavigate(details) {
+  if (details.frameId !== 0) return;
+  await withState(async (s) => {
+    const hit = VisorResearch.siteMatch(details.url, s.settings.blockedSites);
+    if (!hit) return;
+    const blocked = !!s.settings.blockAiSites || (s.settings.mode === 'locked' && s.lockActive && (s.settings.allowedSites || []).length > 0);
+    const ev = { type: 'ai-site', url: capUrl(details.url), host: hostOf(details.url), site: hit, blocked };
+    // Recorded with or without research tracking: it's part of the session
+    queueEvent(s, ev);
+  });
+}
+
+async function copied(msg, sender) {
+  const url = (sender && sender.tab && sender.tab.url) || msg.url;
+  if (!VisorResearch.isRecordable(url || '', VisorConfig.VISOR_WEB_ORIGINS)) return;
+  const text = String(msg.text || '');
+  const norm = text.replace(/\s+/g, ' ').trim();
+  if (norm.length < 20) return;
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(norm));
+  const hash = [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
+  await withState(async (s) => {
+    if (!s.recording) return;
+    queueEvent(s, { type: 'copy', url: capUrl(url), host: hostOf(url), title: String(msg.title || (sender.tab && sender.tab.title) || '').slice(0, 300), copy: { hash, len: Number(msg.len) || text.length, preview: text.slice(0, 140) } });
+  });
+}
+
+// Send queued events to the server, 200 at a time. They stay queued (in
+// session storage, which survives the worker sleeping) until the server has them.
+let flushing = false;
+async function flushResearch() {
+  if (flushing) return;
+  flushing = true;
+  try {
+    for (let i = 0; i < 10; i++) {
+      const s = await getState();
+      if (!s || !s.researchQueue || !s.researchQueue.length) return;
+      const batch = s.researchQueue.slice(0, 200);
+      try {
+        await visorApi('/api/ext/research', { method: 'POST', body: { sessionToken: s.sessionToken, docId: s.docId, events: batch }, origin: s.origin });
+      } catch (e) {
+        if (e.status === 401 && e.data && e.data.reconnect) { await disconnectedByServer(); return; }
+        if (e.status === 410) { await withState((x) => { x.researchQueue = []; }); return; }
+        return; // try again on the next alarm
+      }
+      await stateChain;
+      const now = await getState();
+      if (!now) return;
+      now.researchQueue = (now.researchQueue || []).slice(batch.length);
+      now.lastFlush = new Date().toISOString();
+      await setState(now);
+    }
+  } finally { flushing = false; }
+}
+
+chrome.webNavigation.onCommitted.addListener((d) => { navigated(d).catch(() => {}); });
+chrome.webNavigation.onBeforeNavigate && chrome.webNavigation.onBeforeNavigate.addListener((d) => { beforeNavigate(d).catch(() => {}); });
+chrome.tabs.onActivated.addListener(() => { focusChanged().catch(() => {}); });
+chrome.windows.onFocusChanged.addListener(() => { focusChanged().catch(() => {}); });
+chrome.runtime.onMessage.addListener((msg, sender) => {
+  if (msg && msg.type === 'VISOR_RESEARCH_COPY') copied(msg, sender).catch(() => {});
+  return false;
+});
 
 // ── Lockdown (Section 8.4) ─────────────────────────────────────────────────
 // Filled in with lockdown: declarativeNetRequest rules and tab bouncing.
