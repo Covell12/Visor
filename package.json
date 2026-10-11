@@ -1,7 +1,7 @@
 {
   "name": "visor",
-  "version": "6.0.0",
-  "description": "See who actually did the work. Group-project recordings + Google Docs history → a fair report.",
+  "version": "7.0.0",
+  "description": "Visor Classroom: writing sessions, research, citations, group projects and class discussions, with the whole process visible to the teacher.",
   "main": "index.js",
   "scripts": {
     "start": "node server.js",

@@ -29,6 +29,9 @@ test.before(async () => {
 });
 test.after(() => { server.close(); fs.rmSync(DATA, { recursive: true, force: true }); });
 
+const base_ = () => base;
+const cookieOf = async c => c.cookie();
+
 // A signed-in person: keeps the __session cookie between calls
 function client() {
   let cookie = '';
@@ -40,7 +43,7 @@ function client() {
     try { data = await r.json(); } catch {}
     return { status: r.status, data };
   };
-  return { get: (u, h) => call('GET', u, null, h), post: (u, b, h) => call('POST', u, b || {}, h), patch: (u, b) => call('PATCH', u, b), del: (u, b) => call('DELETE', u, b) };
+  return { get: (u, h) => call('GET', u, null, h), post: (u, b, h) => call('POST', u, b || {}, h), patch: (u, b) => call('PATCH', u, b), del: (u, b) => call('DELETE', u, b), cookie: () => cookie };
 }
 
 test('the classroom flow, end to end', async t => {
@@ -274,4 +277,85 @@ test('group projects: one project per group, linked Docs, extension ingest', asy
   assert.strictEqual(r.status, 200);
   r = await teacher.get(`/api/projects/${a.group.projectIds[0]}`);
   assert.strictEqual(r.data.project.resources.length, 2);
+});
+
+test('privacy: research retention, deleting a student’s data, and Download my data', async () => {
+  const repo = require('../lib/repo');
+  const teacher = client(), stu = client(), other = client();
+  await teacher.post('/api/auth/signup', { email: 'pt@school.test', password: 'secret12', firstName: 'Pat', lastName: 'Teacher', role: 'teacher' });
+  const cls = (await teacher.post('/api/classes', { name: 'Biology' })).data.class;
+  await teacher.patch(`/api/classes/${cls.id}`, { researchRetentionDays: 30 });
+  const me = (await stu.post('/api/auth/signup', { email: 'ps@school.test', password: 'secret12', firstName: 'Pia', lastName: 'Student', role: 'student', over13: true, classCode: cls.joinCode })).data.user;
+  await other.post('/api/auth/signup', { email: 'po@school.test', password: 'secret12', firstName: 'Olu', lastName: 'Other', role: 'student', over13: true, classCode: cls.joinCode });
+  const a = (await teacher.post(`/api/classes/${cls.id}/assignments`, { type: 'writing', title: 'Lab report', writing: { mode: 'open' } })).data.assignment;
+  await teacher.post(`/api/assignments/${a.id}/publish`, {});
+  const doc = (await stu.get(`/api/write/${a.id}`)).data.doc;
+  await other.get(`/api/write/${a.id}`);
+  const s = (await stu.post(`/api/write/${doc.id}/sessions`, { surfaceId: 't', surf: 'tab' })).data;
+  await stu.post(`/api/write/${doc.id}/ops`, { baseSeq: 0, ops: [{ k: 'i', at: 0, s: 'Mitochondria', t: Date.now(), src: 'type' }], surfaceId: 't' }, { 'X-Visor-Session': s.token });
+
+  // Research records: one fresh, one older than the class's 30 days
+  const base = { sessionId: s.session.id, docId: doc.id, studentId: me.id, assignmentId: a.id, classId: cls.id, no: 0 };
+  await repo.putRecord('research', { id: `${s.session.id}:0000`, ...base, events: [{ t: Date.now(), type: 'visit', url: 'https://new.example/' }], updatedAt: new Date().toISOString() });
+  await repo.putRecord('research', { id: `${s.session.id}:0001`, ...base, no: 1, events: [{ t: Date.now() - 40 * 864e5, type: 'visit', url: 'https://old.example/' }], updatedAt: new Date(Date.now() - 40 * 864e5).toISOString() });
+  assert.ok(await app.runRetentionSweep() >= 1);
+  const left = await repo.listRecords('research', { docId: doc.id });
+  assert.deepStrictEqual(left.map(r => r.events[0].url), ['https://new.example/']);
+
+  // Download my data: the student's own essay, its edit log and research
+  let r = await fetch(`${base_()}/api/me/export`, { headers: { Cookie: await cookieOf(stu) } });
+  assert.match(r.headers.get('content-disposition'), /attachment; filename="visor-my-data-/);
+  const data = await r.json();
+  assert.strictEqual(data.account.email, 'ps@school.test');
+  assert.strictEqual(data.documents.length, 1);
+  assert.strictEqual(data.documents[0].text, 'Mitochondria');
+  assert.strictEqual(data.documents[0].editLog.length, 1);
+  assert.strictEqual(data.documents[0].research[0].url, 'https://new.example/');
+  assert.ok(!JSON.stringify(data).includes('po@school.test'), 'nothing about other students');
+
+  // The teacher deletes this student's work in the class
+  r = await teacher.del(`/api/classes/${cls.id}/students/${me.id}/data`);
+  assert.strictEqual(r.status, 200);
+  assert.strictEqual(await repo.getRecord('doc', doc.id), null);
+  assert.deepStrictEqual(await repo.listRecords('research', { docId: doc.id }), []);
+  assert.deepStrictEqual(await repo.listRecords('session', { docId: doc.id }), []);
+  assert.strictEqual((await repo.listRecords('doc', { assignmentId: a.id })).length, 1, 'other students’ work stays');
+
+  // Deleting the class asks for its name, then removes everything in it
+  r = await teacher.del(`/api/classes/${cls.id}`, { confirmName: 'nope' });
+  assert.strictEqual(r.status, 400);
+  r = await teacher.del(`/api/classes/${cls.id}`, { confirmName: 'Biology' });
+  assert.strictEqual(r.status, 200);
+  assert.deepStrictEqual(await repo.listRecords('assignment', { classId: cls.id }), []);
+  assert.deepStrictEqual(await repo.listRecords('doc', { classId: cls.id }), []);
+});
+
+test('time limits: extra time is applied, and time-up submits automatically', async () => {
+  const repo = require('../lib/repo');
+  const teacher = client(), stu = client();
+  await teacher.post('/api/auth/signup', { email: 'tt@school.test', password: 'secret12', firstName: 'Tim', lastName: 'Teacher', role: 'teacher' });
+  const cls = (await teacher.post('/api/classes', { name: 'Timed' })).data.class;
+  const me = (await stu.post('/api/auth/signup', { email: 'ts@school.test', password: 'secret12', firstName: 'Tia', lastName: 'Student', role: 'student', over13: true, classCode: cls.joinCode })).data.user;
+  await teacher.patch(`/api/classes/${cls.id}`, { accommodations: { [me.id]: { timeMultiplier: 1.5, note: 'IEP' } } });
+  const a = (await teacher.post(`/api/classes/${cls.id}/assignments`, { type: 'writing', title: 'Timed write', writing: { mode: 'open', timeLimitMin: 20, autoSubmitOnTimeUp: true } })).data.assignment;
+  await teacher.post(`/api/assignments/${a.id}/publish`, {});
+  const doc = (await stu.get(`/api/write/${a.id}`)).data.doc;
+  let r = await stu.post(`/api/write/${doc.id}/sessions`, { surfaceId: 't', surf: 'tab' });
+  const left = Date.parse(r.data.session.deadlineAt) - Date.parse(r.data.serverNow);
+  assert.ok(Math.abs(left - 30 * 60e3) < 5000, `20 min × 1.5 = 30 min (got ${Math.round(left / 1000)} s)`);
+  const H = { 'X-Visor-Session': r.data.token };
+  // The teacher adds 5 minutes from the live board
+  await teacher.post(`/api/assignments/${a.id}/live/action`, { action: 'add-time', studentIds: [me.id], minutes: 5 });
+  r = await stu.post(`/api/write/${doc.id}/beat`, { surfaceId: 't', surf: 'tab', focused: true, visible: true }, H);
+  assert.ok(Math.abs(Date.parse(r.data.deadlineAt) - Date.parse(r.data.serverNow) - 35 * 60e3) < 5000);
+  // Time runs out (the deadline is moved into the past rather than waiting 35 minutes)
+  await repo.updateRecord('session', r.data.id, s => { s.deadlineAt = new Date(Date.now() - 1000).toISOString(); });
+  r = await stu.post(`/api/write/${doc.id}/ops`, { baseSeq: 0, ops: [{ k: 'i', at: 0, s: 'late', t: Date.now(), src: 'type' }], surfaceId: 't' }, H);
+  assert.strictEqual(r.status, 409, 'no writing after the deadline');
+  assert.strictEqual(r.data.session.endReason, 'time-limit');
+  r = await stu.get(`/api/write/${a.id}`);
+  assert.strictEqual(r.data.doc.status, 'submitted');
+  assert.strictEqual(r.data.doc.autoSubmitted, true);
+  r = await stu.post(`/api/write/${doc.id}/sessions`, { surfaceId: 't2', surf: 'tab' });
+  assert.strictEqual(r.status, 409, 'no new session once submitted');
 });

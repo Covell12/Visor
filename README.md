@@ -1,6 +1,17 @@
-# Visor (v6)
+# Visor Classroom (v7)
 
-See who actually did the work. Teachers create a project and add their students. Visor combines the group's meeting recordings with their Google Docs or Slides history into a fair, evidence-based report of who contributed what.
+A writing and research platform for middle and high school classes. Students write in Visor's own editor during teacher-started writing sessions (in-class essays that replace handwritten ones, or homework); Visor records the whole writing process, and the Visor Chrome extension records research during the session, keeps locked sessions on allowed sites, and adds citations in one click. Around that: classes and rosters, group projects (the original Visor: Google Docs history, Drive import, meeting recordings, an AI-written contribution summary), and recorded class discussions.
+
+Visor shows what was measured (what was typed, pasted, from where, when, how long the student was away) and leaves the judgment to the teacher. It never labels writing as AI-generated or gives a probability. Gemini is used only to transcribe recordings and to write the group-project and discussion summaries, and every AI-written passage says so.
+
+**New in v7 (Visor Classroom):**
+- **Classes:** create, rename, archive, delete; a join code (rotate it, close joining); add students by email, with invites for addresses that don't have an account yet (they join when they sign up); extra time per student; optional Google Classroom roster import.
+- **Assignments:** Writing (presets: *In-class essay (locked)* and *Homework essay (open)*), Group project, Discussion. Publish / unpublish, duplicate to another class.
+- **Visor Writer** (`/write/:id`): a Quill editor where every edit becomes an op the server applies to its own copy of the text; writing sessions with focus pauses, time limits, session windows, accommodations, paste rules, offline queueing, a lease so only one surface (the tab or the extension's side panel) writes at a time, and citations with Works Cited in MLA, APA or Chicago.
+- **Teacher tools:** a live session board (pause, message, add time, end, for one student or everyone), and a review page per essay: the document with "Color by source", a keystroke replay, a process report built on the same engine as the extension, the research log, feedback and scores, and print / save as PDF.
+- **Group projects in classes:** one project per group, with the group's Google Doc linked; the connected extension sends that Doc's history automatically.
+- **Class discussions:** record in the browser (10-minute segments) or upload; voices matched to the roster; measured talk time, turns and who-follows-whom; a labelled AI-written summary.
+- **Privacy:** research retention per class (180 days by default), teachers delete a student's data, students download their own data, an under-13 gate at sign-up. See `/privacy`.
 
 **New in v6:**
 - **Runs on Firebase.** Hosting serves the site, Cloud Functions runs the server, Firestore keeps accounts and projects, and Cloud Storage keeps recordings (private).
@@ -57,7 +68,12 @@ In **console.cloud.google.com** (same project):
 
 ### 7. Point the Chrome extension at the new address
 
-In the extension's `sidepanel.js`, change `VISOR_WEB_URL` to `https://YOUR-PROJECT.web.app`, raise the version in `manifest.json`, and upload the update. In the Chrome Web Store listing, change the privacy policy URL to `https://YOUR-PROJECT.web.app/privacy`.
+The extension only talks to the Visor addresses it lists, in two places that must match exactly:
+
+1. `extension/config.js`: add `https://YOUR-PROJECT.web.app` (and the `firebaseapp.com` one) to `VISOR_WEB_ORIGINS`, and set `VISOR_DEFAULT_ORIGIN` to it.
+2. `extension/manifest.json`: add `https://YOUR-PROJECT.web.app/*` (and `https://YOUR-PROJECT.firebaseapp.com/*`) to the `matches` of the content script whose `js` is `site-bridge.js`.
+
+Raise the version in `manifest.json` and upload the update. In the Chrome Web Store listing, change the privacy policy URL to `https://YOUR-PROJECT.web.app/privacy`. The same applies to a custom domain: list it in both places. (The server needs nothing for this: `/api/ext/*` accepts any `chrome-extension://` origin, without cookies.)
 
 ### Optional: shut off spending at a limit
 
@@ -85,14 +101,53 @@ npm install
 npm start
 ```
 
-Then open http://localhost:3000. Put `GEMINI_API_KEY` (and `SESSION_SECRET` if you share the server) in a file named `.env.local`. Data goes in `data/` (an embedded database and the audio files).
+Then open http://localhost:3000. Put `GEMINI_API_KEY` (and `SESSION_SECRET` if you share the server) in a file named `.env.local`. Data goes in `data/` (an embedded database and the audio files). Without a Gemini key everything works except transcription and the AI-written summaries, which say they're unavailable.
 
-## How it works
+### With the extension
+
+1. Start the web app (above). For quick testing, `VISOR_DEV_LOGIN=1 npm start` and sign in at `http://localhost:3000/dev/login?email=…` (an account with that email must exist).
+2. In Chrome, open `chrome://extensions`, turn on **Developer mode**, **Load unpacked**, and choose the `extension/` folder (the repo next to this one). `http://localhost:3000` is already in its `config.js` and `manifest.json`.
+3. Sign in to the web app as a student and open **Connect extension** on Home (`/extension/connect`).
+4. Open a writing assignment and start a session: the extension's icon shows **REC**, its side panel holds your essay, and **Cite this page** (or Alt+Shift+C) cites the page you're on.
+
+### Settings (`.env`, `.env.local`)
+
+| Variable | What it does |
+|---|---|
+| `GOOGLE_CLIENT_ID`, `GOOGLE_API_KEY`, `GOOGLE_APP_ID` | Sign in with Google and the Drive picker (as before). |
+| `CLASSROOM_IMPORT=1` | Turns on **Import from Google Classroom** on a class's Students tab (needs `GOOGLE_CLIENT_ID`, and the Classroom API enabled for that OAuth client with the scopes `classroom.courses.readonly`, `classroom.rosters.readonly`, `classroom.profile.emails`). The browser gets the token from Google and sends only email addresses to Visor; the token never reaches the server. Off: the button is shown disabled with an explanation. |
+| `VISOR_DEV_LOGIN=1` | Local only: `GET /dev/login?email=…`. Never works on Firebase. |
+| `GEMINI_BASE_URL`, `VERTEX_BASE_URL`, `DRIVE_API_BASE` | Point at stand-in services (tests). |
+| `VISOR_AUDIO_DIR`, `PGLITE_DIR` | Where local recordings and the embedded database go (tests use temp folders). |
+
+### Tests
+
+```bash
+npm test
+```
+
+`node:test`, no framework: the op model, sessions and pauses, paste origins, citations, the process report on the shared engine, discussions, both data stores (Firestore through an in-memory stand-in), and the whole classroom flow over HTTP on a temporary local database. Nothing reaches Firebase, Google or Gemini (one test runs a stand-in Gemini on this machine).
+
+### Keeping shared code in step
+
+- `npm run sync-engine` copies `../extension/changelog.js` (the one analysis engine) to `lib/engine/` and `public/engine/`, and `public/cite-format.js` to `lib/cite.js`. It runs before every deploy; without the extension next to this folder it keeps the committed copies. `test/engine-sync.test.js` and `test/cite.test.js` check the copies match.
+- `npm run vendor` copies Quill 2.0.3 from `node_modules` into `public/vendor/quill/` (committed: school filters often block CDNs).
+
+## How it works: Visor Classroom
+
+1. **Classes.** A teacher creates a class and shares its join code, or adds students by email. Students join with the code (at sign-up or later). Students confirm they're 13 or older, or were signed up by their school.
+2. **Writing assignments.** Locked (in class: Visor extension required, full screen, students kept to allowed sites, pasting only from their own essay, AI sites blocked) or open (homework: everything recorded, little blocked). Time limits count every session together and include each student's extra time.
+3. **Writing sessions.** The student starts a session in the editor. Writing is on only while their Visor tab (or the extension's side panel) has focus and holds the editing lease; leaving it pauses writing at once, and the server records the pause with its reason and length. Every edit is an op (`lib/writing.js`) checked and applied by the server; the op log, in 500-op chunks with snapshots every 2,000 ops, is what the replay and the process report read.
+4. **Research.** During a session the extension records searches, pages and time on them, copies, AI sites and citations (`/api/ext/research`). A paste whose text matches something the student copied in the last 3 hours is linked to that page; anything else is "pasted from outside Visor's view".
+5. **Review.** The teacher's live board shows every student as they write. After submission, the review page shows the essay (and where each part of it came from), a replay, the process report (the extension's engine run on the op log, plus sessions, pastes, typing and rule-based notes for the teacher), the research log, and feedback.
+6. **Group projects and discussions** reuse the project features below; discussions add measured talk time and turns.
+
+## How it works: projects
 
 1. **Accounts.** Sign up with email and password, or with Google. Pick Student or Teacher. Choosing a school is optional and can be changed any time in Profile settings. If someone signs in with Google using an email that already has a password account, Google has proven they own the email, so the account switches to Google sign-in only and the old password stops working.
 2. **Teachers create projects** and add students: by name for students who picked the same school (at least 2 letters, up to 10 matches), or by full email address for anyone.
 3. **Resources tab.** Anyone in the project can add:
-   - **Document data from the Visor extension.** On the extension's Overview tab, type the project code (the `#` chip, which only teachers see) under **Send to Website**. Re-sending the same document replaces the earlier report.
+   - **Document data from the Visor extension.** On the extension's Overview tab, under **Send to Visor**, pick the project (once the extension is connected) or type the project code (the `#` chip, which only teachers see). A connected student's linked group Doc is sent automatically. Re-sending the same document replaces the earlier report.
    - **From Google Drive.** Pick a Doc or Slides file in Google's picker. Visor diffs its saved revisions and credits each change to whoever saved it.
    - **Audio**, by uploading a file or recording in the browser. Gemini transcribes it and separates the voices, then Visor asks "Who is this?" for each voice.
 4. **Clicking a document** opens the same tabs as the extension's side panel: Overview (totals, growth, activity by day and hour), People, Timeline (writing sessions, or Drive saves), Evidence (each paste and deletion: who, when, how big; the text stays in the extension) and Signal (how the text arrived). Reports sent from extension versions before 3.1 show fewer of these; sending again fills them in.
@@ -104,8 +159,9 @@ Then open http://localhost:3000. Put `GEMINI_API_KEY` (and `SESSION_SECRET` if y
 |---|---|
 | Hosting | Serves `public/`. Sends `/api/**`, `/privacy` and `/terms` to the `api` function. |
 | `api` function | The Express app in `server.js`. |
-| `transcribe` function | Starts when `api` writes a job to `visor_jobs`; downloads the recording, has Gemini transcribe it, saves the result. |
-| Firestore | `visor/core` (accounts, schools, projects), `visor_resources`, `visor_analyses`, `visor_meta/session` (the cookie-signing secret, made automatically). Rules block all browser access. |
+| `transcribe` function | Starts when `api` writes a job to `visor_jobs`; downloads the recording (or one 10-minute part of a class discussion), has Gemini transcribe it, saves the result. |
+| `sweep` function | Daily (Cloud Scheduler): deletes extension research older than each class's retention period. |
+| Firestore | `visor/core` (accounts, schools, projects, classes), `visor_resources`, `visor_analyses`, `visor_rec_<kind>` (assignments, student documents, op chunks, sessions, research, discussions, feedback, extension tokens), `visor_meta/session` (the cookie-signing secret, made automatically). Rules block all browser access. `firestore.indexes.json` holds the one composite index (research by class and date, for the sweep). |
 | Cloud Storage | `audio/…` recordings. Rules block all browser access; people play recordings through the signed-in `/api` route. |
 | `stopBilling` function | Optional spending cut-off; see "shut off spending at a limit". |
 | Vertex AI | Gemini: transcribes recordings (read straight from Cloud Storage) and writes the analysis. The server signs in as its own service account. |
@@ -114,8 +170,22 @@ Then open http://localhost:3000. Put `GEMINI_API_KEY` (and `SESSION_SECRET` if y
 ## Files
 
 ```
-index.js             Firebase entry: the api, transcribe and stopBilling functions
-server.js            Express app: accounts, schools, projects, resources, Gemini, analysis
+index.js             Firebase entry: the api, transcribe, sweep and stopBilling functions
+server.js            Express app: route sections only (accounts, schools, projects, resources,
+                     Gemini, analysis, classes, assignments, writing, extension API, discussions)
+lib/classes.js       Classes, join codes, invites, accommodations
+lib/assignments.js   Writing / group / discussion assignments, presets, settings
+lib/writing.js       The op model: applyOp, batches, chunks, snapshots
+lib/sessions.js      Writing sessions: start checks, beats, pauses, deadlines, timeouts
+lib/process.js       The process report (engine on the op log + measured facts + notes)
+lib/research.js      Research events, paste-origin matching
+lib/discussion.js    Discussion stats, segment hints, the AI summary's prompt and checks
+lib/sites.js         The default AI-site list
+lib/cite.js          Citation formatting (a copy of public/cite-format.js)
+lib/engine/          The analysis engine (a copy of extension/changelog.js)
+scripts/             sync-engine.js, vendor.js
+test/                node:test tests
+docs/                TEACHER-QUICKSTART.md
 firebase.json        Hosting rewrites, function settings, rules files
 firestore.rules      Deny all browser access
 storage.rules        Deny all browser access
@@ -126,7 +196,10 @@ lib/session.js       The signed sign-in cookie (__session)
 lib/reports.js       Turns extension, Drive and older reports into one report shape
 lib/drive.js         Google Drive revisions → who added/removed what
 lib/legalPages.js    /privacy and /terms
-public/              index.html, app.js, app.css, logos
+public/              index.html, app.js, app.css, logos; Visor Classroom: router.js, classes.js,
+                     assignments.js, writer.js, writer-session.js, review.js, replay-web.js,
+                     live.js, discussions.js, cite-format.js, ext.js, classroom.css,
+                     engine/changelog.js, vendor/quill/
 ```
 
 ## Limits and notes
@@ -140,4 +213,6 @@ public/              index.html, app.js, app.css, logos
 - **Running on your computer** still uses a Gemini API key from `.env.local`.
 - **Coming from Vercel:** accounts and projects made on the Vercel site are not copied over. People sign up again on the new address.
 - **If you change what Visor collects,** update `lib/legalPages.js`. That page is the privacy policy linked from Google's sign-in screen.
-- **Testing:** `VISOR_DEV_LOGIN=1 npm start` enables `GET /dev/login?email=…` for password-free local testing. It never works on Firebase. `GEMINI_BASE_URL` and `DRIVE_API_BASE` can point at stand-in services.
+- **Testing:** `VISOR_DEV_LOGIN=1 npm start` enables `GET /dev/login?email=…` for password-free local testing. It never works on Firebase. `GEMINI_BASE_URL` and `DRIVE_API_BASE` can point at stand-in services. `npm test` runs the test suite.
+- **Framing:** the extension's side panel frames `/write/…`, so pages are served with `Content-Security-Policy: frame-ancestors 'self' chrome-extension:` (in `server.js` and in `firebase.json`). There's no `X-Frame-Options`.
+- **Writing limits:** 500 ops per batch, 50,000 characters per insert, 400,000 characters per document; research batches of 200 events, 30 a minute per session.

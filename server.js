@@ -123,8 +123,8 @@ function checkConfig() {
     console.log('  ✓ Gemini key loaded (' + GEMINI_API_KEY.slice(0, 6) + '…), model ' + GEMINI_MODEL);
   }
   if (!process.env.SESSION_SECRET) console.warn('  ! SESSION_SECRET not set; using a dev default. Set one before sharing this server.');
-  console.log(`  ✓ Database: ${process.env.DATABASE_URL ? 'Postgres (DATABASE_URL)' : 'local, in data/pglite'}`);
-  console.log('  ✓ Recordings: local, in data/audio');
+  console.log(`  ✓ Database: ${process.env.DATABASE_URL ? 'Postgres (DATABASE_URL)' : `local, in ${process.env.PGLITE_DIR || 'data/pglite'}`}`);
+  console.log(`  ✓ Recordings: local, in ${process.env.VISOR_AUDIO_DIR || 'data/audio'}`);
   console.log(`  ${googleReady() ? '✓' : '·'} Google Drive import ${googleReady() ? 'enabled' : 'off (set GOOGLE_CLIENT_ID, GOOGLE_API_KEY, GOOGLE_APP_ID to turn it on)'}`);
   console.log(`  ${googleSignInReady() ? '✓' : '·'} Sign in with Google ${googleSignInReady() ? 'enabled' : 'off (set GOOGLE_CLIENT_ID to turn it on)'}`);
 }
@@ -1784,6 +1784,9 @@ app.get('/api/write/:assignmentId', ah(async (req, res) => {
     doc: docView(fresh, { withFeedback: true }),
     session: active ? sessionsLib.clientView(active, Date.now()) : null,
     token: active ? await sessionToken(active, surf) : null,
+    // Writing is possible in an active session not paused by the teacher; the
+    // editor also needs focus and the lease, which only the page can know.
+    canWrite: !!active && !active.teacherPaused && fresh.status !== 'submitted',
     timeLeftMs: timeLeft(a, got.cls, fresh, list, me.id), multiplier: mult,
     windowProblem: sessionsLib.windowProblem(a.writing, Date.now()),
     user: { id: me.id, name: fullName(me) },
@@ -2646,6 +2649,64 @@ app.delete('/api/discussions/:did', requireAuth, ah(async (req, res) => {
   res.json({ ok: true });
 }));
 
+// ---- Privacy: retention, and a student's own data ----
+
+// Research the extension recorded is kept for each class's retention period
+// (180 days unless the teacher changes it), then deleted. Essays and their
+// writing history stay. Runs daily: the "sweep" scheduled function on
+// Firebase (index.js), an interval when running locally (boot, below).
+async function runRetentionSweep() {
+  const core = await repo.readCore();
+  let deleted = 0;
+  for (const cls of Object.values(core.classes)) {
+    const days = Number(cls.researchRetentionDays) || 180;
+    const before = new Date(Date.now() - days * 864e5).toISOString();
+    deleted += await repo.deleteRecords('research', { classId: cls.id }, { updatedBefore: before });
+  }
+  if (deleted) console.log(`retention sweep: deleted ${deleted} research record(s)`);
+  return deleted;
+}
+
+// "Download my data": everything Visor Classroom keeps about a student, as JSON
+app.get('/api/me/export', requireAuth, ah(async (req, res) => {
+  const core = await repo.readCore();
+  const me = meOrThrow(req, core);
+  const myClasses = Object.values(core.classes).filter(c => c.studentIds.includes(me.id) || c.teacherId === me.id);
+  const docs = await repo.listRecords('doc', { studentId: me.id });
+  const out = {
+    exportedAt: now(), about: 'Everything Visor Classroom keeps about you: your account, your classes, your essays with their full writing history, your writing sessions, the research the Visor extension recorded during them, and teacher feedback.',
+    account: publicUser(me, core),
+    classes: myClasses.map(c => ({ id: c.id, name: c.name, teacher: fullName(core.users[c.teacherId]) })),
+    projects: Object.values(core.projects).filter(p => p.studentIds.includes(me.id)).map(p => ({ id: p.id, name: p.name })),
+    documents: []
+  };
+  for (const d of docs) {
+    const a = await repo.getRecord('assignment', d.assignmentId);
+    const [ops, sessions, research] = await Promise.all([allOps(d.id), repo.listRecords('session', { docId: d.id }), repo.listRecords('research', { docId: d.id })]);
+    out.documents.push({
+      assignment: a ? { id: a.id, title: a.title } : { id: d.assignmentId }, class: core.classes[d.classId]?.name || null,
+      text: d.text, formats: d.formats, sources: d.sources, status: d.status, submittedAt: d.submittedAt, returnedAt: d.returnedAt,
+      feedback: d.status === 'returned' || d.reopened ? d.feedback || null : null, stats: d.stats,
+      editLog: ops,
+      sessions: sessions.map(({ surfaces, away, awayReason, ...s }) => s),
+      research: research.sort((x, y) => x.no - y.no).flatMap(c => c.events)
+    });
+  }
+  // Discussions: the lines that were matched to this student's voice
+  const discussions = [];
+  for (const c of myClasses) {
+    for (const disc of await repo.listRecords('discussion', { classId: c.id })) {
+      const mineLabels = (disc.speakers || []).filter(sp => sp.assignedUserId === me.id).map(sp => sp.label);
+      if (!mineLabels.length) continue;
+      const lines = discussionLib.mergedLines((disc.segments || []).filter(s => s.status === 'ready')).filter(l => mineLabels.includes(l.speaker)).map(l => ({ t: l.t, text: l.text }));
+      discussions.push({ title: disc.title, recordedAt: disc.createdAt, yourLines: lines });
+    }
+  }
+  out.discussions = discussions;
+  res.setHeader('Content-Disposition', `attachment; filename="visor-my-data-${new Date().toISOString().slice(0, 10)}.json"`);
+  res.type('application/json').send(JSON.stringify(out, null, 2));
+}));
+
 // ═══════════════════════════════════════════════════════════════
 // SECTION 15 — PAGES, ERRORS, BOOT
 // ═══════════════════════════════════════════════════════════════
@@ -2704,9 +2765,13 @@ if (require.main === module) {
   app.listen(PORT, () => {
     console.log(`\n  Visor running → http://localhost:${PORT}\n`);
     boot().then(() => console.log('')).catch(err => console.error('startup error:', err));
+    // Research retention, daily (on Firebase this is the "sweep" scheduled function)
+    setTimeout(() => runRetentionSweep().catch(err => console.error('retention sweep:', err.message)), 60 * 1000);
+    setInterval(() => runRetentionSweep().catch(err => console.error('retention sweep:', err.message)), 24 * 3600 * 1000);
   });
 }
 
 module.exports = app;
 module.exports.runTranscriptionJob = runTranscriptionJob;
 module.exports.runDiscussionJob = runDiscussionJob;
+module.exports.runRetentionSweep = runRetentionSweep;

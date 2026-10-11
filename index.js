@@ -48,6 +48,14 @@ exports.transcribe = onDocumentCreated(
   }
 );
 
+// ── Research retention (Visor Classroom) ──────────────────────────────────
+// Once a day: delete research the extension recorded during writing sessions
+// once it's older than its class's retention period (180 days by default).
+const { onSchedule } = require('firebase-functions/v2/scheduler');
+exports.sweep = onSchedule({ schedule: 'every 24 hours', memory: '512MiB', timeoutSeconds: 540, maxInstances: 1 }, async () => {
+  await app.runRetentionSweep();
+});
+
 // ── Spending cut-off ────────────────────────────────────────────────────
 // A Google Cloud budget can post its running total to a Pub/Sub topic. When
 // the total passes the budget amount, this takes the billing account off the
