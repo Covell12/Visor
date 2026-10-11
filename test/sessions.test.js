@@ -141,7 +141,7 @@ test('locked mode refuses to start without the extension’s acknowledgement', (
   // nor does someone else's
   assert.throws(() => S.checkStart({ doc, assignment: a, userId: 'u1', body, extAck: { userId: 'u2', at: new Date(T0).toISOString(), hasHostPermission: true }, now: T0 }), e => e.status === 409);
   // no research permission: locked mode won't start
-  assert.throws(() => S.checkStart({ doc, assignment: a, userId: 'u1', body, extAck: { userId: 'u1', at: new Date(T0).toISOString(), hasHostPermission: false }, now: T0 }), e => /record your research/.test(e.message));
+  assert.throws(() => S.checkStart({ doc, assignment: a, userId: 'u1', body, extAck: { userId: 'u1', at: new Date(T0).toISOString(), hasHostPermission: false }, now: T0 }), e => /see the sites you visit/.test(e.message));
   const ok = S.checkStart({ doc, assignment: a, userId: 'u1', body, extAck: { userId: 'u1', at: new Date(T0 - 5e3).toISOString(), hasHostPermission: true }, now: T0 });
   assert.deepStrictEqual(ok, { takeover: null });
   // open mode doesn't need it
