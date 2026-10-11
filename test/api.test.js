@@ -123,6 +123,31 @@ test('the classroom flow, end to end', async t => {
   assert.ok(r.data.awayMs >= 4800 && r.data.awayMs < 8000, `away ${r.data.awayMs} ms`);
   assert.strictEqual(r.data.state, 'active');
 
+  // 6. research: the extension (connected with its own token) records a copy;
+  //    pasting the same text into the essay picks up where it came from
+  r = await sam.post('/api/ext/token');
+  const X = { 'X-Visor-Token': r.data.token };
+  r = await sam.get('/api/ext/me', X);
+  assert.strictEqual(r.data.user.email, 'sam@school.test');
+  const copied = 'Teenagers’ circadian rhythms shift later during puberty.';
+  r = await sam.post('/api/ext/research', { sessionToken: H['X-Visor-Session'], docId: doc.id, events: [
+    { type: 'search', t: Date.now() - 20000, url: 'https://www.google.com/search?q=teen+sleep', query: 'teen sleep', engine: 'google' },
+    { type: 'visit', t: Date.now() - 15000, url: 'https://www.cdc.gov/sleep/', title: 'Sleep | CDC' },
+    { type: 'copy', t: Date.now() - 10000, url: 'https://www.cdc.gov/sleep/', title: 'Sleep | CDC', copy: { hash: sha(norm(copied)), len: copied.length, preview: copied } }
+  ] }, X);
+  assert.strictEqual(r.status, 200);
+  assert.strictEqual(r.data.stored, 3);
+  const seqNow = 1 + typed.length;
+  const pasted = ' ' + copied;
+  r = await sam.post(`/api/write/${doc.id}/ops`, { baseSeq: seqNow, ops: [ins(text.length, pasted, { src: 'paste', it: 'insertFromPaste', paste: { hash: sha(norm(pasted)), internal: false } })], textHash: sha(text + pasted), surfaceId: 'tab-1' }, H);
+  assert.strictEqual(r.status, 200);
+  assert.strictEqual(r.data.pastes[0].origin.url, 'https://www.cdc.gov/sleep/');
+  text += pasted;
+  // someone else's extension token can't post into this session
+  r = await kim.post('/api/ext/token');
+  r = await kim.post('/api/ext/research', { sessionToken: H['X-Visor-Session'], docId: doc.id, events: [{ type: 'visit', url: 'https://x.example/' }] }, { 'X-Visor-Token': r.data.token });
+  assert.strictEqual(r.status, 403);
+
   // 7. the student submits
   r = await sam.post(`/api/write/${doc.id}/submit`, {});
   assert.strictEqual(r.status, 200);

@@ -34,7 +34,7 @@ const assignments = require('./lib/assignments');
 const { DEFAULT_AI_SITES } = require('./lib/sites');
 const writing = require('./lib/writing');
 const sessionsLib = require('./lib/sessions');
-const research = { matchPasteOrigins() {} }; // lib/research.js arrives with research capture
+const research = require('./lib/research');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -1952,8 +1952,43 @@ app.post('/api/ext/session/beat', extAuth, ah(async (req, res) => {
   res.json({ active: true, sessionId: updated.id, state: updated.state, deadlineAt: updated.deadlineAt, startedAt: updated.startedAt });
 }));
 
-// Research and citations (phases 8–9)
-async function researchCopiesFor() { return []; }
+// Research events from the extension: { sessionToken, docId, events: [...] }
+// (at most 200 per batch, 30 batches a minute per session). Kept in "research"
+// records next to the session; AI-site visits and blocked navigations also go
+// into the session's own event list.
+app.post('/api/ext/research', extAuth, ah(async (req, res) => {
+  const body = req.body || {};
+  const tok = verify(await getSessionSecret(), String(body.sessionToken || ''), WSESS);
+  if (!tok || tok.uid !== req.extUser.id || tok.docId !== body.docId) throw new HttpError(403, 'That session isn’t yours.');
+  const s0 = await repo.getRecord('session', tok.sid);
+  if (!s0 || s0.studentId !== req.extUser.id) throw new HttpError(404, 'session not found');
+  // A late batch from a session that just ended is still kept; a stale one isn't
+  if (s0.state === 'ended' && Date.now() - Date.parse(s0.endedAt) > 15 * 60 * 1000) throw new HttpError(410, 'That session ended.');
+  if (!research.rateLimit(s0.id)) throw new HttpError(429, 'Too many research batches; try again in a minute.');
+  const events = research.cleanEvents(body.events);
+  if (!events.length) return res.json({ ok: true, stored: 0 });
+  await repo.withRecords(async t => {
+    const s = await t.get('session', s0.id);
+    const last = s.researchLast != null ? await t.get('research', research.chunkId(s.id, s.researchLast)) : null;
+    const chunks = research.appendEvents(s, last, events);
+    for (const c of chunks) t.put('research', c);
+    s.researchLast = chunks[chunks.length - 1].no;
+    s.researchCount = (s.researchCount || 0) + events.length;
+    for (const e of events) {
+      if (e.type === 'ai-site') sessionsLib.addEvent(s, { t: e.t, type: 'ai-site', host: e.host, url: e.url, blocked: !!e.blocked });
+      if (e.type === 'blocked') sessionsLib.addEvent(s, { t: e.t, type: 'lock-violation', host: e.host, url: e.url });
+    }
+    t.put('session', s);
+  });
+  res.json({ ok: true, stored: events.length });
+}));
+
+// Copy events this student made for this assignment, for paste origins
+async function researchCopiesFor(studentId, assignmentId) {
+  const chunks = await repo.listRecords('research', { studentId, assignmentId });
+  const since = Date.now() - research.LIMITS.ORIGIN_WINDOW_MS - 60000;
+  return research.copiesFrom(chunks).filter(c => c.t >= since);
+}
 
 // Group projects and discussions arrive in SECTIONS 11 and 14 (phases 12, 13).
 async function syncGroupProjects() {}
