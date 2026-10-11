@@ -8,9 +8,10 @@
     "dev": "node --watch server.js",
     "test": "node --test \"test/*.test.js\"",
     "sync-engine": "node scripts/sync-engine.js",
-    "predeploy": "node scripts/sync-engine.js",
+    "predeploy": "node scripts/sync-engine.js && node scripts/vendor.js",
     "deploy": "firebase deploy",
-    "logs": "firebase functions:log"
+    "logs": "firebase functions:log",
+    "vendor": "node scripts/vendor.js"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.8",
@@ -25,5 +26,8 @@
   },
   "engines": {
     "node": "24"
+  },
+  "devDependencies": {
+    "quill": "2.0.3"
   }
 }
