@@ -16,7 +16,7 @@
 
 'use strict';
 
-importScripts('config.js', 'research.js', 'session-bg.js');
+importScripts('config.js', 'research.js', 'cite.js', 'session-bg.js');
 
 const DOC_URL = /^https:\/\/docs\.google\.com\/(document|presentation)\/d\//;
 

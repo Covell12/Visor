@@ -13,7 +13,8 @@
     "webNavigation",
     "contextMenus",
     "declarativeNetRequest",
-    "alarms"
+    "alarms",
+    "activeTab"
   ],
   "optional_host_permissions": [
     "<all_urls>"

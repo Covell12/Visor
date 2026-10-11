@@ -151,6 +151,7 @@ async function sessionStart(payload, sender) {
   await enterSessionPanelMode();
   if (recording) await startResearchCapture();
   if (state.settings.mode === 'locked') await lockdownOn(state);
+  addCiteMenu();
   chrome.alarms.create(FLUSH_ALARM, { periodInMinutes: 1 });
   await extBeat();
   return { ok: true, recording, lockActive: (await getState()).lockActive };
@@ -167,6 +168,7 @@ async function sessionEnd(reason) {
   await stopResearchCapture();
   await lockdownOff();
   await chrome.alarms.clear(FLUSH_ALARM).catch(() => {});
+  removeCiteMenu();
   await setState(null);
   await setBadge(false);
   await restoreDocsPanelMode();
@@ -441,6 +443,112 @@ chrome.windows.onFocusChanged.addListener(() => { focusChanged().catch(() => {})
 chrome.runtime.onMessage.addListener((msg, sender) => {
   if (msg && msg.type === 'VISOR_RESEARCH_COPY') copied(msg, sender).catch(() => {});
   return false;
+});
+
+// ── The cite button (Section 8.6) ──────────────────────────────────────────
+//
+// Triggers: the session panel's button, the right-click item "Cite this page
+// with Visor" (only during a session) and Alt+Shift+C. The page's citation
+// details are read in the page by cite.js; the Visor editor formats them in
+// the assignment's style, inserts the in-text citation and adds the entry.
+// Outside a session the button still works: it copies an MLA citation.
+
+const CITE_MENU = 'visor-cite';
+
+async function readCitationMeta(tab) {
+  if (!tab || !/^https?:/.test(tab.url || '') || VisorConfig.isVisorOrigin(tab.url)) {
+    throw new Error('Open the page you want to cite, then cite it.');
+  }
+  try {
+    await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['cite.js'] });
+    const [res] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: () => self.VisorCite.extractCitationMeta(document, location.href) });
+    if (!res || !res.result) throw new Error('empty');
+    return res.result;
+  } catch (e) {
+    throw new Error('Visor can’t read this page. Allow research recording for Visor, or cite it by hand in Sources.');
+  }
+}
+
+async function activeTabForCite(windowId) {
+  const q = windowId != null ? { active: true, windowId } : { active: true, lastFocusedWindow: true };
+  const [tab] = await chrome.tabs.query(q).catch(() => []);
+  return tab || null;
+}
+
+async function citeTab(tab, from) {
+  const s = await getState();
+  let meta;
+  try { meta = await readCitationMeta(tab); }
+  catch (e) { if (from !== 'panel') toastInTab(tab, e.message); return { ok: false, error: e.message }; }
+  if (s && s.active) {
+    // Both editors hear it; the one holding the editing lease acts on it
+    let delivered = false;
+    try { const r = await chrome.runtime.sendMessage({ type: 'VISOR_CITE_TO_PANEL', meta }); delivered = !!(r && r.ok); } catch (_) {}
+    if (s.visorTabId != null) {
+      try { await chrome.tabs.sendMessage(s.visorTabId, { channel: 'visor-to-page', type: 'CITE', meta }); delivered = true; } catch (_) {}
+    }
+    if (!delivered) return { ok: false, error: 'Open your Visor document (the side panel or the Visor tab) to add the citation.' };
+    if (from !== 'panel') toastInTab(tab, `Cited in your essay: ${meta.title || meta.url}`);
+    return { ok: true, meta, message: `Cited: ${meta.title || 'this page'}` };
+  }
+  // No session: copy a formatted citation to the clipboard
+  let text = '';
+  try {
+    const auth = await getAuth();
+    const base = (auth && auth.origin) || VisorConfig.VISOR_DEFAULT_ORIGIN;
+    const r = await fetch(`${base}/api/ext/cite/format`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ meta, style: 'mla' }) });
+    if (r.ok) text = (await r.json()).text;
+  } catch (_) {}
+  // Visor couldn't be reached: the bare minimum, so the student has the source
+  const fallback = !text;
+  if (fallback) text = [meta.authors && meta.authors[0], meta.title ? `“${meta.title}.”` : '', meta.siteName, meta.url].filter(Boolean).join(' ');
+  await copyInTab(tab, text, fallback ? 'Copied the page’s title and link (Visor couldn’t be reached to format it).' : 'MLA citation copied');
+  return { ok: true, copied: true, text };
+}
+
+// The page shows a small note, and (outside a session) puts the text on the clipboard
+async function copyInTab(tab, text, note) {
+  await chrome.scripting.executeScript({ target: { tabId: tab.id }, args: [text, note], func: (t, n) => {
+    const done = () => {
+      const el = document.createElement('div');
+      el.textContent = n;
+      el.setAttribute('role', 'status');
+      el.style.cssText = 'position:fixed;z-index:2147483647;left:50%;bottom:24px;transform:translateX(-50%);background:#10303D;color:#fff;font:600 14px/1.4 -apple-system,Segoe UI,Roboto,sans-serif;padding:10px 16px;border-radius:999px;box-shadow:0 6px 24px rgba(0,0,0,.2)';
+      document.documentElement.appendChild(el);
+      setTimeout(() => el.remove(), 3200);
+    };
+    const old = () => { const ta = document.createElement('textarea'); ta.value = t; ta.style.cssText = 'position:fixed;opacity:0'; document.documentElement.appendChild(ta); ta.select(); try { document.execCommand('copy'); } catch (_) {} ta.remove(); };
+    (navigator.clipboard ? navigator.clipboard.writeText(t).catch(old) : Promise.resolve(old())).then(done, done);
+  } }).catch(() => {});
+}
+async function toastInTab(tab, note) {
+  if (!tab || !/^https?:/.test(tab.url || '')) return;
+  chrome.scripting.executeScript({ target: { tabId: tab.id }, args: [note], func: (n) => {
+    const el = document.createElement('div');
+    el.textContent = n; el.setAttribute('role', 'status');
+    el.style.cssText = 'position:fixed;z-index:2147483647;left:50%;bottom:24px;transform:translateX(-50%);background:#10303D;color:#fff;font:600 14px/1.4 -apple-system,Segoe UI,Roboto,sans-serif;padding:10px 16px;border-radius:999px;box-shadow:0 6px 24px rgba(0,0,0,.2)';
+    document.documentElement.appendChild(el);
+    setTimeout(() => el.remove(), 3200);
+  } }).catch(() => {});
+}
+
+function addCiteMenu() {
+  chrome.contextMenus.removeAll(() => {
+    void chrome.runtime.lastError;
+    chrome.contextMenus.create({ id: CITE_MENU, title: 'Cite this page with Visor', contexts: ['page', 'selection', 'link', 'image'] }, () => void chrome.runtime.lastError);
+  });
+}
+function removeCiteMenu() { chrome.contextMenus.removeAll(() => void chrome.runtime.lastError); }
+
+chrome.contextMenus.onClicked.addListener((info, tab) => { if (info.menuItemId === CITE_MENU) citeTab(tab, 'menu'); });
+chrome.commands.onCommand.addListener(async (command, tab) => {
+  if (command !== 'cite-page') return;
+  citeTab(tab || await activeTabForCite(), 'command');
+});
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (!msg || msg.type !== 'VISOR_CITE_ACTIVE') return false;
+  activeTabForCite(sender.tab ? sender.tab.windowId : undefined).then((tab) => citeTab(tab, msg.from)).then(sendResponse, (e) => sendResponse({ ok: false, error: e.message }));
+  return true;
 });
 
 // ── Lockdown (Section 8.4) ─────────────────────────────────────────────────

@@ -23,6 +23,9 @@
     'https://visor-ed.firebaseapp.com'
   ];
 
+  // Used when the extension isn't connected yet (formatting a citation outside a session)
+  const VISOR_DEFAULT_ORIGIN = 'https://visor-ed.web.app';
+
   const DEFAULT_AI_SITES = [
     'chatgpt.com', 'chat.openai.com', 'openai.com', 'gemini.google.com', 'aistudio.google.com', 'claude.ai',
     'perplexity.ai', 'copilot.microsoft.com', 'poe.com', 'character.ai', 'deepseek.com', 'chat.deepseek.com',
@@ -36,5 +39,5 @@
     try { return VISOR_WEB_ORIGINS.includes(new URL(url).origin); } catch (_) { return false; }
   }
 
-  root.VisorConfig = { VISOR_WEB_ORIGINS, DEFAULT_AI_SITES, isVisorOrigin };
+  root.VisorConfig = { VISOR_WEB_ORIGINS, VISOR_DEFAULT_ORIGIN, DEFAULT_AI_SITES, isVisorOrigin };
 })(typeof self !== 'undefined' ? self : this);
