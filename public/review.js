@@ -128,7 +128,7 @@ function rvProcess(body) {
       ${ty.bursts.count} stretches of continuous typing (typical ${Math.round(ty.bursts.medianChars || 0)} characters, longest ${ty.bursts.longestChars.toLocaleString()}) ·
       ${ty.deletedChars.toLocaleString()} characters deleted of ${ty.insertedChars.toLocaleString()} written (revision ratio ${ty.revisionRatio}).</div>
     <h3 class="section-title rv-h">Edit history</h3>
-    <div class="tiny muted" style="margin-bottom:8px;">The same analysis the Visor extension gives for a Google Doc, run on this essay’s own edit log.${report.engine.matchesDoc ? '' : ' (The rebuilt text differs from the saved essay; the figures above are still exact.)'}</div>
+    <div class="tiny muted" style="margin-bottom:8px;">The same analysis the Visor extension gives for a Google Doc, run on this essay’s own edit log. It judges pastes by their size alone; where it differs, the paste figures above (from Visor’s own editor) are the exact ones.${report.engine.matchesDoc ? '' : ' (The rebuilt text differs from the saved essay; the figures above are still exact.)'}</div>
     <div class="card card-pad" id="rvEngine"></div>`;
   embedDocumentView($('rvEngine'), report.engine.report);
 }
