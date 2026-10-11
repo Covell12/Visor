@@ -172,6 +172,7 @@ function writerSetupQuill() {
   root.addEventListener('drop', e => writerOnDrop(e), true);
   root.addEventListener('contextmenu', e => { if (WR.data.assignment.writing.mode === 'locked' && wsActive()) e.preventDefault(); });
 
+  quill.on('selection-change', range => { if (range) WR.lastRange = range; });
   quill.on('text-change', (delta, old, source) => {
     if (source !== 'user') return;
     writerCapture(delta);
@@ -444,7 +445,7 @@ function writerRefresh() {
   }
   $('wrActions').innerHTML = acts.join('');
   writerRenderIntro();
-  writerRenderSources?.();
+  writerRenderSources();
   writerUpdateCounts();
   WR.lastLock = undefined;
   writerApplyLock();
@@ -524,7 +525,112 @@ function writerApplyLock() {
     ${showResume ? `<button class="btn btn-primary" onclick="wsResume()">${reason === 'exit-fullscreen' ? 'Return to full screen' : 'Resume'}</button>` : ''}</div>`;
 }
 
-// Sources / citations are added in cite-format.js and writer-cite (phase 9)
-function writerToggleSources() { const el = $('wrSources'); if (el) el.classList.toggle('open'); writerRenderSources?.(); el?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }
-function writerInsertCitationMenu() { if (window.writerCitationMenu) writerCitationMenu(); else toast('Add sources with the Visor extension’s Cite button.'); }
-let writerRenderSources = null;
+/* ====================== citations ======================
+   The extension's cite button reads the page and sends its details here (to
+   the side panel's editor, or to this tab through the bridge). Only the
+   editor holding the lease acts on it: it inserts the in-text citation at the
+   cursor as a src:'cite' op and adds the full entry to the document's sources
+   (kept outside the op-logged text, so it never counts as typed words). */
+
+function writerToggleSources() { $('wrSources')?.scrollIntoView({ block: 'start', behavior: 'smooth' }); }
+
+// Insert text at the cursor as a citation op, even if the editor is locked
+// because the student is on the research page right now.
+function writerInsertCite(text) {
+  const q = WR.quill;
+  const len = q.getLength() - 1;
+  let at = Math.min((WR.lastRange?.index ?? len), len);
+  const before = at > 0 ? q.getText(at - 1, 1) : '';
+  const insert = (before && !/\s/.test(before) ? ' ' : '') + text;
+  const was = q.isEnabled();
+  if (!was) q.enable(true);
+  WR.pendingSrc = { src: 'cite', it: 'none', once: true };
+  try { q.insertText(at, insert, 'user'); } finally { WR.pendingSrc = null; if (!was) q.enable(false); }
+  WR.lastRange = { index: at + insert.length, length: 0 };
+  try { q.setSelection(WR.lastRange.index, 0, 'silent'); } catch {}
+}
+
+async function writerCite(meta) {
+  if (!WR.data || !meta) return;
+  if (!wsActive()) { toast('Start a writing session to add citations.', 'err'); return; }
+  if (!isLeaseHolder()) return; // the other editor (tab or side panel) takes it
+  if (WR.session.pause?.reason === 'teacher') { toast('Your teacher paused the session.', 'err'); return; }
+  try {
+    const r = await wapi(`/api/write/${WR.doc.id}/sources`, { method: 'POST', body: { source: meta } });
+    WR.doc.sources = r.sources;
+    writerInsertCite(r.source.inText);
+    writerRenderSources(); writerUpdateCounts();
+    toast(r.existing ? `Cited again: ${r.source.title}` : `Cited: ${r.source.title}`);
+    if (r.source.check?.length && !r.existing) setTimeout(() => toast(`Check: ${r.source.check.join(', ')}. Add it in Sources below.`, 'err'), 2600);
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+// Messages carrying a citation: the bridge in this tab, or the side panel around the embed
+window.addEventListener('message', e => {
+  const m = e.data;
+  if (!m || m.source !== 'visor-ext' || m.type !== 'CITE' || m.replyTo) return;
+  const fromBridge = e.source === window && e.origin === location.origin;
+  const fromPanel = WR.embed && e.source === window.parent && e.origin === WR.embedOrigin;
+  if (fromBridge || fromPanel) writerCite(m.meta);
+});
+
+// Toolbar: re-cite a source already in the list
+function writerInsertCitationMenu() {
+  const list = WR.doc?.sources || [];
+  if (!list.length) return toast('No sources yet. Use the Visor extension’s “Cite this page” on a page you’re using.');
+  if (!wsActive() || !isLeaseHolder()) return toast('Start a writing session to add citations.', 'err');
+  openModal({ title: 'Insert a citation', sub: 'Adds the in-text citation where your cursor is.', body: `<div class="stack">${list.map(s => `<button class="choice cite-pick" data-id="${esc(s.id)}"><div class="t">${esc(s.inText)}</div><div class="d">${esc(s.title || s.url)}</div></button>`).join('')}</div>`, footer: `<button class="btn btn-ghost" onclick="closeModal()">Cancel</button>` });
+  document.querySelectorAll('.cite-pick').forEach(b => b.onclick = () => {
+    const s = list.find(x => x.id === b.dataset.id);
+    closeModal();
+    writerInsertCite(s.inText);
+    WR.quill.focus();
+  });
+}
+
+// Works Cited / References / Bibliography under the essay
+function writerRenderSources() {
+  const el = $('wrSources'); if (!el || !WR.data) return;
+  const style = WR.data.assignment.writing.citationStyle;
+  const bib = VisorCiteFormat.bibliography(WR.doc?.sources || [], style);
+  const editable = WR.doc.status !== 'submitted' && !(WR.doc.status === 'returned' && !WR.doc.reopened);
+  el.innerHTML = `<section class="wr-works" aria-label="${esc(bib.heading)}"><h2>${esc(bib.heading)}</h2>
+    ${bib.items.length ? `<ol class="wr-bib">${bib.items.map(i => `<li><span class="wr-bib-text">${i.html}</span>
+      <span class="wr-bib-tools">${i.source.check?.length ? `<button class="chip-check" onclick="writerEditSource('${esc(i.source.id)}')">Check: ${esc(i.source.check.join(', '))}</button>` : ''}
+      ${editable ? `<button class="btn-icon" aria-label="Edit this source" onclick="writerEditSource('${esc(i.source.id)}')">${I.edit}</button><button class="btn-icon" aria-label="Remove this source" onclick="writerDeleteSource('${esc(i.source.id)}')">${I.trash}</button>` : ''}</span></li>`).join('')}</ol>`
+      : `<p class="muted small">Sources you cite with the Visor extension show up here, formatted in ${esc({ mla: 'MLA', apa: 'APA', chicago: 'Chicago' }[style])}. ${editable ? `<button class="linklike" onclick="writerEditSource(null)">Add one by hand</button>` : ''}</p>`}
+    ${bib.items.length && editable ? `<button class="btn btn-ghost btn-sm" onclick="writerEditSource(null)">${I.plusSm}Add a source by hand</button>` : ''}
+  </section>`;
+}
+
+function writerEditSource(id) {
+  const s = id ? (WR.doc.sources || []).find(x => x.id === id) : { type: 'webpage', authors: [] };
+  if (!s) return;
+  const f = (k, label, ph = '') => `<div class="field"><label for="se-${k}">${label}</label><input id="se-${k}" class="input" value="${esc(s[k] || '')}" placeholder="${esc(ph)}" /></div>`;
+  openModal({ title: id ? 'Edit source' : 'Add a source', sub: 'Fix anything the page didn’t say, like the author or the date.', wide: true, body: `
+    ${f('title', 'Title')}
+    <div class="field"><label for="se-authors">Authors <span class="label-note">one per line</span></label><textarea id="se-authors" class="input" style="min-height:70px;">${esc((s.authors || []).join('\n'))}</textarea></div>
+    <div class="input-row">${f('siteName', 'Website or publication')}${f('publisher', 'Publisher', 'if different')}</div>
+    <div class="input-row">${f('published', 'Date published', 'YYYY-MM-DD')}
+      <div class="field"><label for="se-type">Kind</label><select id="se-type" class="input">${['webpage', 'article', 'journal', 'video', 'book'].map(t => `<option value="${t}" ${s.type === t ? 'selected' : ''}>${{ webpage: 'Web page', article: 'Article', journal: 'Journal article', video: 'Video', book: 'Book' }[t]}</option>`).join('')}</select></div></div>
+    ${f('url', 'Link', 'https://…')}
+    <div class="input-row">${f('journal', 'Journal')}${f('doi', 'DOI')}</div>
+    <div class="input-row">${f('volume', 'Volume')}${f('issue', 'Issue')}</div>
+    ${f('pages', 'Pages', 'e.g. 45-67')}
+    <div id="seErr" class="form-error hidden"></div>`,
+    footer: `<button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="writerSaveSource(${id ? `'${esc(id)}'` : 'null'})">Save</button>` });
+}
+async function writerSaveSource(id) {
+  const v = k => $(`se-${k}`).value;
+  const source = { title: v('title'), authors: v('authors').split('\n').map(x => x.trim()).filter(Boolean), siteName: v('siteName'), publisher: v('publisher'), published: v('published'), type: v('type'), url: v('url'), journal: v('journal'), doi: v('doi'), volume: v('volume'), issue: v('issue'), pages: v('pages') };
+  try {
+    const r = id ? await wapi(`/api/write/${WR.doc.id}/sources/${id}`, { method: 'PATCH', body: { source } }) : await wapi(`/api/write/${WR.doc.id}/sources`, { method: 'POST', body: { source } });
+    WR.doc.sources = r.sources; closeModal(); writerRenderSources(); writerUpdateCounts();
+    if (!id && wsActive() && isLeaseHolder()) toast('Added. Use “Insert citation” to cite it in your essay.');
+  } catch (e) { formError('seErr', e.message); }
+}
+async function writerDeleteSource(id) {
+  if (!await confirmModal('Remove this source?', 'In-text citations already in your essay stay; remove them yourself if you need to.', { okLabel: 'Remove', danger: true })) return;
+  try { const r = await wapi(`/api/write/${WR.doc.id}/sources/${id}`, { method: 'DELETE' }); WR.doc.sources = r.sources; writerRenderSources(); writerUpdateCounts(); }
+  catch (e) { toast(e.message, 'err'); }
+}

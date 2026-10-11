@@ -35,6 +35,7 @@ const { DEFAULT_AI_SITES } = require('./lib/sites');
 const writing = require('./lib/writing');
 const sessionsLib = require('./lib/sessions');
 const research = require('./lib/research');
+const citeFormat = require('./lib/cite');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -1829,6 +1830,91 @@ app.post('/api/write/:docId/submit', ah(async (req, res) => {
   res.json({ doc: docView(doc), warning });
 }));
 
+// ---- Sources (Works Cited) ----
+// Kept on the document, not in the op-logged text, so a bibliography is never
+// counted as the student's writing. The in-text citation the editor inserts
+// is an ordinary op with src:'cite'.
+
+const SOURCE_FIELDS = { url: 2000, canonicalUrl: 2000, title: 300, siteName: 150, publisher: 150, published: 20, modified: 20, doi: 200, journal: 150, volume: 40, issue: 40, pages: 40 };
+const SOURCE_TYPES = ['webpage', 'article', 'journal', 'video', 'book'];
+function cleanSource(raw = {}, base = {}) {
+  const src = { ...base };
+  for (const [k, max] of Object.entries(SOURCE_FIELDS)) if (raw[k] !== undefined) src[k] = cleanText(String(raw[k] ?? ''), max);
+  if (raw.authors !== undefined) src.authors = (Array.isArray(raw.authors) ? raw.authors : String(raw.authors || '').split('\n')).map(a => cleanText(String(a), 120)).filter(Boolean).slice(0, 20);
+  if (raw.type !== undefined) src.type = SOURCE_TYPES.includes(raw.type) ? raw.type : 'webpage';
+  src.authors = src.authors || []; src.type = src.type || 'webpage';
+  if (src.url && !/^https?:\/\//i.test(src.url)) src.url = '';
+  return src;
+}
+function withFormatting(src, style) {
+  const f = citeFormat.format(src, style, { accessed: src.accessed });
+  return { ...src, style, formatted: f.text, formattedHtml: f.html, inText: f.inText, check: f.check };
+}
+async function sourceDocFor(req) {
+  const core = await repo.readCore();
+  const got = await docFor(req, core);
+  if (!got.isOwner) throw new HttpError(403, 'Only the student can change their sources.');
+  if (got.doc.status === 'submitted') throw new HttpError(409, 'This document has been submitted.');
+  return got;
+}
+const activeSessionOf = async docId => (await repo.listRecords('session', { docId })).find(s => s.state !== 'ended') || null;
+
+// Add a source (the cite button, or the student by hand). The same page twice
+// is one source. Returns { source, existing }.
+app.post('/api/write/:docId/sources', ah(async (req, res) => {
+  const got = await sourceDocFor(req);
+  const style = got.a.writing?.citationStyle || 'mla';
+  const t = Date.now();
+  const s = await activeSessionOf(got.doc.id);
+  let src = cleanSource(req.body?.source || {});
+  if (!src.title && !src.url) throw new HttpError(400, 'A source needs at least a title or a link.');
+  src = withFormatting({ ...src, id: uid(), accessed: new Date(t).toISOString().slice(0, 10), addedAt: new Date(t).toISOString(), sessionId: s?.id || null }, style);
+  let existing = false;
+  const doc = await repo.updateRecord('doc', got.doc.id, d => {
+    d.sources = d.sources || [];
+    const same = src.url && d.sources.find(x => (x.canonicalUrl || x.url) === (src.canonicalUrl || src.url));
+    if (same) { existing = true; src = same; return; }
+    if (d.sources.length >= 200) throw new HttpError(400, 'At most 200 sources.');
+    d.sources.push(src);
+  });
+  // The research log links the citation to the page it came from
+  if (s && !existing) {
+    await repo.withRecords(async tx => {
+      const sess = await tx.get('session', s.id);
+      const last = sess.researchLast != null ? await tx.get('research', research.chunkId(sess.id, sess.researchLast)) : null;
+      const chunks = research.appendEvents(sess, last, [{ t, type: 'cite', url: src.url, host: (() => { try { return new URL(src.url).hostname; } catch { return ''; } })(), title: src.title, sourceId: src.id }]);
+      for (const c of chunks) tx.put('research', c);
+      sess.researchLast = chunks[chunks.length - 1].no;
+      tx.put('session', sess);
+    });
+  }
+  res.json({ source: src, existing, sources: doc.sources });
+}));
+
+// Edit a source by hand (recorded as a session event when one is running)
+app.patch('/api/write/:docId/sources/:sourceId', ah(async (req, res) => {
+  const got = await sourceDocFor(req);
+  const style = got.a.writing?.citationStyle || 'mla';
+  let out = null;
+  const doc = await repo.updateRecord('doc', got.doc.id, d => {
+    const i = (d.sources || []).findIndex(x => x.id === req.params.sourceId);
+    if (i < 0) throw new HttpError(404, 'source not found');
+    d.sources[i] = out = withFormatting(cleanSource(req.body?.source || {}, d.sources[i]), style);
+    d.sources[i].editedAt = now();
+  });
+  const s = await activeSessionOf(got.doc.id);
+  if (s) await repo.updateRecord('session', s.id, x => sessionsLib.addEvent(x, { t: Date.now(), type: 'source-edit', sourceId: out.id }));
+  res.json({ source: out, sources: doc.sources });
+}));
+
+app.delete('/api/write/:docId/sources/:sourceId', ah(async (req, res) => {
+  const got = await sourceDocFor(req);
+  const doc = await repo.updateRecord('doc', got.doc.id, d => { d.sources = (d.sources || []).filter(x => x.id !== req.params.sourceId); });
+  const s = await activeSessionOf(got.doc.id);
+  if (s) await repo.updateRecord('session', s.id, x => sessionsLib.addEvent(x, { t: Date.now(), type: 'source-edit', sourceId: req.params.sourceId, detail: 'deleted' }));
+  res.json({ sources: doc.sources });
+}));
+
 // The op log, for replay: the class teacher, or the student for their own doc.
 app.get('/api/write/:docId/ops', ah(async (req, res) => {
   const core = await repo.readCore();
@@ -1982,6 +2068,14 @@ app.post('/api/ext/research', extAuth, ah(async (req, res) => {
   });
   res.json({ ok: true, stored: events.length });
 }));
+
+// Formatting for the extension's cite button outside a session (it copies the
+// citation to the clipboard). Nothing is stored. { meta, style } -> { text, html, inText }
+app.post('/api/ext/cite/format', (req, res) => {
+  const style = ['mla', 'apa', 'chicago'].includes(req.body?.style) ? req.body.style : 'mla';
+  const f = citeFormat.format(cleanSource(req.body?.meta || {}), style);
+  res.json({ text: f.text, html: f.html, inText: f.inText, check: f.check, style });
+});
 
 // Copy events this student made for this assignment, for paste origins
 async function researchCopiesFor(studentId, assignmentId) {
