@@ -1,0 +1,10 @@
+rules_version = '2';
+// Recordings are private. Only Visor's own server (Admin SDK) can read or
+// write them; people play them through the signed-in /api route.
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

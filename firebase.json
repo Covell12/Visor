@@ -1,0 +1,46 @@
+{
+  "hosting": {
+    "public": "public",
+    "ignore": ["firebase.json", "**/.*"],
+    "rewrites": [
+      { "source": "/api/**", "function": { "functionId": "api", "region": "us-central1" } },
+      { "source": "/privacy", "function": { "functionId": "api", "region": "us-central1" } },
+      { "source": "/terms", "function": { "functionId": "api", "region": "us-central1" } },
+      { "source": "**", "destination": "/index.html" }
+    ],
+    "headers": [
+      { "source": "**/*.@(html|js|css)", "headers": [{ "key": "Cache-Control", "value": "no-cache" }] }
+    ]
+  },
+  "functions": [
+    {
+      "source": ".",
+      "codebase": "visor",
+      "runtime": "nodejs24",
+      "ignore": [
+        "node_modules",
+        ".git",
+        ".firebase",
+        "data",
+        "public",
+        "firebase-debug.log",
+        "firebase-debug.*.log",
+        "*.local",
+        "*.zip"
+      ]
+    }
+  ],
+  "firestore": {
+    "rules": "firestore.rules"
+  },
+  "storage": {
+    "rules": "storage.rules"
+  },
+  "emulators": {
+    "functions": { "port": 5001 },
+    "firestore": { "port": 8080 },
+    "storage": { "port": 9199 },
+    "hosting": { "port": 5000 },
+    "ui": { "enabled": false }
+  }
+}

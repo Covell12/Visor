@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Visor</title>
+<link rel="icon" href="/favicon.png" />
+<link rel="stylesheet" href="/app.css" />
+</head>
+<body>
+
+<!-- ================= AUTH ================= -->
+<div id="authView" class="auth hidden">
+  <div class="auth-brand">
+    <div>
+      <img class="logo-big" src="/logo.png" alt="Visor" />
+      <h1>See who actually<br>did the work.</h1>
+      <p>Visor turns group-project recordings and document history into a fair, evidence-based picture of who contributed what.</p>
+    </div>
+    <div class="how">
+      <div><b>1</b><span>Teachers create a project and add their students.</span></div>
+      <div><b>2</b><span>Students upload meeting recordings and send in document data from the Visor extension.</span></div>
+      <div><b>3</b><span>Visor transcribes, identifies who said what, and writes the report.</span></div>
+    </div>
+    <div class="credit credit-light"><a href="/privacy" style="color:inherit;">Privacy</a> · <a href="/terms" style="color:inherit;">Terms</a></div>
+  </div>
+  <div class="auth-form">
+    <div class="auth-card">
+      <!-- Sign in -->
+      <div id="signinForm">
+        <h2>Welcome back</h2>
+        <p class="sub">Sign in with your school email.</p>
+        <div id="signinError" class="form-error hidden"></div>
+        <div id="googleSigninBtn" class="google-btn-mount hidden"></div>
+        <div id="signinDivider" class="auth-divider"><span>or</span></div>
+        <div class="field"><label>Email</label><input id="siEmail" class="input" type="email" autocomplete="email" placeholder="you@school.org" /></div>
+        <div class="field"><label>Password</label><input id="siPassword" class="input" type="password" autocomplete="current-password" /></div>
+        <button class="btn btn-primary btn-lg" style="width:100%;justify-content:center;" onclick="doSignin()">Sign in</button>
+        <div class="auth-switch">New here? <button onclick="showAuth('signup')">Create an account</button></div>
+      </div>
+
+      <!-- Create account -->
+      <div id="signupForm" class="hidden">
+        <h2>Create your account</h2>
+        <p class="sub">Students and teachers use the same sign-up.</p>
+        <div id="signupError" class="form-error hidden"></div>
+        <div id="googleSignupBtn" class="google-btn-mount hidden"></div>
+        <div id="signupDivider" class="auth-divider"><span>or</span></div>
+        <div class="field">
+          <label>Email</label>
+          <input id="suEmail" class="input" type="email" autocomplete="email" placeholder="you@example.org" />
+        </div>
+        <div class="input-row">
+          <div class="field"><label>First name</label><input id="suFirst" class="input" type="text" autocomplete="given-name" /></div>
+          <div class="field"><label>Last name</label><input id="suLast" class="input" type="text" autocomplete="family-name" /></div>
+        </div>
+        <div class="field"><label>Password</label><input id="suPassword" class="input" type="password" autocomplete="new-password" placeholder="At least 6 characters" /></div>
+        <div class="field">
+          <label>School <span class="label-note">optional</span></label>
+          <div id="suSchoolPicker" class="school-picker"></div>
+        </div>
+        <div class="field" style="margin-bottom:8px;"><label>I am a…</label></div>
+        <div class="role-cards">
+          <button class="role-card" data-role="student" onclick="pickRole('student')">
+            <div class="t"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 10v6M2 10l10-5 10 5-10 5z"/><path d="M6 12v5c3 3 9 3 12 0v-5"/></svg>Student</div>
+            <div class="d">Join projects, upload recordings, send document data.</div>
+          </button>
+          <button class="role-card" data-role="teacher" onclick="pickRole('teacher')">
+            <div class="t"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>Teacher</div>
+            <div class="d">Create projects, add students, run the analysis.</div>
+          </button>
+        </div>
+        <button class="btn btn-primary btn-lg" style="width:100%;justify-content:center;" onclick="doSignup()">Create account</button>
+        <div class="auth-switch">Already have an account? <button onclick="showAuth('signin')">Sign in</button></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= APP ================= -->
+<div id="appView" class="hidden">
+  <header class="topbar">
+    <div class="brand"><img src="/logo.png" alt="" /> Visor</div>
+    <div class="school" id="topSchool"></div>
+    <div class="spacer"></div>
+    <div class="user-menu">
+      <button class="user-btn" onclick="toggleMenu('userMenu')" id="userBtn"></button>
+      <div id="userMenu" class="menu hidden">
+        <button onclick="openProfile()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>Profile settings</button>
+        <button onclick="openTutorial()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3M12 17h.01"/></svg>Show tutorial</button>
+        <div class="sep"></div>
+        <button onclick="signOut()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg>Sign out</button>
+      </div>
+    </div>
+  </header>
+
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="head">
+        <div class="kicker">My projects</div>
+        <button id="newProjectBtn" class="btn btn-soft btn-sm hidden" onclick="openNewProject()">+ New</button>
+      </div>
+      <div id="projectList"></div>
+      <div class="credit">Created by Lynx Wattson Wagle<br><a href="/privacy" style="color:inherit;">Privacy</a> · <a href="/terms" style="color:inherit;">Terms</a></div>
+    </aside>
+
+    <main class="main">
+      <div id="emptyMain" class="empty" style="padding-top:90px;">
+        <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></div>
+        <h4>Pick a project</h4>
+        <p id="emptyMainText">Choose a project on the left to see its members, resources, and analysis.</p>
+      </div>
+
+      <div id="projectView" class="hidden">
+        <div class="proj-head">
+          <div>
+            <h2 id="projName"></h2>
+            <div class="meta" id="projMeta"></div>
+          </div>
+          <div class="proj-actions" id="projActions"></div>
+        </div>
+
+        <div class="tabs" id="tabs">
+          <button class="tab active" data-tab="members" onclick="switchTab('members')">Members <span class="count" id="cntMembers">0</span></button>
+          <button class="tab" data-tab="resources" onclick="switchTab('resources')">Resources <span class="count" id="cntResources">0</span></button>
+          <button class="tab" data-tab="analysis" id="tabAnalysis" onclick="switchTab('analysis')">Analysis</button>
+        </div>
+
+        <!-- Members -->
+        <section data-panel="members">
+          <div id="memberSearch" class="search-wrap hidden">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+            <input id="memberSearchInput" class="input" placeholder="Add a student: search your school by name, or type their full email…" oninput="onMemberSearch(this.value)" onfocus="onMemberSearch(this.value)" />
+            <div id="memberDropdown" class="dropdown hidden"></div>
+          </div>
+          <div class="card" id="membersList"></div>
+        </section>
+
+        <!-- Resources -->
+        <section data-panel="resources" class="hidden">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px;">
+            <div class="muted small">Recordings and document data for this project.</div>
+            <button class="btn btn-primary" id="addResourceBtn" onclick="openAddResource()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>Add resource</button>
+          </div>
+          <div id="resourceList" class="res-grid"></div>
+        </section>
+
+        <!-- Analysis -->
+        <section data-panel="analysis" class="hidden">
+          <div id="analysisHead" style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px;flex-wrap:wrap;">
+            <div>
+              <h3 class="section-title">Contribution analysis</h3>
+              <div class="muted small" id="analysisSub">Combines every recording and document report into one picture.</div>
+            </div>
+            <div id="analysisActions"></div>
+          </div>
+          <div id="analysisContent"></div>
+        </section>
+      </div>
+    </main>
+  </div>
+</div>
+
+<div id="modalRoot"></div>
+<div id="toastRoot"></div>
+
+<script src="/app.js"></script>
+</body>
+</html>
