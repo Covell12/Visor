@@ -22,7 +22,7 @@
     try { text = String(document.getSelection() ? document.getSelection().toString() : ''); } catch (_) { return; }
     if (text.trim().length < 20) return;
     try {
-      chrome.runtime.sendMessage({ type: 'VISOR_RESEARCH_COPY', text: text.slice(0, 20000), len: text.length, url: location.href, title: document.title.slice(0, 300) }, () => { void chrome.runtime.lastError; });
+      chrome.runtime.sendMessage({ type: 'VISOR_RESEARCH_COPY', text: text.slice(0, 400000), len: text.length, url: location.href, title: document.title.slice(0, 300) }, () => { void chrome.runtime.lastError; });
     } catch (_) { /* the extension was reloaded: nothing to do */ }
   }, true);
 

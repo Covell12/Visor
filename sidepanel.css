@@ -1691,6 +1691,7 @@ details.v-note > summary::-webkit-details-marker { display: none; }
 
 /* ── Send to Visor (Visor Classroom) ──────────────────────────────────── */
 .v-send-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.v-send-row[hidden] { display: none; }   /* the rule above would otherwise beat [hidden] */
 .v-send-label { font-size: 12px; font-weight: 700; color: var(--ink-2); }
 .v-send-input { flex: 1; min-width: 120px; font: inherit; font-size: 13px; padding: 7px 10px; border-radius: 10px; border: 1px solid var(--hairline); background: var(--surface); color: var(--ink); }
 #send-code-input { text-transform: uppercase; letter-spacing: .12em; font-family: ui-monospace, Menlo, monospace; }

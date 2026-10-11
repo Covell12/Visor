@@ -27,6 +27,15 @@ chrome.runtime.onInstalled.addListener(() => {
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   // Visor writing sessions: the web app (through site-bridge.js), the session
   // panel and the permission window.
+  // "Open side panel" from the Visor page: Chrome only opens a panel inside
+  // the click that asked for it, so this can't wait for anything first
+  if (msg && msg.channel === 'visor-bridge' && msg.type === 'OPEN_PANEL') {
+    if (!sender.tab || !VisorConfig.isVisorOrigin(sender.url || sender.origin || '')) { sendResponse({ ok: false, error: 'not a Visor page' }); return false; }
+    chrome.sidePanel.open({ windowId: sender.tab.windowId })
+      .then(() => sendResponse({ ok: true }))
+      .catch(() => sendResponse({ ok: false, error: 'Click the Visor icon in Chrome’s toolbar to open the side panel.' }));
+    return true;
+  }
   if (msg && msg.channel === 'visor-bridge') {
     sessionReady.then(() => handleBridge(msg, sender)).then(sendResponse, (e) => sendResponse({ ok: false, error: String((e && e.message) || e) }));
     return true;

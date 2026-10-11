@@ -9,7 +9,7 @@
 
 'use strict';
 
-const { buildBlockRules, shouldBounce, RULE_BASE } = require('../lockdown.js');
+const { buildBlockRules, blockedReason, shouldBounce, RULE_BASE } = require('../lockdown.js');
 
 const out = [];
 const ck = (name, got, want) => {
@@ -69,6 +69,30 @@ ck('open, AI flagged only: no rules', buildBlockRules({ mode: 'open', blockedSit
   const rules = buildBlockRules({ mode: 'open', blockedSites: AI, blockAiSites: true, allowedSites: ['only.example'] }, opts);
   ck('open, "block AI sites": AI blocked', decide(rules, 'https://chatgpt.com/'), 'chrome-extension://abc/blocked.html?u=https://chatgpt.com/');
   ck('open: the allowed list doesn’t apply', decide(rules, 'https://www.cdc.gov/'), 'load');
+}
+
+// ── AI sites inside an allowed domain, and "block AI sites" turned off ─────
+{
+  const rules = buildBlockRules({ mode: 'locked', allowedSites: ['google.com'], blockedSites: ['gemini.google.com', 'chatgpt.com'], blockAiSites: true }, opts);
+  ck('an allowed domain still loads', decide(rules, 'https://www.google.com/search?q=sleep'), 'allow');
+  ck('…but an AI site under it is blocked', decide(rules, 'https://gemini.google.com/app'), 'chrome-extension://abc/blocked.html?u=https://gemini.google.com/app');
+  ck('Google sign-in still loads', decide(rules, 'https://accounts.google.com/signin'), 'allow');
+}
+ck('locked, no list, "block AI sites" off: nothing is redirected', buildBlockRules({ mode: 'locked', allowedSites: [], blockedSites: AI, blockAiSites: false }, opts), []);
+{
+  const rules = buildBlockRules({ mode: 'locked', allowedSites: ['en.wikipedia.org'], blockedSites: AI, blockAiSites: false }, opts);
+  ck('locked list, "block AI sites" off: AI sites still aren’t on the list', decide(rules, 'https://chatgpt.com/'), 'chrome-extension://abc/blocked.html?u=https://chatgpt.com/');
+}
+
+// ── Pages already open when the lock starts ────────────────────────────────
+{
+  const st = { mode: 'locked', allowedSites: ['en.wikipedia.org', 'google.com'], blockedSites: ['gemini.google.com'], blockAiSites: true };
+  ck('an open allowed page may stay', blockedReason('https://en.wikipedia.org/wiki/Sleep', st, opts.visorOrigin), null);
+  ck('an open AI page is sent away', blockedReason('https://gemini.google.com/app', st, opts.visorOrigin), 'ai');
+  ck('an open page that isn’t allowed is sent away', blockedReason('https://www.reddit.com/', st, opts.visorOrigin), 'not-allowed');
+  ck('Visor itself stays', blockedReason('https://visor-ed.web.app/write/1', st, opts.visorOrigin), null);
+  ck('browser pages are left to the bounce', blockedReason('chrome://newtab/', st, opts.visorOrigin), null);
+  ck('open session: only AI pages', [blockedReason('https://www.reddit.com/', { ...st, mode: 'open' }, opts.visorOrigin), blockedReason('https://gemini.google.com/', { ...st, mode: 'open' }, opts.visorOrigin)], [null, 'ai']);
 }
 
 // ── Browser pages ──────────────────────────────────────────────────────────

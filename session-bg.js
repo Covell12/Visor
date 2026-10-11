@@ -23,6 +23,7 @@ const SESSION_KEY = 'visorSession';
 const AUTH_KEY = 'visorAuth';
 const FLUSH_ALARM = 'visor-flush';
 const SESSION_PANEL = 'sessionpanel.html';
+const LIVE_FLAG = 'visorSessionLive';
 const DOCS_PANEL = 'sidepanel.html';
 const DEFAULT_TITLE = 'Visor — Writing Sessions & Google Docs History';
 
@@ -102,11 +103,11 @@ async function restoreDocsPanelMode() {
   for (const t of tabs) await syncPanel(t.id, t.url);
 }
 
-async function setBadge(on) {
+async function setBadge(on, recording = true) {
   if (on) {
     await chrome.action.setBadgeText({ text: 'REC' }).catch(() => {});
     await chrome.action.setBadgeBackgroundColor({ color: '#D9534F' }).catch(() => {});
-    await chrome.action.setTitle({ title: 'Visor session: research is being recorded' }).catch(() => {});
+    await chrome.action.setTitle({ title: recording ? 'Visor session: research is being recorded' : 'Visor session (research isn’t being recorded)' }).catch(() => {});
   } else {
     await chrome.action.setBadgeText({ text: '' }).catch(() => {});
     await chrome.action.setTitle({ title: DEFAULT_TITLE }).catch(() => {});
@@ -143,11 +144,17 @@ async function sessionStart(payload, sender) {
     visorWindowId: sender && sender.tab ? sender.tab.windowId : (prev && prev.visorWindowId) || null,
     recording, hasHostPermission: perm,
     researchQueue: prev && prev.docId === docId ? prev.researchQueue || [] : [],
-    lastFlush: null, current: null, lastSearch: null,
+    lastFlush: null,
+    // Sent again for the same session (a reload, another tab): keep the open visit
+    current: prev && prev.docId === docId ? prev.current || null : null,
+    lastSearch: prev && prev.docId === docId ? prev.lastSearch || null : null,
     lockActive: false
   };
   await setState(state);
-  await setBadge(true);
+  // Survives a browser restart (session storage doesn't): if Chrome restarts
+  // mid-session, startup finds this and undoes the session's changes.
+  await chrome.storage.local.set({ [LIVE_FLAG]: { docId, at: new Date().toISOString() } });
+  await setBadge(true, recording);
   await enterSessionPanelMode();
   if (recording) await startResearchCapture();
   if (state.settings.mode === 'locked' || state.settings.blockAiSites) await lockdownOn(state);
@@ -163,6 +170,7 @@ async function sessionEnd(reason) {
   const s = await getState();
   if (s && s.active) {
     await withState((x) => closeCurrentVisit(x, Date.now())).catch(() => {});
+    if (flushing) await flushing.catch(() => {});
     await flushResearch().catch(() => {});
   }
   await stopResearchCapture();
@@ -170,10 +178,31 @@ async function sessionEnd(reason) {
   await chrome.alarms.clear(FLUSH_ALARM).catch(() => {});
   removeCiteMenu();
   await setState(null);
+  await chrome.storage.local.remove(LIVE_FLAG);
   await setBadge(false);
   await restoreDocsPanelMode();
   return { ok: true, ended: reason || 'ended' };
 }
+
+// Chrome restarted (or the extension reloaded) in the middle of a session:
+// session storage is gone but the lockdown rules, badge, menu and panel
+// settings aren't. Undo them, so the browser isn't left locked.
+async function recoverFromLostSession() {
+  const s = await getState();
+  if (s && s.active) return;
+  const flag = (await chrome.storage.local.get(LIVE_FLAG))[LIVE_FLAG];
+  let rules = [];
+  try { rules = (await chrome.declarativeNetRequest.getDynamicRules()).filter((r) => r.id >= VisorLockdown.RULE_BASE && r.id < VisorLockdown.RULE_BASE + 1000); } catch (_) {}
+  if (!flag && !rules.length) return;
+  await stopResearchCapture();
+  await clearRules();
+  await chrome.alarms.clear(FLUSH_ALARM).catch(() => {});
+  removeCiteMenu();
+  await chrome.storage.local.remove(LIVE_FLAG);
+  await setBadge(false);
+  await restoreDocsPanelMode();
+}
+sessionReady.then(recoverFromLostSession).catch(() => {});
 
 async function disconnectedByServer() {
   await chrome.storage.local.remove(AUTH_KEY);
@@ -363,28 +392,39 @@ async function focusChanged() {
 }
 
 // A main-frame navigation committed: a new page (and maybe a search)
+// The top-level document of a tab (frameId 0), or a prerendered page that
+// became one (Chrome gives those another frameId)
+const topFrame = (d) => d.frameId === 0 || d.frameType === 'outermost_frame';
+
 async function navigated(details) {
-  if (details.frameId !== 0) return;
+  if (!topFrame(details) || details.documentLifecycle === 'prerender') return;
+  await recordSearch(details.url);
+  const tab = await lookingAt();
+  if (tab && tab.id === details.tabId) await focusChanged();
+}
+
+// One search, however many navigation events report it (deduplicated over 10 s)
+async function recordSearch(url) {
+  const search = VisorResearch.parseSearch(url);
+  if (!search) return;
   await withState(async (s) => {
     if (!s.recording) return;
     const now = Date.now();
-    const search = VisorResearch.parseSearch(details.url);
-    if (search) {
-      const last = s.lastSearch;
-      if (!(last && last.engine === search.engine && last.query === search.query && now - last.t < SEARCH_DEDUPE_MS)) {
-        queueEvent(s, { type: 'search', url: capUrl(details.url), host: hostOf(details.url), query: search.query, engine: search.engine, t: now });
-      }
-      s.lastSearch = { ...search, t: now };
+    const last = s.lastSearch;
+    if (!(last && last.engine === search.engine && last.query === search.query && now - last.t < SEARCH_DEDUPE_MS)) {
+      queueEvent(s, { type: 'search', url: capUrl(url), host: hostOf(url), query: search.query, engine: search.engine, t: now });
     }
+    s.lastSearch = { ...search, t: now };
   });
-  const tab = await lookingAt();
-  if (tab && tab.id === details.tabId) await focusChanged();
 }
 
 // Before a main-frame navigation: AI sites are recorded even when the lockdown
 // is about to redirect them to blocked.html (so the commit never shows them).
 async function beforeNavigate(details) {
-  if (details.frameId !== 0) return;
+  if (!topFrame(details)) return;
+  // A search that redirects straight to a result (Wikipedia's exact-title
+  // search) never commits its own URL, so it's read here too
+  if (details.documentLifecycle !== 'prerender' && VisorResearch.parseSearch(details.url)) await recordSearch(details.url);
   await withState(async (s) => {
     const hit = VisorResearch.siteMatch(details.url, s.settings.blockedSites);
     if (!hit) return;
@@ -403,19 +443,23 @@ async function copied(msg, sender) {
   if (norm.length < 20) return;
   const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(norm));
   const hash = [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
-  await withState(async (s) => {
-    if (!s.recording) return;
+  const queued = await withState(async (s) => {
+    if (!s.recording) return false;
     queueEvent(s, { type: 'copy', url: capUrl(url), host: hostOf(url), title: String(msg.title || (sender.tab && sender.tab.title) || '').slice(0, 300), copy: { hash, len: Number(msg.len) || text.length, preview: text.slice(0, 140) } });
+    return true;
   });
+  // A copy is usually pasted within seconds: send it now rather than at the
+  // next minute, so the paste can show which page it came from
+  if (queued) { clearTimeout(copyFlushTimer); copyFlushTimer = setTimeout(() => flushResearch().catch(() => {}), 1500); }
 }
+let copyFlushTimer = null;
 
 // Send queued events to the server, 200 at a time. They stay queued (in
 // session storage, which survives the worker sleeping) until the server has them.
-let flushing = false;
-async function flushResearch() {
-  if (flushing) return;
-  flushing = true;
-  try {
+let flushing = null;   // the flush in progress, if any
+function flushResearch() {
+  if (flushing) return flushing;
+  flushing = (async () => {
     for (let i = 0; i < 10; i++) {
       const s = await getState();
       if (!s || !s.researchQueue || !s.researchQueue.length) return;
@@ -427,18 +471,29 @@ async function flushResearch() {
         if (e.status === 410) { await withState((x) => { x.researchQueue = []; }); return; }
         return; // try again on the next alarm
       }
-      await stateChain;
-      const now = await getState();
-      if (!now) return;
-      now.researchQueue = (now.researchQueue || []).slice(batch.length);
-      now.lastFlush = new Date().toISOString();
-      await setState(now);
+      // Drop what was sent (events queued meanwhile stay), inside the state chain
+      await withState((x) => {
+        const q = x.researchQueue || [];
+        const sentT = new Set(batch.map((e) => `${e.t}|${e.type}|${e.url || ''}`));
+        let drop = 0;
+        while (drop < q.length && drop < batch.length && sentT.has(`${q[drop].t}|${q[drop].type}|${q[drop].url || ''}`)) drop++;
+        x.researchQueue = q.slice(drop);
+        x.lastFlush = new Date().toISOString();
+      });
     }
-  } finally { flushing = false; }
+  })().finally(() => { flushing = null; });
+  return flushing;
 }
 
 chrome.webNavigation.onCommitted.addListener((d) => { navigated(d).catch(() => {}); });
 chrome.webNavigation.onBeforeNavigate && chrome.webNavigation.onBeforeNavigate.addListener((d) => { beforeNavigate(d).catch(() => {}); });
+// Single-page sites (YouTube's search box, Perplexity) change the address without a new page load
+chrome.webNavigation.onHistoryStateUpdated && chrome.webNavigation.onHistoryStateUpdated.addListener((d) => { navigated(d).catch(() => {}); });
+// A prerendered page the student actually opens shows up as the tab's new address
+chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
+  if (!info.url || !tab || !tab.active) return;
+  getState().then((st) => { if (st && st.active && st.recording) navigated({ tabId, frameId: 0, url: info.url }).catch(() => {}); });
+});
 chrome.tabs.onActivated.addListener(() => { focusChanged().catch(() => {}); });
 chrome.windows.onFocusChanged.addListener(() => { focusChanged().catch(() => {}); });
 chrome.runtime.onMessage.addListener((msg, sender) => {
@@ -496,7 +551,7 @@ async function citeTab(tab, from) {
   let text = '';
   try {
     const auth = await getAuth();
-    const base = (auth && auth.origin) || VisorConfig.VISOR_DEFAULT_ORIGIN;
+    const base = (auth && auth.origin) || await openVisorOrigin();
     const r = await fetch(`${base}/api/ext/cite/format`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ meta, style: 'mla' }) });
     if (r.ok) text = (await r.json()).text;
   } catch (_) {}
@@ -576,7 +631,23 @@ async function lockdownOn(state) {
   if (rules.length) {
     try { await chrome.declarativeNetRequest.updateDynamicRules({ addRules: rules }); ok = true; } catch (e) { console.warn('Visor lockdown rules failed:', e && e.message); }
   }
-  await patchState((x) => { x.lockActive = ok && x.settings.mode === 'locked'; x.aiBlockActive = ok; });
+  // A locked session with nothing to redirect (no list, AI sites only flagged)
+  // is still locked: the browser-page bounce below applies
+  const locked = state.settings.mode === 'locked' && (ok || !rules.length);
+  await patchState((x) => { x.lockActive = locked; x.aiBlockActive = ok; });
+  // Pages already open don't go through the new rules: send away the ones
+  // that aren't allowed now
+  if (ok) {
+    const tabs = await chrome.tabs.query({}).catch(() => []);
+    for (const t of tabs) {
+      if (!t.url || !VisorLockdown.blockedReason(t.url, state.settings, state.origin)) continue;
+      queueBlocked(t.url);
+      chrome.tabs.update(t.id, { url: `${chrome.runtime.getURL('blocked.html')}?u=${t.url}` }).catch(() => {});
+    }
+  }
+}
+function queueBlocked(url) {
+  withState((x) => { queueEvent(x, { type: 'blocked', url: capUrl(url), host: hostOf(url) }); }).catch(() => {});
 }
 
 async function lockdownOff() {
@@ -613,7 +684,18 @@ chrome.runtime.onMessage.addListener((msg, sender) => {
   }
   if (msg.type === 'VISOR_BACK_TO_WRITING') {
     getState().then(async (s) => {
-      if (!s || s.visorTabId == null) return;
+      if (!s) return;
+      // The blocked page took over the Visor tab itself (or that tab is gone):
+      // load the essay in this tab instead
+      let visorTab = null;
+      if (s.visorTabId != null) visorTab = await chrome.tabs.get(s.visorTabId).catch(() => null);
+      if (!visorTab || (sender.tab && sender.tab.id === s.visorTabId) || !VisorConfig.isVisorOrigin(visorTab.url || '')) {
+        if (sender.tab) {
+          await chrome.tabs.update(sender.tab.id, { url: `${s.origin}/write/${encodeURIComponent(s.assignmentId)}` }).catch(() => {});
+          await patchState((x) => { x.visorTabId = sender.tab.id; x.visorWindowId = sender.tab.windowId; });
+        }
+        return;
+      }
       try { await chrome.tabs.update(s.visorTabId, { active: true }); } catch (_) {}
       if (s.visorWindowId != null) chrome.windows.update(s.visorWindowId, { focused: true }).catch(() => {});
       if (sender.tab && sender.tab.id !== s.visorTabId) chrome.tabs.remove(sender.tab.id).catch(() => {});
@@ -633,6 +715,16 @@ chrome.runtime.onMessage.addListener((msg, sender) => {
 
 const LINKED_TTL_MS = 10 * 60 * 1000;
 const AUTO_SEND_EVERY_MS = 5 * 60 * 1000;
+
+// Not connected: the Visor site open in a tab (a local copy while testing),
+// else the default address
+async function openVisorOrigin() {
+  const tabs = await chrome.tabs.query({}).catch(() => []);
+  for (const t of tabs) {
+    try { const o = new URL(t.url || '').origin; if (VisorConfig.VISOR_WEB_ORIGINS.includes(o)) return o; } catch (_) {}
+  }
+  return VisorConfig.VISOR_DEFAULT_ORIGIN;
+}
 
 async function linkedDocs(force) {
   const auth = await getAuth();
@@ -659,11 +751,19 @@ async function noteSent(fileId, names) {
   await chrome.storage.local.set({ visorSent: Object.fromEntries(keep) });
 }
 
+// A Doc linked a moment ago shouldn't wait out the 10-minute cache: on a
+// miss, a cache older than a minute is refreshed
+async function isLinked(fileId) {
+  if ((await linkedDocs()).some((d) => d.fileId === fileId)) return true;
+  const cache = (await chrome.storage.session.get('visorLinked')).visorLinked;
+  if (cache && Date.now() - cache.at < 60 * 1000) return false;
+  return (await linkedDocs(true)).some((d) => d.fileId === fileId);
+}
+
 async function autoSend(msg) {
   const fileId = msg.fileId || (msg.report && msg.report.meta && msg.report.meta.fileId);
   if (!fileId || !msg.report) return { ok: false };
-  const linked = (await linkedDocs()).filter((d) => d.fileId === fileId);
-  if (!linked.length) return { ok: false, linked: false };
+  if (!(await isLinked(fileId))) return { ok: false, linked: false };
   const last = (await sentLog())[fileId];
   if (last && Date.now() - last.at < AUTO_SEND_EVERY_MS) return { ok: true, throttled: true };
   try {
@@ -691,7 +791,7 @@ async function sendNow(msg) {
     if (msg.code) {
       // Not connected: the project code route (no sign-in needed)
       const auth = await getAuth();
-      const base = (auth && auth.origin) || VisorConfig.VISOR_DEFAULT_ORIGIN;
+      const base = (auth && auth.origin) || await openVisorOrigin();
       const res = await fetch(`${base}/api/extension/ingest`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: String(msg.code).trim().toUpperCase(), report }) });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) return { ok: false, error: data.error || `Visor said ${res.status}` };
@@ -708,7 +808,7 @@ async function sendNow(msg) {
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (!msg) return false;
   const reply = (p) => { p.then(sendResponse, (e) => sendResponse({ ok: false, error: String((e && e.message) || e) })); return true; };
-  if (msg.type === 'VISOR_IS_LINKED') return reply(linkedDocs().then((docs) => ({ linked: docs.some((d) => d.fileId === msg.fileId) })));
+  if (msg.type === 'VISOR_IS_LINKED') return reply(isLinked(msg.fileId).then((linked) => ({ linked })));
   if (msg.type === 'VISOR_AUTO_SEND') return reply(autoSend(msg));
   if (msg.type === 'VISOR_SEND_STATE') return reply(sendState(msg.fileId));
   if (msg.type === 'VISOR_SEND') return reply(sendNow(msg));

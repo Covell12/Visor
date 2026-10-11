@@ -23,7 +23,7 @@ const ck = (name, got, want) => {
 };
 
 // ── A small chrome.* ───────────────────────────────────────────────────────
-function makeChrome() {
+function makeChrome(seed = {}) {
   const calls = [];
   const ev = () => { const fns = []; return { addListener: (f) => fns.push(f), fns }; };
   const store = (area) => {
@@ -55,13 +55,15 @@ function makeChrome() {
     webNavigation: { onCommitted: ev() },
     contextMenus: { create: rec('contextMenus.create'), removeAll: rec('contextMenus.removeAll'), update: rec('contextMenus.update'), onClicked: ev() },
     commands: { onCommand: ev() },
-    declarativeNetRequest: { updateDynamicRules: rec('dnr.update'), getDynamicRules: async () => [] }
+    declarativeNetRequest: { updateDynamicRules: async (u) => { calls.push(['dnr.update', JSON.parse(JSON.stringify(u))]); dnr = dnr.filter((r) => !(u.removeRuleIds || []).includes(r.id)).concat(u.addRules || []); }, getDynamicRules: async () => dnr }
   };
+  let dnr = seed.dnr || [];
+  Object.assign(chrome.storage.local.data, seed.local || {});
   return { chrome, calls, tabs };
 }
 
-function load() {
-  const { chrome, calls, tabs } = makeChrome();
+function load(seed) {
+  const { chrome, calls, tabs } = makeChrome(seed);
   const fetches = [];
   const ctx = {
     chrome, console, setTimeout, clearTimeout, setInterval, clearInterval, URL, TextEncoder, crypto: require('crypto').webcrypto,
@@ -155,6 +157,16 @@ const callsOf = (calls, name) => calls.filter((c) => c[0] === name).map((c) => c
   ck('v3.6: switching to another tab closes it there', callsOf(h.calls, 'setOptions').map((c) => [c[0].tabId, c[0].enabled]), []);
   const ps2 = await h.send({ type: 'VISOR_PANEL_STATE' }, {});
   ck('the panel knows there’s no session', ps2.active, false);
+
+  // ── Chrome restarted mid-session: session storage is gone, the rest isn't ──
+  const r2 = load({ local: { visorSessionLive: { docId: 'd1' } }, dnr: [{ id: 9100, priority: 1, action: { type: 'redirect' }, condition: {} }, { id: 5, priority: 1, action: { type: 'block' }, condition: {} }] });
+  await settle(); await settle();
+  ck('after a restart, Visor’s own lockdown rules are removed', (await r2.chrome.declarativeNetRequest.getDynamicRules()).map((x) => x.id), [5]);
+  ck('  the badge is cleared and the popup is back', [callsOf(r2.calls, 'setBadgeText').at(-1), callsOf(r2.calls, 'setPopup').at(-1)], [[{ text: '' }], [{ popup: 'popup.html' }]]);
+  ck('  the flag is gone', (await r2.chrome.storage.local.get('visorSessionLive')).visorSessionLive, undefined);
+  const r3 = load();
+  await settle(); await settle();
+  ck('a normal start (no flag, no rules) changes nothing', callsOf(r3.calls, 'setPopup').length, 0);
 
   console.log(out.every(Boolean) ? `\nall passed (${out.length} checks)` : `\n${out.filter((x) => !x).length} FAILED`);
   process.exit(out.every(Boolean) ? 0 : 1);
