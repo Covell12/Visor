@@ -19,6 +19,8 @@ const crypto = require('crypto');
 
 const repo = require('./lib/repo');
 const audioStorage = require('./lib/audioStorage');
+const audioFormats = require('./lib/audioFormats');
+const audioConvert = require('./lib/audioConvert');
 const { normalizeReport, buildDriveReport } = require('./lib/reports');
 const { analyzeDriveFile } = require('./lib/drive');
 const legal = require('./lib/legalPages');
@@ -181,6 +183,7 @@ app.get('/api/config', (req, res) => {
     uploadMode: audioStorage.mode(),
     maxAudioMB: Math.round(audioStorage.MAX_AUDIO_BYTES / 1024 / 1024),
     chunkBytes: audioStorage.CHUNK_BYTES,
+    audioFormats: { byExt: audioFormats.FORMATS, byType: audioFormats.EXT_BY_TYPE, label: audioFormats.LABEL },
     google: googleReady() ? { ...GOOGLE } : null,
     googleSignIn: googleSignInReady() ? GOOGLE.clientId : null,
     geminiReady: geminiReady()
@@ -478,17 +481,8 @@ async function geminiJSON(parts, opts = {}) { return parseLooseJSON(await gemini
 // (we know Speaker 1, Speaker 2… with sample quotes; the uploader tells us
 // who each one is) → status "ready" (script-style transcript with names).
 
-const ALLOWED_AUDIO_TYPES = ['audio/webm', 'audio/ogg', 'audio/mpeg', 'audio/mp3', 'audio/mp4', 'audio/x-m4a', 'audio/m4a', 'audio/aac', 'audio/wav', 'audio/x-wav', 'audio/wave', 'audio/flac', 'audio/x-flac', 'audio/aiff', 'audio/x-aiff', 'video/mp4', 'video/webm', 'video/quicktime'];
-const MIME_BY_EXT = { webm: 'audio/webm', mp3: 'audio/mp3', m4a: 'audio/mp4', mp4: 'audio/mp4', wav: 'audio/wav', ogg: 'audio/ogg', flac: 'audio/flac', aac: 'audio/aac', aiff: 'audio/aiff' };
-// The stored file name and type only ever come from these known lists.
-function audioMime(filename, mime) {
-  const ext = (String(filename || '').split('.').pop() || '').toLowerCase();
-  const given = typeof mime === 'string' ? mime.split(';')[0].trim().toLowerCase() : '';
-  const mimeType = (given.startsWith('audio/') && ALLOWED_AUDIO_TYPES.includes(given) ? given : null) || own(MIME_BY_EXT, ext) || 'audio/webm';
-  const byType = Object.entries(MIME_BY_EXT).find(([, t]) => t === mimeType)?.[0];
-  const fileExt = own(MIME_BY_EXT, ext) ? ext : (byType || (mimeType === 'audio/mpeg' ? 'mp3' : 'webm'));
-  return { mimeType, fileExt };
-}
+// Accepted recording types: lib/audioFormats.js. The stored file name and type
+// only ever come from that list.
 
 // A transcription that has been "transcribing" longer than the job is allowed
 // to run (9 minutes on Firebase) was cut off. Say so, so the "Try again" button
@@ -530,6 +524,53 @@ async function startTranscription(resourceId) {
   transcriptionJobs.set(resourceId, job);
 }
 
+// Send a recording to Gemini and return its parsed JSON answer.
+// The sound is converted to a small MP3 first (lib/audioConvert.js). Small
+// MP3s go inside the request; bigger ones (over ~1 hour) are put in Cloud
+// Storage for a moment so Vertex AI can read them from there.
+const INLINE_AUDIO_MAX = Number(process.env.INLINE_AUDIO_MAX_BYTES) || 18 * 1024 * 1024;
+const VERTEX_AUDIO_TYPE = { 'audio/aac': 'audio/x-aac' }; // Vertex's name for it (only used if conversion is unavailable)
+async function transcribeAudio(r, prompt) {
+  const opts = { temperature: 0.2, maxOutputTokens: 16000 };
+  const original = await audioStorage.readAudio(r.audio);
+  const ext = String(r.audio.path || r.audio.file || '').split('.').pop().toLowerCase();
+
+  let mp3 = null;
+  try {
+    mp3 = await audioConvert.convert(original, ext);
+  } catch (err) {
+    if (err instanceof audioConvert.UnreadableAudio) throw new Error(err.message);
+    console.warn('converting the recording failed; sending the original:', err.message);
+  }
+  const send = mp3
+    ? { mimeType: 'audio/mp3', data: mp3, gsUri: null }
+    : { mimeType: GEMINI_VIA === 'vertex' ? (VERTEX_AUDIO_TYPE[r.audio.mime] || r.audio.mime) : r.audio.mime, data: original, gsUri: GEMINI_VIA === 'vertex' ? audioStorage.gcsUri(r.audio) : null };
+
+  const inline = () => geminiJSON([{ text: prompt }, { inlineData: { mimeType: send.mimeType, data: send.data.toString('base64') } }], opts);
+  const viaStorage = async uri => {
+    try {
+      return await geminiJSON([{ text: prompt }, { fileData: { mimeType: send.mimeType, fileUri: uri } }], opts);
+    } catch (err) {
+      if (!/^Gemini (400|403):/.test(err.message)) throw err;
+      console.warn('Vertex AI could not read the recording from Cloud Storage; sending it inline instead:', err.message);
+      return inline();
+    }
+  };
+
+  try {
+    if (GEMINI_VIA === 'vertex' && send.data.length > INLINE_AUDIO_MAX && audioStorage.mode() === 'gcs') {
+      if (send.gsUri) return await viaStorage(send.gsUri);
+      const temp = await audioStorage.saveTemp(`transcode/${r.id}.mp3`, send.data, send.mimeType);
+      try { return await viaStorage(temp.uri); } finally { await temp.remove(); }
+    }
+    return await inline();
+  } catch (err) {
+    // Say plainly when it's the recording Google rejected, not a setup problem.
+    if (/^Gemini 400:/.test(err.message)) throw new Error(`Gemini couldn't process this recording. ${err.message.replace(/^Gemini 400:\s*/, 'Google said: ')}`);
+    throw err;
+  }
+}
+
 async function transcribeResource(resourceId) {
   const r = await repo.getResource(resourceId);
   if (!r || r.type !== 'audio') return;
@@ -550,26 +591,7 @@ Return ONLY JSON in this shape:
 }
 Keep every line short (one thought each). Every line's speaker must be one of the labels in "speakers".`;
 
-  const opts = { temperature: 0.2, maxOutputTokens: 16000 };
-  const inline = async () => geminiJSON([
-    { text: prompt },
-    { inlineData: { mimeType: r.audio.mime, data: (await audioStorage.readAudio(r.audio)).toString('base64') } }
-  ], opts);
-  let parsed;
-  const gsUri = GEMINI_VIA === 'vertex' ? audioStorage.gcsUri(r.audio) : null;
-  if (gsUri) {
-    // Vertex AI reads the recording straight from Cloud Storage (no size limit
-    // from sending it inside the request). If it can't, send the bytes instead.
-    try {
-      parsed = await geminiJSON([{ text: prompt }, { fileData: { mimeType: r.audio.mime, fileUri: gsUri } }], opts);
-    } catch (err) {
-      if (!/^Gemini (400|403):/.test(err.message)) throw err;
-      console.warn('Vertex AI could not read the recording from Cloud Storage; sending it inline instead:', err.message);
-      parsed = await inline();
-    }
-  } else {
-    parsed = await inline();
-  }
+  const parsed = await transcribeAudio(r, prompt);
 
   const lines = Array.isArray(parsed.lines) ? parsed.lines.map(l => ({ t: String(l.t || ''), speaker: String(l.speaker || 'Speaker 1'), text: String(l.text || '').trim() })).filter(l => l.text) : [];
   const labels = Array.from(new Set(lines.map(l => l.speaker)));
@@ -753,8 +775,9 @@ app.post('/api/projects/:id/resources/audio/uploads', requireAuth, ah(async (req
   const size = Number(req.body?.size);
   if (!Number.isInteger(size) || size <= 0) return res.status(400).json({ error: 'no audio received' });
   if (size > audioStorage.MAX_AUDIO_BYTES) return res.status(413).json({ error: 'That file is over 60 MB. Try a shorter or more compressed recording.' });
-  const { mimeType, fileExt } = audioMime(filename, mime);
-  const up = await audioStorage.startUpload({ projectId: got.project.id, ext: fileExt, mime: mimeType, size });
+  const format = audioFormats.audioFormat(filename, mime);
+  if (!format) return res.status(415).json({ error: audioFormats.unsupportedMessage(filename, mime), unsupportedType: true });
+  const up = await audioStorage.startUpload({ projectId: got.project.id, ext: format.ext, mime: format.mime, size });
   const uploadToken = sign(await getSessionSecret(), { kind: 'audio-upload', up, projectId: got.project.id, userId: got.me.id, exp: Date.now() + UPLOAD_TOKEN_MS }, 'audio-upload');
   res.json({ uploadToken, chunkBytes: audioStorage.CHUNK_BYTES });
 }));

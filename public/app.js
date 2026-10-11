@@ -69,7 +69,7 @@ const I = {
 };
 
 // Server settings: where recordings upload to, and the Google Drive picker keys (null when Drive isn't set up).
-let CFG = { uploadMode: 'local', maxAudioMB: 60, chunkBytes: 4194304, google: null };
+let CFG = { uploadMode: 'local', maxAudioMB: 60, chunkBytes: 4194304, google: null, audioFormats: null };
 const configReady = fetch('/api/config').then(r => r.json()).then(c => { CFG = { ...CFG, ...c }; }).catch(() => {});
 
 let toastTimer;
@@ -569,10 +569,36 @@ function openAddResource() {
 
 // Send a recording to the server in 4 MB pieces (so big files fit through the
 // hosting limits), then register it so transcription starts.
-const AUDIO_TYPE_BY_EXT = { mp3: 'audio/mpeg', m4a: 'audio/mp4', mp4: 'audio/mp4', wav: 'audio/wav', webm: 'audio/webm', ogg: 'audio/ogg', flac: 'audio/flac', aac: 'audio/aac', aiff: 'audio/aiff' };
+// Which recording types Visor takes. The list comes from the server
+// (lib/audioFormats.js); this copy is only used until /api/config arrives.
+const AUDIO_FORMATS_FALLBACK = {
+  byExt: { mp3: 'audio/mpeg', m4a: 'audio/mp4', aac: 'audio/aac', wav: 'audio/wav', webm: 'audio/webm', ogg: 'audio/ogg', oga: 'audio/ogg', opus: 'audio/ogg', flac: 'audio/flac', aiff: 'audio/aiff', aif: 'audio/aiff', mp4: 'audio/mp4', mov: 'audio/mp4' },
+  byType: { 'audio/mpeg': 'mp3', 'audio/mp3': 'mp3', 'audio/mp4': 'm4a', 'audio/x-m4a': 'm4a', 'audio/aac': 'aac', 'audio/wav': 'wav', 'audio/x-wav': 'wav', 'audio/wave': 'wav', 'audio/webm': 'webm', 'video/webm': 'webm', 'audio/ogg': 'ogg', 'audio/flac': 'flac', 'audio/aiff': 'aiff', 'video/mp4': 'mp4', 'video/quicktime': 'mov' },
+  label: 'MP3, M4A, WAV, WebM, OGG, FLAC, AAC or AIFF audio, or MP4/MOV video'
+};
+const audioFormats = () => CFG.audioFormats || AUDIO_FORMATS_FALLBACK;
+const hasKey = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+// → { ext, type } if Visor takes this file, or null. Same rule as the server.
+function recordingFormat(filename, type) {
+  const F = audioFormats();
+  const name = String(filename || ''); const dot = name.lastIndexOf('.');
+  const ext = dot > 0 ? name.slice(dot + 1).toLowerCase() : '';
+  if (ext && hasKey(F.byExt, ext)) return { ext, type: F.byExt[ext] };
+  const t = String(type || '').split(';')[0].trim().toLowerCase();
+  if (t && hasKey(F.byType, t)) return { ext: F.byType[t], type: F.byExt[F.byType[t]] };
+  return null;
+}
+function unsupportedRecordingMessage(filename, type) {
+  const name = String(filename || ''); const dot = name.lastIndexOf('.');
+  const what = dot > 0 ? `.${name.slice(dot + 1).toLowerCase()} files aren't` : (type ? `"${String(type).split(';')[0]}" files aren't` : "That kind of file isn't");
+  return `${what} supported for recordings. Use ${audioFormats().label}.`;
+}
+const recordingAccept = () => ['audio/*', 'video/mp4', 'video/quicktime', ...Object.keys(audioFormats().byExt).map(e => '.' + e)].join(',');
+
 async function sendRecording(fileOrBlob, { filename, title, duration, onProgress }) {
-  const ext = (String(filename).split('.').pop() || '').toLowerCase();
-  const type = (fileOrBlob.type || AUDIO_TYPE_BY_EXT[ext] || 'audio/webm').split(';')[0];
+  const format = recordingFormat(filename, fileOrBlob.type);
+  if (!format) throw new Error(unsupportedRecordingMessage(filename, fileOrBlob.type));
+  const type = (fileOrBlob.type || format.type).split(';')[0];
   if (!fileOrBlob.size) throw new Error('That recording is empty.');
   if (fileOrBlob.size > CFG.maxAudioMB * 1024 * 1024) throw new Error(`That file is over ${CFG.maxAudioMB} MB. Try a shorter or more compressed recording.`);
   const base = `/api/projects/${project.id}/resources/audio`;
@@ -599,12 +625,12 @@ async function sendRecording(fileOrBlob, { filename, title, duration, onProgress
 }
 
 function showUploadAudio() {
-  openModal({ title: 'Upload a recording', sub: 'MP3, M4A, WAV, WebM or OGG. Visor transcribes it and asks you who each voice is.', body: `
+  openModal({ title: 'Upload a recording', sub: `${audioFormats().label}. Visor transcribes it and asks you who each voice is.`, body: `
     <div id="dropzone" class="dropzone" onclick="$('fileInput').click()" ondragover="event.preventDefault();this.classList.add('over')" ondragleave="this.classList.remove('over')" ondrop="onDrop(event)">
       ${I.upload}
       <div style="font-weight:600;margin-top:8px;">Drop an audio file here, or click to choose</div>
-      <div class="muted small" style="margin-top:4px;">Up to 60 MB</div>
-      <input id="fileInput" type="file" accept="audio/*,.m4a,.mp3,.wav,.webm,.ogg" class="hidden" onchange="onFilePicked(this.files[0])" />
+      <div class="muted small" style="margin-top:4px;">Up to ${CFG.maxAudioMB} MB</div>
+      <input id="fileInput" type="file" accept="${recordingAccept()}" class="hidden" onchange="onFilePicked(this.files[0])" />
     </div>
     <div class="field" style="margin-top:16px;"><label>Title</label><input id="upTitle" class="input" placeholder="e.g. Planning meeting, Tuesday" /></div>
     <div id="upStatus"></div>`,
@@ -614,8 +640,20 @@ let pickedFile = null;
 function onDrop(e) { e.preventDefault(); $('dropzone').classList.remove('over'); const f = e.dataTransfer.files[0]; if (f) onFilePicked(f); }
 function onFilePicked(f) {
   if (!f) return;
+  const input = `<input id="fileInput" type="file" accept="${recordingAccept()}" class="hidden" onchange="onFilePicked(this.files[0])" />`;
+  const problem = !recordingFormat(f.name, f.type) ? unsupportedRecordingMessage(f.name, f.type)
+    : f.size > CFG.maxAudioMB * 1024 * 1024 ? `That file is ${(f.size / 1024 / 1024).toFixed(0)} MB. The limit is ${CFG.maxAudioMB} MB; try a shorter or more compressed recording.`
+    : !f.size ? 'That file is empty.' : '';
+  if (problem) {
+    pickedFile = null;
+    $('dropzone').classList.add('bad');
+    $('dropzone').innerHTML = `${I.upload}<div style="font-weight:600;margin-top:8px;">${esc(f.name)}</div><div class="dz-error" role="alert">${esc(problem)}</div><div class="muted small" style="margin-top:6px;">Click to choose a different file</div>${input}`;
+    $('upBtn').disabled = true;
+    return;
+  }
   pickedFile = f;
-  $('dropzone').innerHTML = `${I.check}<div style="font-weight:600;margin-top:8px;">${esc(f.name)}</div><div class="muted small">${(f.size / 1024 / 1024).toFixed(1)} MB · click to change</div><input id="fileInput" type="file" accept="audio/*" class="hidden" onchange="onFilePicked(this.files[0])" />`;
+  $('dropzone').classList.remove('bad');
+  $('dropzone').innerHTML = `${I.check}<div style="font-weight:600;margin-top:8px;">${esc(f.name)}</div><div class="muted small">${(f.size / 1024 / 1024).toFixed(1)} MB · click to change</div>${input}`;
   if (!$('upTitle').value) $('upTitle').value = f.name.replace(/\.[a-z0-9]+$/i, '');
   $('upBtn').disabled = false;
 }
@@ -662,6 +700,9 @@ function showRecordAudio() {
 }
 async function toggleRecord() {
   if (rec.recorder && rec.recorder.state === 'recording') { rec.recorder.stop(); return; }
+  if (typeof MediaRecorder === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+    toast("This browser can't record audio. Use Chrome, Safari, Edge or Firefox, or upload a recording instead.", 'err'); return;
+  }
   try {
     rec.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
   } catch { toast('Microphone access was blocked. Allow it in the browser and try again.', 'err'); return; }
@@ -703,8 +744,10 @@ async function saveRecording() {
   const btn = $('recSave');
   btn.disabled = true; btn.innerHTML = `<span class="spinner spinner-sm"></span> Saving…`;
   try {
-    const ext = (rec.blob.type || 'audio/webm').includes('mp4') ? 'm4a' : 'webm';
-    const r = await sendRecording(rec.blob, { filename: `recording.${ext}`, title: $('recTitle').value.trim() || 'Recording', duration: rec.duration || (Date.now() - rec.start) / 1000, onProgress: p => { btn.innerHTML = `<span class="spinner spinner-sm"></span> Saving… ${p}%`; } });
+    // Name the file after what the browser actually recorded (Chrome: WebM, Safari: MP4).
+    const fmt = rec.blob.type ? recordingFormat('', rec.blob.type) : { ext: 'webm' };
+    if (!fmt) throw new Error(`This browser recorded in a format Visor doesn't support (${rec.blob.type.split(';')[0]}). Try Chrome or Safari, or upload a recording instead.`);
+    const r = await sendRecording(rec.blob, { filename: `recording.${fmt.ext}`, title: $('recTitle').value.trim() || 'Recording', duration: rec.duration || (Date.now() - rec.start) / 1000, onProgress: p => { btn.innerHTML = `<span class="spinner spinner-sm"></span> Saving… ${p}%`; } });
     modalOnClose = null; afterAudioAdded(r.resource);
   } catch (e) { toast(e.message, 'err'); $('recSave').disabled = false; $('recSave').textContent = 'Save & transcribe'; }
 }

@@ -1,12 +1,13 @@
-// Firebase entry point. `firebase deploy` reads this file and creates two
+// Firebase entry point. `firebase deploy` reads this file and creates the
 // Cloud Functions:
 //
 //   api        — the whole Express app (server.js). Firebase Hosting sends
 //                /api/**, /privacy and /terms here; everything else is served
 //                straight from public/.
 //   transcribe — runs when the api writes a job to visor_jobs: downloads the
-//                recording, has Gemini transcribe it, saves the result. One
-//                recording per instance at a time (each needs ~200 MB of memory).
+//                recording, converts it to a small MP3 (ffmpeg), has Gemini
+//                transcribe it, saves the result. One recording per instance
+//                at a time (each needs ~300 MB of memory).
 //
 // On your computer, `npm start` runs server.js directly and this file isn't used.
 
@@ -34,7 +35,7 @@ exports.api = onRequest(
 );
 
 exports.transcribe = onDocumentCreated(
-  { document: 'visor_jobs/{jobId}', secrets: [GEMINI_API_KEY], memory: '1GiB', timeoutSeconds: 540, concurrency: 1, retry: false },
+  { document: 'visor_jobs/{jobId}', secrets: [GEMINI_API_KEY], memory: '1GiB', cpu: 1, timeoutSeconds: 540, concurrency: 1, retry: false },
   async event => {
     const job = event.data?.data();
     try {

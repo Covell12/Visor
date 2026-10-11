@@ -242,6 +242,9 @@ textarea.input { min-height: 120px; resize: vertical; line-height: 1.5; }
 .dropzone { border: 2px dashed var(--line); border-radius: var(--r-lg); padding: 34px 20px; text-align: center; background: var(--surface); transition: all .12s; }
 .dropzone.over, .dropzone:hover { border-color: var(--blue); background: var(--blue-soft); }
 .dropzone svg { width: 30px; height: 30px; color: var(--blue-deep); }
+.dropzone.bad { border-color: var(--red); background: var(--red-soft); }
+.dropzone.bad svg { color: var(--red); }
+.dz-error { color: var(--red); font-size: 13.5px; margin: 8px auto 0; max-width: 420px; line-height: 1.45; }
 .rec { display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 16px 0; }
 .rec-btn { width: 76px; height: 76px; border-radius: 50%; border: 0; background: var(--grad); color: #fff; display: flex; align-items: center; justify-content: center; box-shadow: 0 8px 24px rgba(77,190,220,0.4); }
 .rec-btn.on { background: var(--red); box-shadow: 0 0 0 10px rgba(217,83,79,0.15); animation: recpulse 1.2s infinite; }

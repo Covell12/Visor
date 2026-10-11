@@ -74,6 +74,18 @@ To check it's connected: `firebase functions:log --only stopBilling` shows a lin
 
 To bring the site back after a cut-off: **Billing → Account management → My projects** → the project's ⋮ menu → **Change billing** → pick your billing account.
 
+### Optional: deploy automatically from GitHub
+
+`.github/workflows/deploy.yml` runs `firebase deploy` every time you push to the `web-app` branch.
+
+1. **A deploy account:** in **console.cloud.google.com** (your Firebase project) → **IAM & Admin → Service Accounts → Create service account**. Name it `github-deploy`. Give it the roles **Editor** and **Service Account User**. Then open it → **Keys → Add key → Create new key → JSON**. A `.json` file downloads. Treat it like a password: never put it in the repo.
+2. **Two GitHub secrets:** your repo → **Settings → Secrets and variables → Actions → New repository secret**:
+   - `FIREBASE_SERVICE_ACCOUNT`: paste the whole contents of the `.json` file.
+   - `VISOR_ENV`: paste the whole contents of your `.env` file.
+3. **Push.** The **Actions** tab shows each deploy. Delete the downloaded `.json` file afterwards.
+
+If the key is ever exposed, delete it on the service account's **Keys** tab and make a new one.
+
 ### Updating later
 
 Edit the files, then run `firebase deploy` again. For page-only changes (anything in `public/`), `firebase deploy --only hosting` is faster. To see server errors: `firebase functions:log`.
@@ -94,7 +106,7 @@ Then open http://localhost:3000. Put `GEMINI_API_KEY` (and `SESSION_SECRET` if y
 3. **Resources tab.** Anyone in the project can add:
    - **Document data from the Visor extension.** On the extension's Overview tab, type the project code (the `#` chip, which only teachers see) under **Send to Website**. Re-sending the same document replaces the earlier report.
    - **From Google Drive.** Pick a Doc or Slides file in Google's picker. Visor diffs its saved revisions and credits each change to whoever saved it.
-   - **Audio**, by uploading a file or recording in the browser. Gemini transcribes it and separates the voices, then Visor asks "Who is this?" for each voice.
+   - **Audio**, by uploading a file or recording in the browser. The server converts the sound to a small MP3 (so Chrome's WebM, Safari's MP4 and phone videos all work the same way), Gemini transcribes it and separates the voices, then Visor asks "Who is this?" for each voice.
 4. **Clicking a document** opens the same tabs as the extension's side panel: Overview (totals, growth, activity by day and hour), People, Timeline (writing sessions, or Drive saves), Evidence (each paste and deletion: who, when, how big; the text stays in the extension) and Signal (how the text arrived). Reports sent from extension versions before 3.1 show fewer of these; sending again fills them in.
 5. **Analysis tab.** The teacher runs it. Visor combines every document report and transcript, adds each student's writing habits (typed vs. pasted, external pastes, active time, sessions, typing speed) across all their documents, and Gemini writes the report. The teacher chooses whether students can see it.
 
@@ -122,6 +134,8 @@ storage.rules        Deny all browser access
 lib/platform.js      Firebase or local?
 lib/repo.js          Picks the data store: repoFirestore.js on Firebase, repoSql.js locally
 lib/audioStorage.js  Recordings: Cloud Storage or data/audio, uploaded in pieces
+lib/audioFormats.js  The recording types Visor accepts (the page gets the same list)
+lib/audioConvert.js  Converts a recording to a small MP3 for Gemini (ffmpeg-static)
 lib/session.js       The signed sign-in cookie (__session)
 lib/reports.js       Turns extension, Drive and older reports into one report shape
 lib/drive.js         Google Drive revisions → who added/removed what
@@ -131,7 +145,7 @@ public/              index.html, app.js, app.css, logos
 
 ## Limits and notes
 
-- **Recordings:** up to 60 MB each (MP3, M4A, WAV, WebM, OGG). Transcription can run for up to 9 minutes per recording. If it fails, the recording shows **Try again**; a recording that transcribed fine can't be re-run.
+- **Recordings:** up to 60 MB each: MP3, M4A, WAV, WebM, OGG, FLAC, AAC or AIFF audio, or MP4/MOV video (only the sound is used). Any other type is refused with a message saying which types work, before anything uploads. If a file has the right ending but no readable sound (damaged, or a video with no audio), the recording says so instead of transcribing. Transcription can run for up to 9 minutes per recording. If it fails, the recording shows **Try again**; a recording that transcribed fine can't be re-run.
 - **Abandoned uploads:** if someone closes the page partway through an upload, its pieces stay in the `uploads/` folder of Cloud Storage. Optional tidy-up: in Google Cloud Console → Cloud Storage → your bucket → **Lifecycle** → add a rule to delete objects with the prefix `uploads/` after 1 day.
 - **Hosting waits 60 seconds** for the server. Uploads and transcription are built around that. If an analysis takes longer, the page keeps checking and shows it when it's ready.
 - **Scale:** the server runs at most 10 copies at once (`maxInstances` in `index.js`), which caps cost. All accounts and projects share one compressed Firestore document, which has room for many thousands of accounts.
