@@ -293,6 +293,7 @@ async function permissionAnswered(granted) {
   if (granted && s && s.active && s.settings.researchTracking && !s.recording) {
     await patchState((x) => { x.recording = true; x.hasHostPermission = true; });
     await startResearchCapture();
+    await setBadge(true, true);
   }
   permissionWaiters.splice(0).forEach((r) => r({ ok: true, granted: !!granted }));
 }
