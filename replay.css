@@ -1,0 +1,630 @@
+/* ============================================================================
+ * Visor — Live Replay
+ * ==========================================================================*/
+
+* { box-sizing: border-box; }
+
+html, body { height: 100%; margin: 0; }
+
+body {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  gap: 10px;
+  padding: 12px;
+  font-family: 'Google Sans', Inter, -apple-system, BlinkMacSystemFont, sans-serif;
+  font-size: 13px;
+  color: var(--ink);
+  background: var(--page);
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+.hidden { display: none !important; }
+
+/* ── Top bar ───────────────────────────────────────────────────────────────*/
+
+.r-top {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 14px;
+  border-radius: var(--r-lg);
+  animation: visor-rise 0.6s var(--spring) both;
+}
+
+.r-title { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.r-title img { border-radius: 6px; }
+.r-title strong { display: block; font-size: 13.5px; }
+
+.r-clock {
+  display: block;
+  font-size: 11px;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.r-actors {
+  display: flex;
+  gap: 7px;
+  margin-left: auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.r-actor {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px 5px 6px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  background: var(--surface-3);
+  border: 1px solid var(--hairline);
+  opacity: 0.45;
+  transition: opacity 0.35s var(--ease), transform 0.5s var(--spring);
+}
+.r-actor.is-live {
+  opacity: 1;
+  transform: scale(1.05);
+  border: 1px solid var(--hairline);
+}
+.r-actor-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--c);
+}
+.r-actor.is-live .r-actor-dot { animation: visor-pulse 1.1s var(--ease) infinite; }
+
+.r-close {
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--ink-2);
+  background: var(--surface-3);
+  border: 1px solid var(--hairline);
+}
+.r-close:hover { color: var(--ink); }
+
+/* ── Stage ─────────────────────────────────────────────────────────────────*/
+
+.r-stage {
+  display: grid;
+  grid-template-columns: 1fr 260px;
+  gap: 10px;
+  min-height: 0;
+}
+.r-stage.is-solo { grid-template-columns: 1fr; }
+
+.r-paper {
+  position: relative;
+  border-radius: var(--r-xl);
+  overflow: hidden;
+  animation: visor-rise 0.7s var(--spring) 0.05s both;
+}
+
+.r-text {
+  height: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 30px 34px 60px;
+  font-family: 'Google Sans', Inter, system-ui, sans-serif;
+  font-size: 14.5px;
+  line-height: 1.75;
+  white-space: pre-wrap;
+  word-break: break-word;
+  scroll-behavior: smooth;
+}
+
+.r-text span { transition: background-color 0.7s var(--ease); }
+
+/* Freshly typed text glows briefly, then settles. */
+.r-fresh { animation: r-ignite 1.1s var(--ease) forwards; }
+@keyframes r-ignite {
+  0%   { background: color-mix(in srgb, var(--c) 45%, transparent); }
+  100% { background: transparent; }
+}
+
+/* A paste flares hot, a sheen sweeps across it, and within two seconds it has
+   faded back into the page. Durations match GLOW_MS in replay.js. */
+.r-paste-glow {
+  --glow: var(--hot-vivid, #FF6FA5);
+  border-radius: 4px;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+  background-image: linear-gradient(100deg, transparent 38%,
+    color-mix(in srgb, var(--glow) 25%, #FFFFFF 75%) 50%, transparent 62%);
+  background-size: 250% 100%;
+  background-position: 160% 0;
+  background-repeat: no-repeat;
+  animation:
+    r-paste-glow 1.7s cubic-bezier(0.3, 0, 0.2, 1) both,
+    r-paste-sheen 0.75s cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+@keyframes r-paste-glow {
+  0% {
+    background-color: color-mix(in srgb, var(--glow) 70%, transparent);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--glow) 95%, transparent),
+                0 0 14px 2px color-mix(in srgb, var(--glow) 60%, transparent);
+  }
+  30% {
+    background-color: color-mix(in srgb, var(--glow) 34%, transparent);
+    box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--glow) 80%, transparent),
+                0 0 10px 1px color-mix(in srgb, var(--glow) 35%, transparent);
+  }
+  100% {
+    background-color: transparent;
+    box-shadow: 0 0 0 1.5px transparent, 0 0 10px 1px transparent;
+  }
+}
+@keyframes r-paste-sheen {
+  0%   { background-position: 160% 0; }
+  100% { background-position: -60% 0; }
+}
+
+/* A tag over the start of the paste; absolutely placed, so the text never moves. */
+.r-paste-head { position: relative; }
+.r-paste-head::before {
+  content: attr(data-pasted);
+  position: absolute;
+  left: -2px;
+  bottom: calc(100% - 1px);
+  padding: 0 6px;
+  border-radius: 5px 5px 5px 2px;
+  white-space: nowrap;
+  font-size: 9.5px;
+  font-weight: 700;
+  line-height: 15px;
+  letter-spacing: 0.02em;
+  color: #FFFFFF;
+  background: linear-gradient(135deg, #FF6FA5, #E0356F);
+  box-shadow: 0 4px 12px -4px rgba(224, 53, 111, 0.7);
+  pointer-events: none;
+  animation: r-paste-tag 1.7s cubic-bezier(0.3, 0, 0.2, 1) both;
+  animation-delay: inherit;
+}
+@keyframes r-paste-tag {
+  0%   { opacity: 0; transform: translateY(4px) scale(0.9); }
+  10%  { opacity: 1; transform: none; }
+  65%  { opacity: 1; transform: none; }
+  100% { opacity: 0; transform: translateY(-3px); }
+}
+
+.r-caret {
+  position: absolute;
+  width: 2px;
+  height: 20px;
+  border-radius: 2px;
+  background: var(--c, var(--accent));
+  box-shadow: 0 0 10px 1px color-mix(in srgb, var(--c, var(--accent)) 65%, transparent);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s, transform 0.09s linear;
+}
+.r-caret.is-on { opacity: 1; animation: r-blink 1.05s steps(2, start) infinite; }
+@keyframes r-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
+
+/* ── Ghost pane ────────────────────────────────────────────────────────────*/
+
+.r-ghosts {
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--r-lg);
+  overflow: hidden;
+  animation: visor-rise 0.7s var(--spring) 0.12s both;
+}
+.r-ghosts.is-min { grid-row: auto; }
+
+.r-ghosts-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 13px 14px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  border-bottom: 1px solid var(--hairline-dim);
+}
+.r-ghosts-head button { margin-left: auto; }
+
+.r-ghosts-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.r-ghost {
+  flex-shrink: 0;
+  padding: 11px 12px;
+  border-radius: 12px;
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--ink-2);
+  background: var(--surface-3);
+  border: 1px solid var(--hairline);
+  animation: r-ghost-in 0.55s var(--spring) both;
+  position: relative;
+}
+
+@keyframes r-ghost-in {
+  from { opacity: 0; transform: translateX(14px) scale(0.96); filter: blur(4px); }
+  to   { opacity: 1; transform: none; filter: none; }
+}
+
+.r-ghost-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  margin-bottom: 6px;
+  font-size: 10px;
+  color: var(--ink-3);
+}
+.r-ghost-meta b { color: var(--c); font-weight: 650; }
+/* Clamped to four lines so one long deletion cannot squeeze every other
+ * entry out of the pane. */
+.r-ghost-text {
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in srgb, var(--hot) 60%, transparent);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.r-ghosts-empty {
+  padding: 20px 10px;
+  text-align: center;
+  font-size: 11px;
+  color: var(--ink-3);
+}
+
+/* ── Transport ─────────────────────────────────────────────────────────────*/
+
+.r-transport {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 14px;
+  border-radius: var(--r-lg);
+  animation: visor-rise 0.7s var(--spring) 0.18s both;
+}
+
+.r-play {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  border: none;
+  border-radius: 14px;
+  cursor: pointer;
+  color: #fff;
+  background: var(--accent);
+}
+
+.r-mini {
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--ink-2);
+  background: var(--surface-3);
+  border: 1px solid var(--hairline);
+}
+.r-mini:hover { color: var(--ink); }
+
+.r-scrub-wrap { flex: 1; min-width: 0; }
+
+.r-scrub {
+  position: relative;
+  height: 26px;
+  cursor: pointer;
+  touch-action: none;
+}
+
+.r-scrub-track {
+  position: absolute;
+  top: 10px;
+  left: 0;
+  right: 0;
+  height: 6px;
+  border-radius: 99px;
+  overflow: hidden;
+  background: var(--hairline-dim);
+}
+
+/* Density of editing across the document's life, drawn behind the fill. */
+.r-scrub-heat { position: absolute; inset: 0; display: flex; opacity: 0.55; }
+.r-scrub-heat i { display: block; height: 100%; }
+
+.r-scrub-fill {
+  position: absolute;
+  top: 0; left: 0; bottom: 0;
+  width: 0%;
+  border-radius: 99px;
+  background: var(--accent);
+  box-shadow: 0 0 12px -2px var(--accent);
+}
+
+.r-scrub-marks { position: absolute; top: 4px; left: 0; right: 0; height: 18px; }
+.r-scrub-mark {
+  position: absolute;
+  top: 0;
+  width: 2px;
+  height: 18px;
+  border-radius: 2px;
+  background: var(--hot);
+  opacity: 0.75;
+  transform: translateX(-1px);
+}
+.r-scrub-mark::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: 22px;
+  left: 50%;
+  transform: translateX(-50%) translateY(4px);
+  padding: 4px 7px;
+  border-radius: 7px;
+  font-size: 10px;
+  white-space: nowrap;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s var(--ease), transform 0.3s var(--spring);
+}
+.r-scrub-mark:hover { opacity: 1; }
+.r-scrub-mark:hover::after { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+.r-scrub-thumb {
+  position: absolute;
+  top: 6px;
+  left: 0;
+  width: 14px;
+  height: 14px;
+  margin-left: -7px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow:
+    0 0 0 1px var(--hairline-dim),
+    0 3px 10px -2px var(--shade-deep);
+  transition: transform 0.25s var(--spring);
+  pointer-events: none;
+}
+.r-scrub:hover .r-scrub-thumb,
+.r-scrub.is-dragging .r-scrub-thumb { transform: scale(1.3); }
+
+.r-scrub-legend {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 2px;
+  font-size: 10px;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.r-speeds { display: flex; gap: 2px; padding: 3px; border-radius: 11px; }
+.r-speeds button {
+  padding: 5px 9px;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  background: transparent;
+  color: var(--ink-3);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 650;
+  transition: all 0.3s var(--ease);
+}
+.r-speeds button.is-active {
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+}
+
+.r-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--ink-2);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.r-toggle input { accent-color: var(--accent); }
+
+/* ── Loading ───────────────────────────────────────────────────────────────*/
+
+.r-loading {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 14px;
+  font-size: 12px;
+  color: var(--ink-2);
+  background: var(--page);
+  transition: opacity 0.4s var(--ease);
+}
+.r-loading.is-gone { opacity: 0; pointer-events: none; }
+
+.v-loader { position: relative; width: 48px; height: 48px; }
+.v-loader-ring, .v-loader-core { position: absolute; inset: 0; border-radius: 50%; }
+.v-loader-ring {
+  border: 2px solid transparent;
+  border-top-color: var(--accent);
+  border-right-color: var(--accent-2);
+  animation: r-spin 1.05s cubic-bezier(0.6, 0.1, 0.4, 0.9) infinite;
+}
+.v-loader-core {
+  inset: 12px;
+  background: var(--accent);
+  filter: blur(1px);
+  animation: visor-pulse 1.9s var(--ease) infinite;
+}
+@keyframes r-spin { to { transform: rotate(360deg); } }
+
+::-webkit-scrollbar { width: 9px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 99px;
+  background: var(--hairline-dim);
+  background-clip: content-box;
+}
+
+@media (max-width: 880px) {
+  .r-stage { grid-template-columns: 1fr; }
+  .r-ghosts { display: none; }
+}
+
+/* ── Replay could not start ────────────────────────────────────────────────*/
+
+.r-load-fail {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  max-width: 300px;
+  text-align: center;
+}
+.r-load-fail-mark { font-size: 30px; color: var(--warm); }
+.r-load-fail p { margin: 0; font-size: 12.5px; line-height: 1.55; color: var(--ink-2); }
+
+.r-btn-quiet {
+  padding: 8px 18px;
+  border: none;
+  border-radius: 11px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 640;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+}
+
+/* ── Color-by-author switch ────────────────────────────────────────────────*/
+
+.r-switch {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+}
+
+/* The native checkbox stays focusable but invisible; the track is the control. */
+.r-switch input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.r-switch-track {
+  position: relative;
+  display: block;
+  width: 38px;
+  height: 22px;
+  flex-shrink: 0;
+  border-radius: 999px;
+  background: var(--hairline-dim);
+  border: 1px solid var(--hairline);
+  transition: background 0.35s var(--ease), box-shadow 0.35s var(--ease);
+}
+
+.r-switch-knob {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(10, 16, 32, 0.35);
+  transition: transform 0.45s var(--spring);
+}
+
+.r-switch input:checked + .r-switch-track {
+  background: var(--accent);
+  box-shadow:
+    inset 0 0 0 1px transparent,
+    0 3px 10px -4px var(--accent);
+}
+.r-switch input:checked + .r-switch-track .r-switch-knob {
+  transform: translateX(16px);
+}
+
+.r-switch input:focus-visible + .r-switch-track {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.r-switch:hover .r-switch-knob { transform: scale(1.06); }
+.r-switch:hover input:checked + .r-switch-track .r-switch-knob {
+  transform: translateX(16px) scale(1.06);
+}
+
+.r-switch-label {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--ink-2);
+  transition: color 0.25s var(--ease);
+}
+.r-switch input:checked ~ .r-switch-label { color: var(--ink); }
+
+/* ── Tab picker ────────────────────────────────────────────────────────────*/
+
+.r-scope { display: flex; align-items: center; gap: 8px; margin-left: 18px; }
+.r-scope.hidden { display: none; }
+
+.r-scope-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.r-scope-select {
+  max-width: 200px;
+  padding: 6px 26px 6px 10px;
+  border: none;
+  border-radius: 9px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 620;
+  color: var(--ink);
+  background: var(--surface-3);
+  border: 1px solid var(--hairline);
+  appearance: none;
+  background-image:
+    linear-gradient(45deg, transparent 50%, currentColor 50%),
+    linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position: calc(100% - 14px) calc(50% + 1px), calc(100% - 9px) calc(50% + 1px);
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+}
+.r-scope-select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

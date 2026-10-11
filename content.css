@@ -1,0 +1,689 @@
+/* ============================================================================
+ * Visor — Injected UI
+ * ----------------------------------------------------------------------------
+ * Everything here is scoped under a #visor-* id or .visor-* class so nothing
+ * leaks into the Google Docs editor. Tokens are declared locally rather than
+ * imported, because a content script cannot rely on @import resolving.
+ *
+ * NOTHING HERE MAY USE backdrop-filter.
+ *
+ * It is the reason the Docs window flickered. Chrome blurs a backdrop using
+ * "extend" edge handling: it guesses the pixels outside the element by
+ * repeating its edge pixels outward. A one-pixel scroll changes those edge
+ * pixels, so the extension changes completely and the blur resolves to a
+ * different colour on the very next frame. Docs repaints continuously — the
+ * caret alone blinks about twice a second — and each filtered element also
+ * costs a full readback of the destination texture per frame. Six of them sat
+ * over the editor.
+ *
+ * The surfaces below are opaque enough to look the same without it. Behind the
+ * HUD the page is white, and a heavy blur of white is white, so the filter was
+ * buying very little for what it cost.
+ *
+ * The side panel and the replay window are separate documents with static
+ * backgrounds and nothing repainting behind them, so their glass is genuine and
+ * stays. This restriction is only for what Visor injects into the editor.
+ * ==========================================================================*/
+
+.visor-launch,
+#visor-hud,
+#visor-hud-tab,
+#visor-replay-overlay {
+  --v-accent:   #1268C3;
+  --v-accent-2: #1268C3;
+  --v-hot:      #C3305F;
+  --v-warm:     #9A6100;
+  --v-ink:      #11161F;
+  --v-ink-2:    #5A6474;
+  --v-surface:  #FFFFFF;
+  --v-hair:     #E4E7EC;       /* borders */
+  --v-hair-dim: #E4E7EC;       /* dividers; one hairline everywhere now */
+  --v-shade:    rgba(17, 22, 31, 0.10);
+  --v-spring:   cubic-bezier(0.2, 0.7, 0.2, 1);
+  --v-ease:     cubic-bezier(0.32, 0.72, 0, 1);
+  font-family: 'Google Sans', Inter, -apple-system, BlinkMacSystemFont, sans-serif;
+  box-sizing: border-box;
+}
+
+.visor-launch *,
+#visor-hud *,
+#visor-hud-tab *,
+#visor-replay-overlay * { box-sizing: border-box; }
+
+/* Dark is opt-in per element. :root belongs to the Google Docs page, so each
+ * injected element carries the attribute itself. */
+.visor-launch[data-visor-theme="dark"],
+#visor-hud[data-visor-theme="dark"],
+#visor-hud-tab[data-visor-theme="dark"],
+#visor-replay-overlay[data-visor-theme="dark"] {
+  --v-accent:   #6BB2F5;
+  --v-accent-2: #6BB2F5;
+  --v-hot:      #F2789F;
+  --v-warm:     #E0A64A;
+  --v-ink:      #E9ECF2;
+  --v-ink-2:    #AEB6C3;
+  --v-surface:  #171B22;
+  --v-hair:     #2A303B;
+  --v-hair-dim: #2A303B;
+  --v-shade:    rgba(0, 0, 0, 0.45);
+}
+
+/* ── Launcher ──────────────────────────────────────────────────────────────*/
+
+.visor-launch {
+  /* Sits in the Docs title bar, whose controls are laid out tightly and can
+   * clip or overlap a late-injected sibling. A stacking context above them plus
+   * no-shrink keeps the pill whole and on top instead of cut off by its
+   * neighbours. */
+  position: relative;
+  z-index: 2147480000;
+  flex: 0 0 auto;
+  flex-shrink: 0;
+  isolation: isolate;
+
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  min-width: max-content;
+  /* Among Docs' own round title-bar controls now, so it is spaced like one of
+   * them rather than overlapped onto its neighbour. */
+  margin: 0 6px;
+  padding: 0 13px 0 9px;
+  border: 1px solid var(--v-hair);
+  border-radius: 999px;
+  cursor: pointer;
+  overflow: hidden;
+  color: var(--v-ink);
+  font-size: 12.5px;
+  font-weight: 620;
+  letter-spacing: 0.1px;
+  background: var(--v-surface);
+  box-shadow: 0 1px 2px rgba(17, 22, 31, 0.05);
+  transition:
+    background-color 0.15s var(--v-ease),
+    border-color 0.15s var(--v-ease),
+    box-shadow 0.15s var(--v-ease);
+  vertical-align: middle;
+}
+
+.visor-launch[data-visor-theme="light"] { background: #FFFFFF; }
+.visor-launch[data-visor-theme="dark"]  { background: #171B22; }
+
+/* Hover tints towards the accent rather than towards grey: this is the one
+   coloured thing Visor puts in the editor, and it should look alive. */
+.visor-launch:hover {
+  background: #F2F7FE;
+  border-color: #B8D3F2;
+  box-shadow: 0 2px 6px -1px rgba(18, 104, 195, 0.18);
+}
+.visor-launch[data-visor-theme="dark"]:hover {
+  background: #1B2430;
+  border-color: #33506E;
+  box-shadow: 0 2px 6px -1px rgba(0, 0, 0, 0.5);
+}
+.visor-launch:active { background: #E7F0FB; box-shadow: none; }
+.visor-launch[data-visor-theme="dark"]:active { background: #202B38; box-shadow: none; }
+
+.visor-launch-mark,
+.visor-launch-text { position: relative; z-index: 1; white-space: nowrap; }
+
+.visor-launch-mark { border-radius: 3px; }
+
+.visor-launch-floating {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 2147483000;
+  height: 36px;
+  margin: 0;
+  padding: 0 16px 0 13px;
+  font-size: 13.5px;
+  box-shadow: 0 8px 22px -12px var(--v-shade);
+  animation: visor-launch-in 0.35s var(--v-ease) both;
+}
+
+@keyframes visor-launch-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* ── Heads-up display ──────────────────────────────────────────────────────*/
+
+#visor-hud {
+  position: fixed;
+  left: 50%;
+  bottom: 20px;
+  z-index: 2147482000;
+  transform: translate(-50%, 26px);
+  opacity: 0;
+  transition:
+    transform 0.75s var(--v-spring),
+    opacity 0.45s var(--v-ease);
+  color: var(--v-ink);
+}
+
+#visor-hud.is-in { opacity: 1; transform: translate(-50%, 0); }
+
+#visor-hud.is-collapsed .vh-body,
+#visor-hud.is-collapsed .vh-glass { opacity: 0; pointer-events: none; transform: translateY(10px) scale(0.96); }
+/* Collapsed: the shell keeps its layout but must not intercept clicks. */
+#visor-hud.is-collapsed { pointer-events: none; }
+
+.vh-glass {
+  position: absolute;
+  inset: 0;
+  border: 1px solid var(--v-hair);
+  border-radius: 16px;
+  background: var(--v-surface);
+  box-shadow: 0 1px 2px rgba(17, 22, 31, 0.05), 0 14px 34px -20px rgba(17, 22, 31, 0.55);
+  transition: opacity 0.4s var(--v-ease), transform 0.5s var(--v-spring);
+}
+
+/* Compact: one line of text per element, so the bar is only as tall as its
+   buttons plus a little air. */
+.vh-body {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 7px 8px 7px 13px;
+  transition: opacity 0.35s var(--v-ease), transform 0.5s var(--v-spring);
+}
+
+.vh-brand {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+.vh-brand img { border-radius: 4px; }
+
+.vh-rule {
+  width: 1px;
+  height: 18px;
+  background: var(--v-hair);
+}
+
+.vh-chips { display: flex; gap: 10px; }
+
+.vh-chip {
+  min-width: 128px;
+  animation: visor-hud-chip 0.6s var(--v-spring) both;
+  animation-delay: var(--d, 0ms);
+}
+@keyframes visor-hud-chip {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.vh-chip-head {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  line-height: 14px;
+  margin-bottom: 3px;
+}
+.vh-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--c);
+}
+.vh-name {
+  max-width: 56px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+/* Share and active time together, right-aligned on the name's own line. */
+.vh-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  margin-left: auto;
+  white-space: nowrap;
+  font-size: 10.5px;
+  color: var(--v-ink-2);
+  font-variant-numeric: tabular-nums;
+}
+.vh-pct { font-weight: 650; color: var(--v-ink); }
+.vh-time::before { content: '·'; margin-right: 5px; color: var(--v-ink-2); opacity: 0.7; }
+
+.vh-track {
+  height: 3px;
+  border-radius: 999px;
+  background: var(--v-hair-dim);
+  overflow: hidden;
+}
+.vh-track i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--c);
+  transform-origin: left;
+  animation: visor-hud-fill 0.9s var(--v-spring) both;
+  animation-delay: calc(var(--d, 0ms) + 120ms);
+}
+@keyframes visor-hud-fill { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+
+
+.vh-stats {
+  display: flex;
+  gap: 11px;
+  font-size: 11px;
+  color: var(--v-ink-2);
+  white-space: nowrap;
+}
+.vh-stats b {
+  color: var(--v-ink);
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.vh-flag {
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 650;
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+}
+.vh-flag-hot  { background: color-mix(in srgb, var(--v-hot) 20%, transparent);  color: var(--v-hot); }
+.vh-flag-warm { background: color-mix(in srgb, var(--v-warm) 22%, transparent); color: #B87400; }
+.vh-flag-cool { background: color-mix(in srgb, var(--v-accent) 14%, transparent); color: #0F5AA8; }
+
+[data-visor-theme="dark"] .vh-flag-warm { color: var(--v-warm); }
+[data-visor-theme="dark"] .vh-flag-cool { color: var(--v-accent); }
+
+.vh-spark { display: flex; align-items: center; opacity: 0.95; }
+
+.vh-btn {
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: 999px;
+  cursor: pointer;
+  color: var(--v-ink-2);
+  font-size: 11px;
+  background: var(--v-hair-dim);
+  transition: color 0.15s var(--v-ease), background 0.15s var(--v-ease);
+}
+.vh-btn:hover { color: var(--v-ink); background: #E7EDF6; }
+.vh-btn:active { transform: scale(0.94); }
+[data-visor-theme="dark"] .vh-btn:hover { background: #262E3A; }
+
+/* The replay button is the one filled control in the bar: blue disc, white
+   triangle, so the thing people actually want is the thing they see first. */
+.vh-btn-play {
+  color: #FFFFFF;
+  background: var(--v-accent);
+}
+.vh-btn-play:hover { color: #FFFFFF; background: #0F5AA8; }
+.vh-btn-play svg { display: block; }
+[data-visor-theme="dark"] .vh-btn-play { color: #0B1220; background: var(--v-accent); }
+[data-visor-theme="dark"] .vh-btn-play:hover { background: #8CC5F8; }
+
+
+
+/* ── Replay overlay ────────────────────────────────────────────────────────*/
+
+#visor-replay-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.32s var(--v-ease);
+}
+#visor-replay-overlay.is-open { opacity: 1; pointer-events: auto; }
+
+/* Opaque, deliberately.
+ *
+ * This covers the whole viewport while the replay is open, and Google Docs
+ * behind it never stops repainting — the caret alone blinks about twice a
+ * second. At any alpha below 1 the browser has to composite the live page
+ * through this layer on every one of those repaints, for as long as the replay
+ * is up. Opaque, it can skip the page underneath entirely.
+ *
+ * It was 0.42 over an 8px blur, so the page was already obscured; this only
+ * finishes the job. */
+.vr-scrim {
+  position: absolute;
+  inset: 0;
+  background: #080D1A;
+}
+
+.vr-shell {
+  position: relative;
+  width: min(1180px, 94vw);
+  height: min(820px, 92vh);
+  border-radius: 26px;
+  overflow: hidden;
+  /* Slide, never scale. Scaling a layer that holds an iframe re-rasters the
+     whole frame on every step of the animation, and this one runs exactly while
+     the replay is loading and building its first view. */
+  transform: translateY(14px);
+  opacity: 0;
+  box-shadow:
+    0 40px 100px -30px rgba(6, 12, 28, 0.7),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.16);
+  transition: transform 0.62s var(--v-spring), opacity 0.4s var(--v-ease);
+}
+#visor-replay-overlay.is-open .vr-shell { transform: none; opacity: 1; }
+
+#visor-replay-frame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: none;
+  background: transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .visor-launch, #visor-hud, .vh-chip, .vh-track i, .vr-shell,
+  .visor-launch-floating, #visor-hud-tab {
+    animation: none !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* ── Minimised tab ─────────────────────────────────────────────────────────
+ * A sibling of the HUD, not a child. #visor-hud carries a translate() to
+ * centre itself, and a transformed ancestor becomes the containing block for
+ * `position: fixed` descendants — nested here, this tab would anchor to the
+ * HUD and sit off-screen rather than in the corner of the viewport.
+ */
+
+/* The collapsed bar: the mark and a play button in one white rounded
+   rectangle, in both themes — the mark is drawn for a white ground. */
+#visor-hud-tab {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 2147482001;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  border: 1px solid #E4E7EC;
+  border-radius: 16px;
+  cursor: pointer;
+  background: #FFFFFF;
+  box-shadow: 0 6px 18px -12px rgba(17, 22, 31, 0.5);
+
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(6px);
+  transition:
+    opacity 0.2s var(--v-ease),
+    transform 0.3s var(--v-ease),
+    border-color 0.15s var(--v-ease);
+}
+
+#visor-hud-tab.is-shown {
+  opacity: 1;
+  pointer-events: auto;
+  transform: none;
+}
+
+
+/* Dark pages get a dark rectangle: a white pill in the corner of a dark editor
+   reads as a hole in the page. */
+#visor-hud-tab[data-visor-theme="dark"] {
+  background: #171B22;
+  border-color: #2A303B;
+}
+#visor-hud-tab[data-visor-theme="dark"] .vt-open:hover { background: #1B2430; }
+#visor-hud-tab[data-visor-theme="dark"]:hover { border-color: #33506E; }
+
+/* Everything but the play button brings the bar back. */
+#visor-hud-tab .vt-open {
+  display: grid;
+  place-items: center;
+  padding: 6px 5px 6px 8px;
+  border: none;
+  border-radius: 12px;
+  cursor: pointer;
+  background: transparent;
+  transition: background 0.2s var(--v-ease);
+}
+#visor-hud-tab .vt-open img { display: block; width: 30px; height: 20px; }
+#visor-hud-tab .vt-open:hover { background: #F1F7FE; }
+
+/* A rounded triangle, not a disc: the button itself is only a hit area. */
+#visor-hud-tab .vt-play {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  border-radius: 12px;
+  cursor: pointer;
+  color: var(--v-accent);
+  background: transparent;
+  transition: transform 0.2s var(--v-ease);
+}
+#visor-hud-tab .vt-play svg { display: block; }
+#visor-hud-tab .vt-play:hover { transform: scale(1.06); }
+#visor-hud-tab .vt-play:active { transform: scale(0.9); transition-duration: 0.1s; }
+
+/* While the first read runs: the mark breathes, so the click looks received. */
+#visor-hud-tab.is-busy .vt-open img { animation: vt-breathe 1.2s var(--v-ease) infinite; }
+@keyframes vt-breathe { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+#visor-hud-tab.is-busy .vt-play { opacity: 0.45; pointer-events: none; }
+
+/* A word above the rectangle: "Reading edits…", or why nothing opened. */
+#visor-hud-tab .vt-hint {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  padding: 5px 9px;
+  border-radius: 8px;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 600;
+  color: #FFFFFF;
+  background: #11161F;
+  opacity: 0;
+  transform: translateY(3px);
+  pointer-events: none;
+  transition: opacity 0.16s var(--v-ease), transform 0.2s var(--v-ease);
+}
+#visor-hud-tab.is-hinting .vt-hint { opacity: 1; transform: none; }
+
+#visor-hud-tab button:focus-visible { outline: 2px solid #5AC8FA; outline-offset: 2px; }
+
+#visor-hud-tab:hover { border-color: #B8D3F2; box-shadow: 0 6px 18px -10px rgba(18, 104, 195, 0.45); }
+#visor-hud-tab:active { transform: scale(0.98); transition-duration: 0.1s; }
+
+/* ── Tab filter (drops up) ─────────────────────────────────────────────────
+ * The HUD is anchored to the bottom of the window, so the menu opens upward —
+ * a downward menu would render off-screen.
+ */
+
+/* Several HUD parts set `display`, which would win over the `hidden` attribute
+   on its own. They are hidden rather than removed so the glass layer beneath
+   them is never torn down and rebuilt. */
+#visor-hud [hidden] { display: none !important; }
+
+.vh-filter { position: relative; display: flex; }
+
+/* Grows to name the selection the whole bar is scoped to. */
+.vh-btn-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: auto;
+  padding: 0 10px 0 9px;
+}
+.vh-scope {
+  max-width: 92px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 650;
+}
+/* A dot marks current-tab mode: the scope moves as you change tabs in Docs. */
+.vh-btn-filter.is-following .vh-scope::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 5px;
+  border-radius: 50%;
+  background: var(--v-accent);
+  vertical-align: 1px;
+}
+
+/* Shown in place of the contributor chips when a tab has no recorded edits. */
+.vh-none {
+  padding: 0 4px;
+  font-size: 11px;
+  color: var(--v-ink-2);
+  white-space: nowrap;
+}
+.vh-filter.is-open .vh-btn-filter {
+  color: var(--v-ink);
+  background: color-mix(in srgb, var(--v-accent) 24%, transparent);
+}
+
+.vh-menu {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  right: -6px;
+  z-index: 5;
+  /* Eight rows per column (--vh-rows), filling top to bottom then left to
+     right; past two columns every column and its text shrink by --vh-scale. */
+  display: grid;
+  grid-template-rows: repeat(var(--vh-rows, 8), auto);
+  grid-auto-flow: column;
+  grid-auto-columns: calc(200px * var(--vh-scale, 1));
+  column-gap: 2px;
+  max-width: calc(100vw - 16px);
+  padding: 5px;
+  border-radius: 10px;
+  /* Literal, not var(--v-surface).
+   *
+   * This menu came out dark navy with dark text on a light page, while its own
+   * ::after arrow — reading the very same token — came out light. Tokens cannot
+   * disagree like that on one element, so the value was not reaching it
+   * intact. It floats over the document rather than sitting on the bar, so it
+   * has no reason to inherit anything: it states its own colours, opaque, and
+   * the dark variant below overrides them wholesale. */
+  background: #FFFFFF;
+  color: #11161F;
+  border: 1px solid #E4E7EC;
+  box-shadow: 0 14px 34px -18px rgba(17, 22, 31, 0.55);
+
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(6px);
+  transform-origin: bottom right;
+  transition:
+    opacity 0.16s var(--v-ease),
+    transform 0.2s var(--v-ease);
+}
+
+.vh-filter.is-open .vh-menu {
+  opacity: 1;
+  pointer-events: auto;
+  transform: none;
+}
+
+/* Little tail pointing back at the button. */
+.vh-menu::after {
+  content: '';
+  position: absolute;
+  right: 16px;
+  bottom: -5px;
+  width: 10px;
+  height: 10px;
+  transform: rotate(45deg);
+  background: #FFFFFF;
+  box-shadow: 1px 1px 0 #E4E7EC;
+}
+
+/* Dark variant, stated as literally as the light one above. */
+#visor-hud[data-visor-theme="dark"] .vh-menu {
+  background: #171B22;
+  color: #E9ECF2;
+  border-color: #2A303B;
+  box-shadow: 0 14px 34px -18px rgba(0, 0, 0, 0.7);
+}
+#visor-hud[data-visor-theme="dark"] .vh-menu::after {
+  background: #171B22;
+  box-shadow: 1px 1px 0 #2A303B;
+}
+#visor-hud[data-visor-theme="dark"] .vh-menu-item { color: #E9ECF2; }
+#visor-hud[data-visor-theme="dark"] .vh-menu-item:hover { background: #232934; }
+
+.vh-menu-item {
+  display: flex;
+  align-items: center;
+  gap: calc(8px * var(--vh-scale, 1));
+  width: 100%;
+  padding: calc(8px * var(--vh-scale, 1)) calc(10px * var(--vh-scale, 1));
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  background: transparent;
+  color: #11161F;   /* see .vh-menu: stated, not inherited */
+  font: inherit;
+  font-size: calc(12px * var(--vh-scale, 1));   /* after `font`, which resets it */
+  font-weight: 550;
+  text-align: left;
+  transition: background 0.2s var(--v-ease);
+}
+.vh-menu-item:hover { background: #F1F7FE; }
+.vh-menu-item.is-on { font-weight: 700; }
+
+.vh-menu-check { width: 12px; opacity: 0; color: var(--v-accent); font-size: 11px; }
+.vh-menu-item.is-on .vh-menu-check { opacity: 1; }
+
+.vh-menu-text {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The tab 'Current tab' resolves to, right-aligned beside it. Literal colours,
+   like the rest of this menu. */
+/* "Current tab" keeps its label whole; only the tab name beside it truncates. */
+.vh-menu-text:has(+ .vh-menu-sub) { flex-shrink: 0; }
+
+.vh-menu-sub {
+  flex: 0 1 auto;
+  min-width: 0;
+  margin-left: auto;
+  padding-left: 12px;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: calc(10.5px * var(--vh-scale, 1));
+  font-weight: 500;
+  color: #55637F;
+}
+#visor-hud[data-visor-theme="dark"] .vh-menu-sub { color: #838D9C; }
+
+.vh-menu-note {
+  padding: 8px 10px 4px;
+  margin-top: 4px;
+  border-top: 1px solid var(--v-hair-dim);
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: var(--v-ink-2);
+}

@@ -1,0 +1,76 @@
+{
+  "manifest_version": 3,
+  "name": "Visor — Who Wrote What: Google Docs History",
+  "short_name": "Visor",
+  "version": "3.6",
+  "description": "Free and unlimited. See who wrote what in any Google Doc: contributions, replay, paste detection, and recovered deleted text.",
+  "minimum_chrome_version": "116",
+  "permissions": [
+    "storage",
+    "sidePanel",
+    "tabs"
+  ],
+  "host_permissions": [
+    "https://docs.google.com/document/*",
+    "https://docs.google.com/presentation/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://docs.google.com/document/*",
+        "https://docs.google.com/presentation/*"
+      ],
+      "js": [
+        "page-probe.js"
+      ],
+      "world": "MAIN",
+      "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "https://docs.google.com/document/*",
+        "https://docs.google.com/presentation/*"
+      ],
+      "js": [
+        "changelog.js",
+        "content.js"
+      ],
+      "css": [
+        "content.css"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_title": "Visor — Who Wrote What: Google Docs History",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "logo.png",
+        "replay.html",
+        "replay.js",
+        "replay.css",
+        "glass.css",
+        "theme.js"
+      ],
+      "matches": [
+        "https://docs.google.com/*"
+      ]
+    }
+  ]
+}

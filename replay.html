@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Visor — Live Replay</title>
+  <script src="theme.js"></script>
+  <link rel="stylesheet" href="glass.css" />
+  <link rel="stylesheet" href="replay.css" />
+</head>
+<body>
+
+  <!-- ── Top bar ──────────────────────────────────────────────────────── -->
+  <header class="r-top glass">
+    <div class="r-title">
+      <img src="logo.png" alt="" width="30" height="20">
+      <div>
+        <strong id="r-doc">Live replay</strong>
+        <span id="r-clock" class="r-clock">—</span>
+      </div>
+    </div>
+
+    <div id="r-scope" class="r-scope hidden">
+      <label class="r-scope-label" for="r-scope-select">Tab</label>
+      <select id="r-scope-select" class="r-scope-select" aria-label="Document tab to replay"></select>
+    </div>
+
+    <div id="r-actors" class="r-actors"></div>
+
+    <button id="r-close" class="r-close lift" aria-label="Close replay">✕</button>
+  </header>
+
+  <!-- ── Stage ────────────────────────────────────────────────────────── -->
+  <main class="r-stage">
+    <div class="r-paper glass">
+      <div id="r-text" class="r-text" aria-live="off"></div>
+      <div id="r-caret" class="r-caret" aria-hidden="true"></div>
+    </div>
+
+    <!-- Ghost pane: what was deleted, as it is deleted -->
+    <aside class="r-ghosts glass" id="r-ghost-pane">
+      <div class="r-ghosts-head">
+        <span>Removed as you watch</span>
+        <button id="r-ghost-toggle" class="r-mini" title="Hide">–</button>
+      </div>
+      <div id="r-ghosts" class="r-ghosts-body"></div>
+    </aside>
+  </main>
+
+  <!-- ── Transport ────────────────────────────────────────────────────── -->
+  <footer class="r-transport glass">
+    <button id="r-play" class="r-play lift" aria-label="Play">
+      <svg class="r-icon-play" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+      <svg class="r-icon-pause hidden" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg>
+    </button>
+
+    <button id="r-restart" class="r-mini lift" title="Restart">↺</button>
+
+    <div class="r-scrub-wrap">
+      <div id="r-scrub" class="r-scrub" role="slider" tabindex="0"
+           aria-label="Scrub through the writing" aria-valuemin="0" aria-valuemax="100">
+        <div class="r-scrub-track">
+          <div id="r-scrub-heat" class="r-scrub-heat"></div>
+          <div id="r-scrub-fill" class="r-scrub-fill"></div>
+        </div>
+        <div id="r-scrub-marks" class="r-scrub-marks"></div>
+        <div id="r-scrub-thumb" class="r-scrub-thumb"></div>
+      </div>
+      <div class="r-scrub-legend">
+        <span id="r-pos">0 / 0 edits</span>
+        <span id="r-chars">0 chars</span>
+      </div>
+    </div>
+
+    <div class="r-speeds glass-thin" id="r-speeds">
+      <button data-x="1">1×</button>
+      <button data-x="4" class="is-active">4×</button>
+      <button data-x="16">16×</button>
+      <button data-x="64">64×</button>
+      <button data-x="0">max</button>
+    </div>
+
+    <label class="r-switch" title="Color text by who wrote it">
+      <input type="checkbox" id="r-colorize" checked>
+      <span class="r-switch-track" aria-hidden="true"><span class="r-switch-knob"></span></span>
+      <span class="r-switch-label">Color by author</span>
+    </label>
+  </footer>
+
+  <div id="r-loading" class="r-loading">
+    <div class="v-loader"><span class="v-loader-ring"></span><span class="v-loader-core"></span></div>
+    <p>Preparing replay…</p>
+  </div>
+
+  <script src="replay.js"></script>
+</body>
+</html>

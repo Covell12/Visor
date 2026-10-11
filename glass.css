@@ -1,0 +1,198 @@
+/* ============================================================================
+ * Visor — Surfaces
+ * ----------------------------------------------------------------------------
+ * The shared material layer: colour tokens, one surface treatment, and the
+ * handful of interaction and entrance rules everything else builds on.
+ *
+ * The rule here is restraint. A surface is a flat fill and a hairline border —
+ * no translucency, no blurred colour wash behind the page, no pointer-tracked
+ * highlight, no grain. Those were doing the work of drawing attention, and
+ * they drew it to the chrome instead of to the figures, which is the only
+ * thing in this extension worth looking at. Depth is carried by borders and,
+ * where something genuinely floats, one soft shadow.
+ *
+ * Colour is spent, not sprinkled: one accent, used for the current thing and
+ * for data. Gradients are reserved for the mark itself and for charts where a
+ * gradient encodes a value.
+ *
+ * There is no backdrop-filter here, and there must not be — it re-rasterises
+ * Google Docs' very large composited layers on every frame, which is what made
+ * the UI flicker.
+ * ==========================================================================*/
+
+/* ── Theme ─────────────────────────────────────────────────────────────────
+ * Light is the default, unconditionally. Dark is opt-in via data-theme="dark"
+ * on the root element, set by the theme toggle and persisted. The system
+ * preference is deliberately NOT consulted: a media query would silently
+ * override the user's explicit choice.
+ */
+
+:root {
+  /* Text — contrast-checked against --page. --ink-3 is used at 10–11px, so it
+   * is kept at ~5:1 rather than the ~3.5:1 a lighter grey would give. */
+  --ink:            #11161F;
+  --ink-2:          #414B5A;
+  --ink-3:          #6B7585;
+
+  --accent:         #1268C3;   /* one accent: the current thing, and data */
+  --accent-2:       #1268C3;   /* kept as a name so charts can key off it */
+  --hot:            #C3305F;
+  --warm:           #9A6100;
+  --good:           #17804A;
+
+  /* Saturated variants for fills and dots, where contrast is not the concern */
+  --accent-vivid:   #2E86DE;
+  --accent-2-vivid: #2E86DE;
+  --hot-vivid:      #E8447A;
+
+  --surface:        #FFFFFF;
+  --surface-2:      #F6F8FC;
+  --surface-3:      #EDF1F8;
+  --hairline:       #DFE5EF;   /* borders */
+  --hairline-dim:   #EAEEF6;   /* dividers inside a surface */
+
+  /* The headline panel. In light it is white with green type — the ink is the
+   * brand, not the ground — so the panel lifts off the page instead of
+   * punching a hole in it. White on white needs an edge, hence its own
+   * hairline and inner rule. Dark keeps its filled deep blue: an unfilled
+   * panel there would vanish. */
+  --ink-panel:      #FFFFFF;
+  --ink-panel-2:    #E6F1EB;   /* the author chips */
+  --ink-panel-line: #CFE3DA;   /* the panel's edge */
+  --ink-panel-rule: #E2EFE8;   /* the rule above the chips */
+  --on-ink:         #14654B;
+  --on-ink-2:       #3A7862;
+  --shade:          rgba(17, 22, 31, 0.06);
+  --shade-deep:     rgba(17, 22, 31, 0.14);
+
+  --page:           #F4F7FC;
+  --page-2:         #EAEFF8;
+
+  /* Accent used as a material, not as a fill: a tint for surfaces that belong
+   * to the accent, and a line for their edges. */
+  --accent-soft:    #F1F7FE;
+  --accent-soft-2:  #E5F0FC;
+  --accent-line:    #C8DDF5;
+  --accent-ink:     #0F5AA8;
+
+  /* One shadow, two strengths. Anything that does not float gets the first or
+   * nothing at all. */
+  --shadow-1:       0 1px 2px rgba(17, 22, 31, 0.05);
+  --shadow-2:       0 12px 30px -16px rgba(17, 22, 31, 0.35);
+
+  /* Motion — short, and only where it explains a change */
+  --spring:         cubic-bezier(0.2, 0.7, 0.2, 1);
+  --ease:           cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-out:       cubic-bezier(0.16, 1, 0.3, 1);
+
+  --r-sm: 6px;
+  --r-md: 9px;
+  --r-lg: 12px;
+  --r-xl: 16px;
+}
+
+:root[data-theme="dark"] {
+  --ink:            #E9ECF2;
+  --ink-2:          #AEB6C3;
+  --ink-3:          #838D9C;   /* lifted for legibility at small sizes */
+
+  --accent:         #6BB2F5;
+  --accent-2:       #6BB2F5;
+  --hot:            #F2789F;
+  --warm:           #E0A64A;
+  --good:           #4CC98A;
+
+  --accent-vivid:   #4C9FEF;
+  --accent-2-vivid: #4C9FEF;
+  --hot-vivid:      #E8447A;
+
+  --surface:        #151B25;
+  --surface-2:      #1A212D;
+  --surface-3:      #212A38;
+  --hairline:       #2B3545;
+  --hairline-dim:   #232C3A;
+
+  --ink-panel:      #1B2941;
+  --ink-panel-2:    #24364F;
+  --ink-panel-line: #2B3C58;
+  --ink-panel-rule: rgba(255, 255, 255, 0.10);
+  --on-ink:         #F2F6FF;
+  --on-ink-2:       #9DB0CC;
+  --shade:          rgba(0, 0, 0, 0.30);
+  --shade-deep:     rgba(0, 0, 0, 0.45);
+
+  --page:           #0C1119;
+  --page-2:         #111826;
+
+  --accent-soft:    #16202C;
+  --accent-soft-2:  #1B2937;
+  --accent-line:    #2E4761;
+  --accent-ink:     #8CC5F8;
+
+  --shadow-1:       0 1px 2px rgba(0, 0, 0, 0.35);
+  --shadow-2:       0 12px 30px -16px rgba(0, 0, 0, 0.7);
+}
+
+/* ── The material ──────────────────────────────────────────────────────────
+ * .glass is a flat panel: a fill and a hairline. The name is kept because it
+ * is stamped across four files' worth of markup; the treatment is not.
+ */
+
+.glass {
+  position: relative;
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-1);
+}
+
+/* A recessed variant for controls, chips and tracks. */
+.glass-thin {
+  background: var(--surface-2);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-sm);
+}
+
+/* ── Interaction ───────────────────────────────────────────────────────────*/
+
+.lift {
+  transition:
+    background-color 0.15s var(--ease),
+    border-color 0.15s var(--ease),
+    box-shadow 0.15s var(--ease);
+}
+.lift:hover { background: var(--accent-soft); border-color: var(--accent-line); }
+.lift:active { background: var(--accent-soft-2); }
+
+/* ── Entrances ─────────────────────────────────────────────────────────────
+ * A short fade, and nothing else. Panels used to rise, scale and unblur; at
+ * this size that reads as decoration rather than as a thing arriving.
+ */
+
+@keyframes visor-rise {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes visor-fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes visor-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.45; }
+}
+
+@keyframes visor-drift {
+  0%, 100% { transform: none; }
+  50%      { transform: translateY(-2px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}

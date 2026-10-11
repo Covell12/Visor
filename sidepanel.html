@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Visor</title>
+  <script src="theme.js"></script>
+  <link rel="stylesheet" href="glass.css" />
+  <link rel="stylesheet" href="sidepanel.css" />
+</head>
+<body>
+
+  <!-- ── Header ───────────────────────────────────────────────────────── -->
+  <header class="v-header">
+    <div class="v-brand">
+      <img src="logo.png" alt="" class="v-mark" width="33" height="22">
+      <div class="v-brand-text">
+        <strong>Visor</strong>
+        <span id="doc-title" class="v-doc-title">No document</span>
+      </div>
+    </div>
+    <div class="header-actions">
+    <button id="btn-theme" class="v-icon-btn lift" title="Switch theme" aria-label="Switch between light and dark theme">
+      <svg class="v-icon-sun" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+        <path d="M12 17a5 5 0 1 1 0-10 5 5 0 0 1 0 10zm0-13.2a1 1 0 0 1-1-1V1.8a1 1 0 1 1 2 0v1a1 1 0 0 1-1 1zm0 18.4a1 1 0 0 1-1-1v-1a1 1 0 1 1 2 0v1a1 1 0 0 1-1 1zM3.8 13h-1a1 1 0 1 1 0-2h1a1 1 0 1 1 0 2zm18.4 0h-1a1 1 0 1 1 0-2h1a1 1 0 1 1 0 2zM5.6 7a1 1 0 0 1-.7-.3l-.7-.7a1 1 0 0 1 1.4-1.4l.7.7A1 1 0 0 1 5.6 7zm13.5 13.5a1 1 0 0 1-.7-.3l-.7-.7a1 1 0 1 1 1.4-1.4l.7.7a1 1 0 0 1-.7 1.7zM4.9 20.5a1 1 0 0 1-.7-1.7l.7-.7a1 1 0 1 1 1.4 1.4l-.7.7a1 1 0 0 1-.7.3zM18.4 7a1 1 0 0 1-.7-1.7l.7-.7a1 1 0 1 1 1.4 1.4l-.7.7a1 1 0 0 1-.7.3z"/>
+      </svg>
+      <svg class="v-icon-moon hidden" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+        <path d="M21 13.2A9 9 0 1 1 10.8 3a7 7 0 0 0 10.2 10.2z"/>
+      </svg>
+    </button>
+    <button id="btn-refresh" class="v-icon-btn lift" title="Re-read revision history" aria-label="Re-read revision history">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+        <path d="M17.65 6.35A8 8 0 1 0 19.73 14h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4z"/>
+      </svg>
+    </button>
+    </div>
+  </header>
+
+  <!-- ── States ───────────────────────────────────────────────────────── -->
+
+  <section id="state-nodoc" class="v-state hidden">
+    <div class="v-state-art" aria-hidden="true">◇</div>
+    <h2>Open a Document</h2>
+    <p>Visor reads the history of Google Docs or Slides you have open.</p>
+  </section>
+
+  <!-- Editors only. This is the whole gate. -->
+  <section id="state-viewonly" class="v-state hidden">
+    <div class="v-lock" aria-hidden="true">
+      <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+           stroke-width="1.6" stroke-linecap="round">
+        <rect x="4.5" y="10.5" width="15" height="10" rx="2.5"/>
+        <path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/>
+      </svg>
+    </div>
+    <h2>Revision history is only accessible to accounts with editing permissions</h2>
+    <p>
+      Visor cannot show writing history because you do not have editing
+      permissions for this document.
+    </p>
+    <p class="v-state-note">
+      Ask the owner for edit access if you wish to view the writing history.
+    </p>
+  </section>
+
+  <section id="state-empty" class="v-state hidden">
+    <div class="v-state-art" aria-hidden="true">◌</div>
+    <h2>No history yet</h2>
+    <p>This document has no recorded edits to analyze.</p>
+  </section>
+
+  <section id="state-error" class="v-state hidden">
+    <div class="v-state-art v-state-art-warn" aria-hidden="true">△</div>
+    <h2>Could not read history</h2>
+    <p id="error-message">Something went wrong.</p>
+    <button id="btn-retry" class="v-btn v-btn-primary lift">Try again</button>
+  </section>
+
+  <!-- Loading -->
+  <section id="state-loading" class="v-state hidden">
+    <div class="v-loader" aria-hidden="true">
+      <span class="v-loader-ring"></span>
+    </div>
+    <div class="v-progress glass-thin">
+      <div id="progress-fill" class="v-progress-fill"></div>
+    </div>
+    <p id="loading-label" class="v-loading-label">Reading revision stream…</p>
+    <p class="v-loading-sub">Reading every edit.... Stand by.</p>
+
+    <div class="v-rate glass-thin">
+      <svg class="v-rate-star" width="20" height="20" viewBox="0 0 24 24"
+           aria-hidden="true">
+        <path d="m12 2.6 2.9 5.9 6.5.95-4.7 4.6 1.1 6.45L12 17.45 6.2 20.5l1.1-6.45-4.7-4.6 6.5-.95z"/>
+      </svg>
+      <p class="v-rate-copy">
+        While you're waiting, <strong>rate the extension</strong>!
+        <span class="v-rate-sub">It helps us developers out :)</span>
+      </p>
+      <button type="button" id="btn-rate" class="v-btn lift">Rate Visor</button>
+    </div>
+  </section>
+
+  <!-- ── Main ─────────────────────────────────────────────────────────── -->
+  <main id="main" class="v-main hidden">
+
+    <!-- Which document tab the figures cover -->
+    <div id="scope-bar" class="v-scope hidden">
+      <div class="v-scope-row">
+        <svg class="v-scope-icon" width="13" height="13" viewBox="0 0 24 24"
+             fill="currentColor" aria-hidden="true">
+          <path d="M3 5h18l-7 8v6l-4 2v-8z"/>
+        </svg>
+        <div class="v-scope-picker">
+          <button type="button" id="scope-button" class="v-scope-btn"
+                  aria-haspopup="listbox" aria-expanded="false"
+                  aria-label="Document tab">
+            <span id="scope-current" class="v-scope-current">All tabs</span>
+            <svg class="v-scope-chev" width="9" height="9" viewBox="0 0 24 24"
+                 fill="currentColor" aria-hidden="true">
+              <path d="M12 16 4.5 8h15z"/>
+            </svg>
+          </button>
+          <ul id="scope-menu" class="v-scope-menu hidden" role="listbox"
+              tabindex="-1" aria-label="Document tab"></ul>
+        </div>
+      </div>
+      <div id="scope-note" class="v-scope-note"></div>
+    </div>
+
+    <nav class="v-tabs" role="tablist">
+      <span class="v-tab-glider" id="tab-glider" aria-hidden="true"></span>
+      <button class="v-tab is-active" data-tab="overview" role="tab" aria-selected="true">Overview</button>
+      <button class="v-tab" data-tab="people"   role="tab" aria-selected="false">People</button>
+      <button class="v-tab" data-tab="timeline" role="tab" aria-selected="false">Timeline</button>
+      <button class="v-tab" data-tab="evidence" role="tab" aria-selected="false">Evidence</button>
+      <button class="v-tab" data-tab="signal"   role="tab" aria-selected="false">Signal</button>
+    </nav>
+
+    <!-- Overview -->
+    <section id="panel-overview" class="v-panel is-active">
+      <div id="metrics"></div>
+
+      <button id="btn-replay" class="v-replay-cta glass lift">
+        <span class="v-replay-play" aria-hidden="true">▶</span>
+        <span class="v-replay-copy">
+          <strong>Live replay</strong>
+          <em>Watch a character-by-character replay of the document development process.</em>
+        </span>
+      </button>
+
+      <h3 class="v-section">Document growth</h3>
+      <div class="v-card glass" id="growth-card">
+        <div id="growth-chart" class="v-chart"></div>
+      </div>
+
+      <h3 class="v-section section-row">
+        Document Timeline
+        <button id="btn-expand-stats" class="v-expand">
+          Expand
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M4 4h7v2H6v5H4V4zm16 16h-7v-2h5v-5h2v7z"/>
+          </svg>
+        </button>
+      </h3>
+      <div class="v-card glass">
+        <div id="heatmap" class="v-heatmap"></div>
+      </div>
+    </section>
+
+    <!-- People -->
+    <section id="panel-people" class="v-panel">
+      <h3 class="v-section">Contributors</h3>
+      <p class="v-hint">Attribution is recorded by character.</p>
+      <div id="people-list" class="v-people"></div>
+
+      <h3 class="v-section">Surviving text by author</h3>
+      <div class="v-card glass">
+        <div id="provenance-bar" class="v-provenance"></div>
+        <div id="provenance-legend" class="v-legend"></div>
+      </div>
+    </section>
+
+    <!-- Timeline -->
+    <section id="panel-timeline" class="v-panel">
+      <h3 class="v-section">Writing sessions</h3>
+      <p class="v-hint">A session ends after five minutes of inactivity.</p>
+      <div id="sessions" class="v-sessions"></div>
+    </section>
+
+    <!-- Evidence -->
+    <section id="panel-evidence" class="v-panel">
+      <div class="v-seg glass-thin" role="tablist">
+        <button class="v-seg-btn is-active" data-ev="pastes">Pastes</button>
+        <button class="v-seg-btn" data-ev="deletions">Deletions</button>
+      </div>
+
+      <div id="ev-pastes" class="v-ev is-active">
+        <p class="v-hint">Each entry is a single insertion operation.</p>
+        <div class="v-sortbar">
+          <span class="v-sortbar-label">Sort</span>
+          <div class="v-sorts" id="paste-sorts" role="group" aria-label="Sort pastes">
+            <button class="v-sort is-active" data-sort="recent">Newest</button>
+            <button class="v-sort" data-sort="size">Largest</button>
+            <button class="v-sort" data-sort="person">Person</button>
+          </div>
+        </div>
+        <div id="pastes-list" class="v-evlist"></div>
+      </div>
+
+      <div id="ev-deletions" class="v-ev">
+        <p class="v-hint">Deleted text.</p>
+        <div class="v-sortbar">
+          <span class="v-sortbar-label">Sort</span>
+          <div class="v-sorts" id="deletion-sorts" role="group" aria-label="Sort deletions">
+            <button class="v-sort is-active" data-sort="recent">Newest</button>
+            <button class="v-sort" data-sort="size">Largest</button>
+            <button class="v-sort" data-sort="person">Person</button>
+          </div>
+        </div>
+        <div id="deletions-list" class="v-evlist"></div>
+      </div>
+
+    </section>
+
+    <!-- Signal -->
+    <section id="panel-signal" class="v-panel">
+      <div class="v-card glass v-gauge-card">
+        <div id="gauge" class="v-gauge"></div>
+        <div class="v-gauge-copy">
+          <div id="gauge-verdict" class="v-gauge-verdict"></div>
+          <p id="gauge-blurb" class="v-gauge-blurb"></p>
+        </div>
+      </div>
+
+      <div class="v-notice glass-thin">
+        This is the amount of characters that were pasted directly from outside
+        the document.
+      </div>
+
+      <h3 class="v-section">How the text arrived</h3>
+      <p class="v-hint">How every character in the document was added.</p>
+      <div class="v-card glass v-defs">
+        <div class="v-def">
+          <span class="v-def-dot" style="background:var(--accent)" aria-hidden="true"></span>
+          <div class="v-def-body">
+            <b>Internal pastes</b>
+            <span>Instances of copying and pasting text from one part of the
+              document to the other.</span>
+          </div>
+        </div>
+        <div class="v-def">
+          <span class="v-def-dot" style="background:var(--hot)" aria-hidden="true"></span>
+          <div class="v-def-body">
+            <b>External pastes</b>
+            <span>Text that came from outside the document.</span>
+          </div>
+        </div>
+      </div>
+      <div class="v-card glass v-pie-card">
+        <div id="origin-chart" class="v-pie"></div>
+        <div id="origin-legend" class="v-pie-legend"></div>
+      </div>
+
+      <h3 class="v-section">What was measured</h3>
+      <div id="signal-list" class="v-signals"></div>
+    </section>
+
+  </main>
+
+  <!-- Expanded activity statistics -->
+  <section id="stats-sheet" class="v-sheet hidden" role="dialog"
+           aria-modal="true" aria-labelledby="sheet-title">
+    <header class="v-sheet-head glass">
+      <div>
+        <strong id="sheet-title">Activity</strong>
+        <span id="sheet-sub" class="v-sheet-sub"></span>
+      </div>
+      <button id="btn-close-stats" class="v-icon-btn lift" aria-label="Close statistics">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <path d="M19 6.4 17.6 5 12 10.6 6.4 5 5 6.4 10.6 12 5 17.6 6.4 19l5.6-5.6 5.6 5.6 1.4-1.4-5.6-5.6z"/>
+        </svg>
+      </button>
+    </header>
+
+    <div class="v-sheet-body">
+      <div id="sheet-tiles" class="v-metrics"></div>
+
+      <h3 class="v-section">Activity over time</h3>
+      <div class="v-sortbar">
+        <span class="v-sortbar-label">By</span>
+        <div class="v-sorts" id="grain-sorts" role="group" aria-label="Time grouping">
+          <button class="v-sort" data-grain="hour">Hour</button>
+          <button class="v-sort is-active" data-grain="day">Day</button>
+          <button class="v-sort" data-grain="week">Week</button>
+          <button class="v-sort" data-grain="month">Month</button>
+          <button class="v-sort" data-grain="year">Year</button>
+        </div>
+      </div>
+      <div class="v-card glass"><div id="grain-chart" class="v-bars"></div></div>
+
+      <h3 class="v-section section-row">
+        Who wrote it
+        <span class="v-sorts v-sorts-mini" id="pie-metric" role="group" aria-label="Contribution measure">
+          <button class="v-sort is-active" data-metric="inserted">Characters</button>
+          <button class="v-sort" data-metric="mutations">Edits</button>
+          <button class="v-sort" data-metric="activeMinutes">Time</button>
+        </span>
+      </h3>
+      <div class="v-card glass v-pie-card">
+        <div id="pie-chart" class="v-pie"></div>
+        <div id="pie-legend" class="v-pie-legend"></div>
+      </div>
+
+      <h3 class="v-section">Time of day</h3>
+      <div class="v-card glass"><div id="hour-chart" class="v-bars"></div></div>
+
+      <h3 class="v-section">Day of week</h3>
+      <div class="v-card glass"><div id="weekday-chart" class="v-bars"></div></div>
+
+      <h3 class="v-section section-row">
+        Every writing day
+        <span id="daylist-count" class="v-section-note"></span>
+      </h3>
+      <p class="v-hint">Each row displays one day's edits.</p>
+      <div id="day-list" class="v-daylist"></div>
+    </div>
+  </section>
+
+  <!-- A single edit, on its own -->
+  <section id="edit-sheet" class="v-sheet hidden" role="dialog"
+           aria-modal="true" aria-labelledby="edit-title">
+    <header class="v-sheet-head glass">
+      <div>
+        <strong id="edit-title">Edit</strong>
+        <span id="edit-when" class="v-sheet-sub"></span>
+      </div>
+      <button id="btn-close-edit" class="v-icon-btn lift" aria-label="Close">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <path d="M19 6.4 17.6 5 12 10.6 6.4 5 5 6.4 10.6 12 5 17.6 6.4 19l5.6-5.6 5.6 5.6 1.4-1.4-5.6-5.6z"/>
+        </svg>
+      </button>
+    </header>
+
+    <div class="v-sheet-body">
+      <div id="edit-tiles" class="v-metrics"></div>
+
+      <h3 class="v-section section-row">
+        Text added
+        <span id="edit-added-len" class="v-section-note"></span>
+      </h3>
+      <div class="v-card glass">
+        <div id="edit-replay" class="v-editreplay" aria-live="off"></div>
+        <div class="v-editreplay-bar">
+          <button id="edit-play" class="v-play-sm lift" aria-label="Replay this edit">
+            <svg class="ic-play" width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+            <svg class="ic-pause hidden" width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg>
+          </button>
+          <div class="v-editreplay-track"><i id="edit-progress"></i></div>
+          <div class="v-sorts v-sorts-mini" id="edit-speed" role="group" aria-label="Replay speed">
+            <button class="v-sort" data-x="1">1×</button>
+            <button class="v-sort is-active" data-x="6">6×</button>
+            <button class="v-sort" data-x="0">max</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="edit-removed-wrap" class="hidden">
+        <h3 class="v-section section-row">
+          Text removed
+          <span id="edit-removed-len" class="v-section-note"></span>
+        </h3>
+        <div class="v-card glass"><div id="edit-removed" class="v-editremoved"></div></div>
+      </div>
+
+      <h3 class="v-section">Every keystroke in this edit</h3>
+      <p class="v-hint">One row per operation</p>
+      <div id="edit-ops" class="v-oplist"></div>
+    </div>
+  </section>
+
+  <script src="sidepanel.js"></script>
+</body>
+</html>
