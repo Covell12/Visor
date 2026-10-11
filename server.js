@@ -32,6 +32,9 @@ const { OAuth2Client } = require('google-auth-library');
 const classes = require('./lib/classes');
 const assignments = require('./lib/assignments');
 const { DEFAULT_AI_SITES } = require('./lib/sites');
+const writing = require('./lib/writing');
+const sessionsLib = require('./lib/sessions');
+const research = { matchPasteOrigins() {} }; // lib/research.js arrives with research capture
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -1513,6 +1516,332 @@ async function deleteAssignmentRecords(core, a) {
   for (const p of Object.values(core.projects).filter(p => p.assignmentId === a.id)) await deleteProjectEverything(p.id);
   await repo.deleteRecord('assignment', a.id);
 }
+
+// ═══════════════════════════════════════════════════════════════
+// SECTION 12 — WRITING
+// ═══════════════════════════════════════════════════════════════
+//
+// Visor Writer. Each student gets one document per writing assignment ("doc"
+// record), whose text the server keeps itself by applying every op the
+// editor sends (lib/writing.js). Ops are only accepted inside an active
+// writing session (lib/sessions.js), from the one surface holding the
+// editing lease, in sequence. The tab authenticates with the cookie, the
+// extension's side panel with its extension token; both then send the
+// session token (X-Visor-Session) on op, beat and lease calls.
+
+const WSESS = 'wsess';
+
+// Who's asking: the cookie, or the extension's token (the side panel embed).
+async function writerUser(req, core) {
+  const fromCookie = currentUser(req, core);
+  if (fromCookie) return fromCookie;
+  const ext = await extUserFromHeader(req, core);
+  if (ext) return ext;
+  throw new HttpError(401, 'not signed in');
+}
+
+async function sessionToken(s, surf) {
+  return sign(await getSessionSecret(), { uid: s.studentId, sid: s.id, docId: s.docId, surf, iat: Date.now() }, WSESS);
+}
+// The session token on op, beat and lease calls. The session's own state is
+// checked on every use, so a token dies with its session.
+async function sessionAuth(req) {
+  // The header normally; the body for navigator.sendBeacon, which can't set headers
+  const t = verify(await getSessionSecret(), String(req.get('X-Visor-Session') || req.body?._session || ''), WSESS);
+  if (!t || t.docId !== req.params.docId) throw new HttpError(401, 'Your writing session has expired. Reload the page.');
+  return t;
+}
+
+// A student document and who may see it: its student, or the class teacher.
+async function docFor(req, core, docId = req.params.docId) {
+  const me = await writerUser(req, core);
+  const doc = await repo.getRecord('doc', docId);
+  if (!doc) throw new HttpError(404, 'document not found');
+  const cls = own(core.classes, doc.classId);
+  const isOwner = doc.studentId === me.id;
+  const isTeacher = !!cls && cls.teacherId === me.id;
+  if (!isOwner && !isTeacher) throw new HttpError(403, 'not your document');
+  const a = await repo.getRecord('assignment', doc.assignmentId);
+  return { doc, a, cls, me, isOwner, isTeacher };
+}
+
+// Get the student's document, making it (with the teacher's starter text as
+// op 1) the first time.
+async function getOrCreateDoc(a, cls, studentId) {
+  const id = writing.docIdFor(a.id, studentId);
+  const have = await repo.getRecord('doc', id);
+  if (have) return have;
+  return repo.withRecords(async t => {
+    const again = await t.get('doc', id);
+    if (again) return again;
+    const { doc, firstOps } = writing.newDoc({ id, assignmentId: a.id, classId: cls.id, studentId, templateText: a.writing?.templateText || '' });
+    if (firstOps.length) t.put('opchunk', { id: writing.chunkId(id, 0), docId: id, classId: cls.id, assignmentId: a.id, studentId, no: 0, ops: firstOps, updatedAt: now() });
+    t.put('doc', doc);
+    return doc;
+  });
+}
+
+// Bring a document's sessions up to date (timeouts, time limits, windows),
+// saving any that changed. Returns them, newest first.
+async function sweepDocSessions(doc, a) {
+  const list = await repo.listRecords('session', { docId: doc.id });
+  const t = Date.now();
+  for (const s of list.filter(s => s.state !== 'ended')) {
+    const before = JSON.stringify([s.state, s.pauses.length, s.events.length]);
+    const ended = sessionsLib.sweep(s, t, { windowEnd: a?.writing?.windowEnd });
+    if (JSON.stringify([s.state, s.pauses.length, s.events.length]) !== before) {
+      const saved = await repo.updateRecord('session', s.id, x => { if (x.state !== 'ended') sessionsLib.sweep(x, Date.now(), { windowEnd: a?.writing?.windowEnd }); });
+      Object.assign(s, saved);
+    }
+    if (ended) await afterSessionEnded(s, a);
+  }
+  return list.sort((x, y) => (x.startedAt < y.startedAt ? 1 : -1));
+}
+
+// A session just ended: free the lease, refresh the cached figures, and submit
+// if time ran out on an assignment set to submit automatically.
+async function afterSessionEnded(s, a) {
+  const autoSubmit = s.endReason === 'time-limit' && a?.writing?.autoSubmitOnTimeUp;
+  await repo.updateRecord('doc', s.docId, d => {
+    if (d.lease?.sessionId === s.id) d.lease = null;
+    if (autoSubmit && d.status !== 'submitted') { d.status = 'submitted'; d.submittedAt = s.endedAt || now(); d.reopened = false; d.autoSubmitted = true; }
+  });
+  if (autoSubmit) await repo.updateRecord('session', s.id, x => { if (!x.events.some(e => e.type === 'submit')) sessionsLib.addEvent(x, { t: Date.parse(x.endedAt || now()), type: 'submit', auto: true }); });
+  await syncDocStats(s.docId);
+}
+
+async function syncDocStats(docId) {
+  const list = await repo.listRecords('session', { docId });
+  const st = sessionsLib.docSessionStats(list, Date.now());
+  await repo.updateRecord('doc', docId, d => { d.stats = { ...(d.stats || {}), ...st }; });
+}
+
+// The document as the editor sees it
+function docView(doc, { withFeedback } = {}) {
+  const out = { id: doc.id, assignmentId: doc.assignmentId, text: doc.text, formats: doc.formats, sources: doc.sources || [], seq: doc.seq, status: doc.status, submittedAt: doc.submittedAt, returnedAt: doc.returnedAt, reopened: !!doc.reopened, lease: doc.lease, stats: doc.stats, autoSubmitted: !!doc.autoSubmitted };
+  if (withFeedback && doc.feedback && (doc.status === 'returned' || doc.reopened)) out.feedback = doc.feedback;
+  return out;
+}
+
+// Remaining time across sessions, for the start screen ("38 minutes left")
+function timeLeft(a, cls, doc, sessions, studentId) {
+  const lim = a.writing?.timeLimitMin;
+  if (!lim) return null;
+  const total = lim * 60000 * classes.multiplierFor(cls, studentId) + (doc.extraTimeMs || 0);
+  return Math.max(0, total - sessionsLib.usedMs(sessions.filter(s => s.state === 'ended')));
+}
+
+// The editor page: the student's document, the assignment's settings, the
+// active session (if any) and a token for it.
+app.get('/api/write/:assignmentId', ah(async (req, res) => {
+  const core = await repo.readCore();
+  const me = await writerUser(req, core);
+  const a = await repo.getRecord('assignment', req.params.assignmentId);
+  if (!a || a.type !== 'writing') throw new HttpError(404, 'writing assignment not found');
+  const got = classes.classFor(core, me, a.classId);
+  if (got.isTeacher) return res.status(403).json({ error: 'Teachers review student writing from the assignment page.', reviewUrl: `/a/${a.id}?tab=submissions` });
+  if (!a.publishedAt) throw new HttpError(404, 'writing assignment not found');
+  const doc = await getOrCreateDoc(a, got.cls, me.id);
+  const list = await sweepDocSessions(doc, a);
+  const fresh = await repo.getRecord('doc', doc.id);
+  const active = list.find(s => s.state !== 'ended') || null;
+  const surf = req.query.surf === 'panel' ? 'panel' : 'tab';
+  const mult = classes.multiplierFor(got.cls, me.id);
+  res.json({
+    assignment: assignments.studentView(a), class: { id: got.cls.id, name: got.cls.name }, describe: assignments.describeWriting(a.writing, mult),
+    doc: docView(fresh, { withFeedback: true }),
+    session: active ? sessionsLib.clientView(active, Date.now()) : null,
+    token: active ? await sessionToken(active, surf) : null,
+    timeLeftMs: timeLeft(a, got.cls, fresh, list, me.id), multiplier: mult,
+    windowProblem: sessionsLib.windowProblem(a.writing, Date.now()),
+    user: { id: me.id, name: fullName(me) },
+    serverNow: now()
+  });
+}));
+
+// Start (or take over) a session. Body: { surfaceId, surf, extPresent, extVersion, fullscreen }
+app.post('/api/write/:docId/sessions', ah(async (req, res) => {
+  const core = await repo.readCore();
+  const got = await docFor(req, core);
+  if (!got.isOwner) throw new HttpError(403, 'Only the student can write in their document.');
+  const body = req.body || {};
+  const surfaceId = String(body.surfaceId || '').slice(0, 60);
+  if (!surfaceId) throw new HttpError(400, 'surfaceId is required');
+  const surf = body.surf === 'panel' ? 'panel' : 'tab';
+  const list = await sweepDocSessions(got.doc, got.a);
+  const doc = await repo.getRecord('doc', got.doc.id);
+  let active = list.find(s => s.state !== 'ended') || null;
+  const t = Date.now();
+  const { takeover } = sessionsLib.checkStart({ doc, assignment: got.a, userId: got.me.id, active, extAck: doc.extAck, body: { ...body, surf }, now: t });
+  if (takeover?.end) {
+    await repo.updateRecord('session', active.id, x => sessionsLib.endSession(x, 'timeout', t, { at: Date.parse(x.lastBeat || x.startedAt) }));
+    await afterSessionEnded(active, got.a);
+    active = null;
+  }
+  let s;
+  if (takeover?.reuse) {
+    // The same student opened another tab: it joins the running session.
+    s = await repo.updateRecord('session', active.id, x => {
+      x.surfaces[surfaceId] = { kind: surf, focused: true, visible: true, fullscreen: body.fullscreen !== false, lastBeat: new Date(t).toISOString() };
+      x.lastBeat = new Date(t).toISOString();
+      sessionsLib.addEvent(x, { t, type: 'lease', surf, takeover: true });
+      sessionsLib.evaluateFocus(x, t);
+    });
+  } else {
+    const ended = list.filter(x => x.state === 'ended' || x.id === active?.id);
+    const deadlineAt = sessionsLib.computeDeadline({ timeLimitMin: got.a.writing?.timeLimitMin, multiplier: classes.multiplierFor(got.cls, got.me.id), used: sessionsLib.usedMs(ended), extraMs: doc.extraTimeMs, now: t });
+    if (deadlineAt && Date.parse(deadlineAt) <= t + 5000) throw new HttpError(409, 'You’ve used all of your time for this assignment. Ask your teacher if you need more.');
+    s = sessionsLib.newSession({ doc, assignment: got.a, userId: got.me.id, body: { ...body, surf, surfaceId }, deadlineAt, extAck: doc.extAck, now: t });
+    await repo.putRecord('session', s);
+  }
+  const lease = { surfaceId, sessionId: s.id, surf, at: new Date(t).toISOString() };
+  await repo.updateRecord('doc', doc.id, d => {
+    d.lease = lease;
+    if (d.status === 'not-started' || d.status === 'returned') d.status = 'in-progress';
+    d.updatedAt = now();
+  });
+  await syncDocStats(doc.id);
+  const fresh = await repo.getRecord('doc', doc.id);
+  res.json({ session: sessionsLib.clientView(s, t), token: await sessionToken(s, surf), lease, doc: docView(fresh), serverNow: now() });
+}));
+
+// Load the session named by the token and bring it up to date
+async function liveSession(req) {
+  const tok = await sessionAuth(req);
+  const s = await repo.getRecord('session', tok.sid);
+  if (!s || s.docId !== req.params.docId || s.studentId !== tok.uid) throw new HttpError(401, 'Your writing session has expired. Reload the page.');
+  return { tok, s };
+}
+const endedReply = s => ({ ended: true, session: sessionsLib.clientView(s, Date.now()) });
+
+// Ops: { baseSeq, ops:[...], textHash, surfaceId }
+app.post('/api/write/:docId/ops', ah(async (req, res) => {
+  const { tok, s: s0 } = await liveSession(req);
+  const body = req.body || {};
+  if (!Array.isArray(body.ops)) throw new HttpError(400, 'ops must be a list');
+  if (body.ops.length > writing.LIMITS.BATCH_OPS) throw new HttpError(413, 'Too many ops in one batch (500 at most).');
+  const a = await repo.getRecord('assignment', s0.assignmentId);
+  // Pastes: look for the research copy each one came from (outside the transaction)
+  const copies = body.ops.some(o => o && (o.src === 'paste' || o.src === 'drop')) ? await researchCopiesFor(s0.studentId, s0.assignmentId) : [];
+  let endedNow = null;
+  const out = await repo.withRecords(async t => {
+    const s = await t.get('session', s0.id);
+    const doc = await t.get('doc', req.params.docId);
+    const nowMs = Date.now();
+    endedNow = sessionsLib.sweep(s, nowMs, { windowEnd: a?.writing?.windowEnd });
+    if (s.state === 'ended') { t.put('session', s); return { ended: s }; }
+    if (s.teacherPaused) throw new HttpError(423, 'Your teacher paused the session.');
+    if (doc.status === 'submitted') throw new HttpError(409, 'This document has been submitted.');
+    const surfaceId = String(body.surfaceId || '');
+    if (!doc.lease || doc.lease.sessionId !== s.id || doc.lease.surfaceId !== surfaceId) throw new HttpError(409, 'Another window is writing in this document.', { notLeaseHolder: true, lease: doc.lease, ...writing.resyncData(doc) });
+    const chunkIds = writing.chunkIdsFor(doc.id, Number(body.baseSeq), body.ops.length);
+    const chunks = {};
+    if (Number(body.baseSeq) === doc.seq) for (const id of chunkIds) chunks[id] = await t.get('opchunk', id);
+    const stamped = writing.applyBatch(doc, body.ops, { baseSeq: Number(body.baseSeq), textHash: body.textHash, sid: s.id, surf: tok.surf === 'panel' || doc.lease.surf === 'panel' ? 'panel' : 'tab', now: nowMs });
+    research.matchPasteOrigins(stamped, copies, { studentId: s.studentId, now: nowMs });
+    writing.updateStats(doc, stamped);
+    for (const c of writing.appendToChunks(doc.id, chunks, stamped)) t.put('opchunk', { ...c, classId: doc.classId, assignmentId: doc.assignmentId, studentId: doc.studentId });
+    doc.updatedAt = new Date(nowMs).toISOString();
+    doc.process = null; // the process report is rebuilt on the next review
+    s.opsTo = doc.seq;
+    if (!s.opsFrom || s.opsFrom > stamped[0]?.n) s.opsFrom = stamped[0]?.n || s.opsFrom;
+    s.lastBeat = new Date(nowMs).toISOString();
+    if (s.surfaces[surfaceId]) s.surfaces[surfaceId].lastBeat = s.lastBeat;
+    t.put('doc', doc); t.put('session', s);
+    return { seq: doc.seq, pastes: stamped.filter(o => o.paste).map(o => ({ n: o.n, origin: o.paste.origin, internal: o.paste.internal })) };
+  });
+  if (out.ended) { if (endedNow) await afterSessionEnded(out.ended, a); return res.status(409).json({ error: 'Your writing session has ended.', ...endedReply(out.ended) }); }
+  res.json(out);
+}));
+
+// Beat: { surfaceId, surf, focused, visible, fullscreen, extPresent, extLock, online, events, offlinePause, seq, wantText }
+app.post('/api/write/:docId/beat', ah(async (req, res) => {
+  const { tok, s: s0 } = await liveSession(req);
+  const a = await repo.getRecord('assignment', s0.assignmentId);
+  const body = req.body || {};
+  let endedNow = null, pausesBefore = s0.pauses.length;
+  const s = await repo.updateRecord('session', s0.id, x => {
+    const t = Date.now();
+    endedNow = sessionsLib.sweep(x, t, { windowEnd: a?.writing?.windowEnd });
+    if (x.state !== 'ended') sessionsLib.applyBeat(x, { ...body, surf: body.surf === 'panel' ? 'panel' : 'tab' }, t);
+  });
+  if (endedNow) await afterSessionEnded(s, a);
+  else if (s.pauses.length !== pausesBefore) await syncDocStats(s.docId);
+  const doc = await repo.getRecord('doc', s.docId);
+  const out = { ...sessionsLib.clientView(s, Date.now()), lease: doc.lease, seq: doc.seq, docStatus: doc.status, ended: s.state === 'ended' };
+  if (body.wantText && Number(body.seq) !== doc.seq) Object.assign(out, { text: doc.text, formats: doc.formats });
+  res.json(out);
+}));
+
+// Hand the editing lease to this surface: { surfaceId, surf }
+app.post('/api/write/:docId/lease', ah(async (req, res) => {
+  const { s: s0 } = await liveSession(req);
+  if (s0.state === 'ended') return res.status(409).json({ error: 'Your writing session has ended.', ...endedReply(s0) });
+  const body = req.body || {};
+  const surfaceId = String(body.surfaceId || '').slice(0, 60);
+  if (!surfaceId) throw new HttpError(400, 'surfaceId is required');
+  const surf = body.surf === 'panel' ? 'panel' : 'tab';
+  const t = Date.now();
+  const lease = { surfaceId, sessionId: s0.id, surf, at: new Date(t).toISOString() };
+  const doc = await repo.updateRecord('doc', s0.docId, d => { d.lease = lease; });
+  await repo.updateRecord('session', s0.id, x => {
+    x.surfaces[surfaceId] = { kind: surf, focused: true, visible: true, fullscreen: x.surfaces[surfaceId]?.fullscreen ?? true, lastBeat: new Date(t).toISOString() };
+    x.lastBeat = new Date(t).toISOString();
+    sessionsLib.addEvent(x, { t, type: 'lease', surf });
+    sessionsLib.evaluateFocus(x, t);
+  });
+  res.json({ lease, doc: docView(doc) });
+}));
+
+// The student ends the session
+app.post('/api/write/:docId/end', ah(async (req, res) => {
+  const { s: s0 } = await liveSession(req);
+  const a = await repo.getRecord('assignment', s0.assignmentId);
+  const s = await repo.updateRecord('session', s0.id, x => sessionsLib.endSession(x, 'student', Date.now()));
+  await afterSessionEnded(s, a);
+  res.json({ session: sessionsLib.clientView(s, Date.now()) });
+}));
+
+// Submit: ends any running session and marks the document submitted. Word
+// limits only warn.
+app.post('/api/write/:docId/submit', ah(async (req, res) => {
+  const core = await repo.readCore();
+  const got = await docFor(req, core);
+  if (!got.isOwner) throw new HttpError(403, 'Only the student can submit their document.');
+  if (got.doc.status === 'submitted') throw new HttpError(409, 'This is already submitted.');
+  const list = await sweepDocSessions(got.doc, got.a);
+  const t = Date.now();
+  for (const s of list.filter(s => s.state !== 'ended')) {
+    const done = await repo.updateRecord('session', s.id, x => { sessionsLib.addEvent(x, { t, type: 'submit' }); sessionsLib.endSession(x, 'submitted', t); });
+    await afterSessionEnded(done, got.a);
+  }
+  if (!list.some(s => s.state !== 'ended') && list[0]) await repo.updateRecord('session', list[0].id, x => { sessionsLib.addEvent(x, { t, type: 'submit', afterSession: true }); });
+  const doc = await repo.updateRecord('doc', got.doc.id, d => { d.status = 'submitted'; d.submittedAt = new Date(t).toISOString(); d.reopened = false; d.lease = null; d.updatedAt = now(); });
+  const w = got.a.writing || {}, words = doc.stats?.words || 0;
+  const warning = w.minWords && words < w.minWords ? `Submitted with ${words} words; the assignment asks for at least ${w.minWords}.`
+    : w.maxWords && words > w.maxWords ? `Submitted with ${words} words; the assignment asks for at most ${w.maxWords}.` : null;
+  res.json({ doc: docView(doc), warning });
+}));
+
+// The op log, for replay: the class teacher, or the student for their own doc.
+app.get('/api/write/:docId/ops', ah(async (req, res) => {
+  const core = await repo.readCore();
+  const got = await docFor(req, core);
+  const from = Math.max(1, Number(req.query.from) || 1);
+  const to = Math.min(got.doc.seq, Number(req.query.to) || got.doc.seq, from + 4999);
+  const ops = [];
+  if (to >= from) {
+    for (let no = writing.chunkNo(from); no <= writing.chunkNo(to); no++) {
+      const c = await repo.getRecord('opchunk', writing.chunkId(got.doc.id, no));
+      for (const op of c?.ops || []) if (op.n >= from && op.n <= to) ops.push(op);
+    }
+  }
+  res.json({ ops, from, to, seq: got.doc.seq, nextFrom: to < got.doc.seq ? to + 1 : null });
+}));
+
+// Extension API, research and citations (SECTION 13, phases 7–9)
+async function extUserFromHeader() { return null; }
+async function researchCopiesFor() { return []; }
 
 // Group projects and discussions arrive in SECTIONS 11 and 14 (phases 12, 13).
 async function syncGroupProjects() {}

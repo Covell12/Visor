@@ -20,6 +20,8 @@ test('applyOp inserts, deletes and bounds-checks', () => {
   assert.throws(() => W.applyOp(st, W.cleanOp(ins(13, 'x'))), e => e.status === 409);
   assert.throws(() => W.applyOp(st, W.cleanOp(del(10, 5))), e => e.status === 409);
   assert.throws(() => W.applyOp(st, W.cleanOp(fmt(0, 50, { bold: true }))), e => e.status === 409);
+  W.applyOp(st, W.cleanOp(fmt(12, 1, { header: 1 })));   // Quill's final line break, one past the end
+  assert.deepStrictEqual(st.formats.at(-1), { at: 12, len: 1, attrs: { header: 1 } });
   assert.throws(() => W.cleanOp({ k: 'x', at: 0 }), e => e.status === 400);
   assert.throws(() => W.cleanOp({ k: 'i', at: -1, s: 'a' }), e => e.status === 400);
   assert.throws(() => W.cleanOp(ins(0, 'x'.repeat(50001))), e => e.status === 413);
@@ -130,7 +132,7 @@ test('replaying every op reproduces the document exactly', () => {
   }
   const replayed = W.replayOps(log);
   assert.strictEqual(replayed.text, doc.text);
-  assert.deepStrictEqual(W.compactFormats(replayed.formats, replayed.text.length), W.compactFormats(doc.formats, doc.text.length));
+  assert.deepStrictEqual(W.compactFormats(replayed.formats, replayed.text.length + 1), W.compactFormats(doc.formats, doc.text.length + 1));
   assert.ok(log.some(o => o.paste && o.paste.hash.length === 64), 'paste hashes are made server-side when the client sends a bad one');
 });
 
