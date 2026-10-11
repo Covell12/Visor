@@ -37,6 +37,7 @@ const sessionsLib = require('./lib/sessions');
 const research = require('./lib/research');
 const citeFormat = require('./lib/cite');
 const processLib = require('./lib/process');
+const discussionLib = require('./lib/discussion');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -582,15 +583,13 @@ async function startTranscription(resourceId) {
   transcriptionJobs.set(resourceId, job);
 }
 
-async function transcribeResource(resourceId) {
-  const r = await repo.getResource(resourceId);
-  if (!r || r.type !== 'audio') return;
-  const core = await repo.readCore();
-  const project = core.projects[r.projectId];
-  const people = project ? projectPeople(core, project).map(p => p.name) : [];
-
-  const prompt = `This is a recording of a student group working on a school project.${people.length ? ` The people who might be in it: ${people.join(', ')} (there may also be others).` : ''}
-
+// The transcription prompt. `setting` says what the recording is; `people`
+// are names that may be heard; `hints` (Visor Classroom discussions) describe
+// the voices of the previous 10-minute segment, so labels stay consistent
+// from one segment to the next.
+function transcriptionPrompt({ setting = 'This is a recording of a student group working on a school project.', people = [], hints = null } = {}) {
+  return `${setting}${people.length ? ` The people who might be in it: ${people.join(', ')} (there may also be others).` : ''}
+${hints ? discussionLib.hintsText(hints) : ''}
 Transcribe it word for word and separate the speakers by voice. Do NOT guess names; label voices "Speaker 1", "Speaker 2", etc., numbered in order of first appearance. Do not summarize or interpret anything.
 
 Return ONLY JSON in this shape:
@@ -601,19 +600,22 @@ Return ONLY JSON in this shape:
   ]
 }
 Keep every line short (one thought each). Every line's speaker must be one of the labels in "speakers".`;
+}
 
+// Send one stored recording to Gemini with a prompt; returns { lines, speakers }.
+async function transcribeAudio(audio, prompt) {
   const opts = { temperature: 0.2, maxOutputTokens: 16000 };
   const inline = async () => geminiJSON([
     { text: prompt },
-    { inlineData: { mimeType: r.audio.mime, data: (await audioStorage.readAudio(r.audio)).toString('base64') } }
+    { inlineData: { mimeType: audio.mime, data: (await audioStorage.readAudio(audio)).toString('base64') } }
   ], opts);
   let parsed;
-  const gsUri = GEMINI_VIA === 'vertex' ? audioStorage.gcsUri(r.audio) : null;
+  const gsUri = GEMINI_VIA === 'vertex' ? audioStorage.gcsUri(audio) : null;
   if (gsUri) {
     // Vertex AI reads the recording straight from Cloud Storage (no size limit
     // from sending it inside the request). If it can't, send the bytes instead.
     try {
-      parsed = await geminiJSON([{ text: prompt }, { fileData: { mimeType: r.audio.mime, fileUri: gsUri } }], opts);
+      parsed = await geminiJSON([{ text: prompt }, { fileData: { mimeType: audio.mime, fileUri: gsUri } }], opts);
     } catch (err) {
       if (!/^Gemini (400|403):/.test(err.message)) throw err;
       console.warn('Vertex AI could not read the recording from Cloud Storage; sending it inline instead:', err.message);
@@ -632,7 +634,16 @@ Keep every line short (one thought each). Every line's speaker must be one of th
     const quotes = (Array.isArray(m.quotes) && m.quotes.length ? m.quotes : own.slice(0, 3).map(l => l.text)).map(String).slice(0, 3);
     return { label, quotes, voice: String(m.voice || ''), assignedName: null, assignedUserId: null };
   });
+  return { lines, speakers };
+}
 
+async function transcribeResource(resourceId) {
+  const r = await repo.getResource(resourceId);
+  if (!r || r.type !== 'audio') return;
+  const core = await repo.readCore();
+  const project = core.projects[r.projectId];
+  const people = project ? projectPeople(core, project).map(p => p.name) : [];
+  const { lines, speakers } = await transcribeAudio(r.audio, transcriptionPrompt({ people }));
   await repo.updateResource(resourceId, res => {
     res.audio.lines = lines;
     res.audio.speakers = speakers;
@@ -2349,9 +2360,291 @@ async function myGroupFor(core, a, me) {
   const g = (await groupRows(core, a)).find(x => x.students.some(s => s.id === me.id));
   return g || null;
 }
-// Discussions arrive in SECTION 14
-async function discussionRows() { return []; }
-async function myDiscussionStats() { return null; }
+
+// ═══════════════════════════════════════════════════════════════
+// SECTION 14 — DISCUSSIONS
+// ═══════════════════════════════════════════════════════════════
+//
+// A Discussion assignment holds recordings of a class discussion
+// ("discussion" records). The browser recorder splits long recordings into
+// 10-minute segments and uploads each one as it finishes, with the same
+// chunked upload as project recordings. Segments are transcribed one after
+// another: segment k's prompt carries segment k-1's voices and two quotes
+// each, so the same voice keeps its label. The voice wizard then runs once
+// over the merged voices, with the class roster as choices. The analysis is
+// measured arithmetic (lib/discussion.js) plus an AI-written summary.
+
+const DISC_STALE_MS = (IS_FIREBASE ? 11 : 6) * 60 * 1000;
+const discussionJobs = new Map(); // `${did}:${k}` -> Promise (local runs)
+
+function discussionStatus(d) {
+  const segs = d.segments || [];
+  if (d.recording) return 'recording';
+  if (!segs.length) return 'empty';
+  if (segs.some(s => s.status === 'queued' || s.status === 'transcribing')) return 'transcribing';
+  if (segs.some(s => s.status === 'error')) return 'error';
+  if ((d.speakers || []).some(s => !s.assignedName)) return 'identify';
+  return 'ready';
+}
+
+async function discussionFor(req, core, did = req.params.did) {
+  const d = await repo.getRecord('discussion', did);
+  if (!d) throw new HttpError(404, 'discussion not found');
+  const got = classes.classFor(core, meOrThrow(req, core), d.classId);
+  return { d, ...got };
+}
+async function teacherDiscussion(req, core) {
+  const got = await discussionFor(req, core);
+  if (!got.isTeacher) throw new HttpError(403, 'only the class teacher can do that');
+  return got;
+}
+const rosterOf = (core, cls) => cls.studentIds.map(id => core.users[id]).filter(Boolean).map(u => ({ id: u.id, name: fullName(u) }));
+const teacherOf = (core, cls) => { const t = core.users[cls.teacherId]; return t ? { id: t.id, name: fullName(t) } : null; };
+
+// Segments that have been "transcribing" longer than a job may run were cut off
+async function reconcileDiscussion(d) {
+  const stale = (d.segments || []).filter(s => s.status === 'transcribing' && !discussionJobs.has(`${d.id}:${s.k}`) && Date.now() - Date.parse(s.startedAt || 0) > DISC_STALE_MS);
+  if (!stale.length) return d;
+  return repo.updateRecord('discussion', d.id, x => {
+    for (const s of x.segments) if (stale.some(t => t.k === s.k) && s.status === 'transcribing') { s.status = 'error'; s.error = 'Transcription was interrupted before it finished. Try again.'; }
+    x.status = discussionStatus(x);
+  });
+}
+
+// Start the next segment that's waiting, once every segment before it is done
+async function kickDiscussion(did) {
+  let start = null;
+  await repo.updateRecord('discussion', did, d => {
+    start = null;
+    const segs = [...(d.segments || [])].sort((a, b) => a.k - b.k);
+    for (const s of segs) {
+      if (s.status === 'transcribing') return;
+      if (s.status === 'queued') { s.status = 'transcribing'; s.startedAt = now(); s.error = null; start = s.k; break; }
+    }
+    d.status = discussionStatus(d);
+  });
+  if (start == null) return;
+  if (IS_FIREBASE) {
+    const { firestore } = require('./lib/firebaseAdmin');
+    await firestore().collection('visor_jobs').add({ kind: 'discussion', discussionId: did, k: start, createdAt: now() });
+    return;
+  }
+  const key = `${did}:${start}`;
+  if (discussionJobs.has(key)) return;
+  discussionJobs.set(key, runDiscussionJob(did, start).finally(() => discussionJobs.delete(key)));
+}
+
+async function runDiscussionJob(did, k) {
+  try {
+    await transcribeDiscussionSegment(did, k);
+  } catch (err) {
+    console.error(`discussion transcription failed for ${did} segment ${k}:`, err.message);
+    await repo.updateRecord('discussion', did, d => {
+      const s = d.segments.find(x => x.k === k);
+      if (s) { s.status = 'error'; s.error = geminiReady() ? err.message : 'Transcription is unavailable: this server has no Gemini access set up.'; }
+      d.status = discussionStatus(d);
+    }).catch(() => {});
+  }
+  await kickDiscussion(did).catch(() => {});
+}
+
+async function transcribeDiscussionSegment(did, k) {
+  const d = await repo.getRecord('discussion', did);
+  const seg = d?.segments.find(s => s.k === k);
+  if (!seg) return;
+  const core = await repo.readCore();
+  const cls = own(core.classes, d.classId);
+  const people = cls ? [...rosterOf(core, cls).map(r => r.name), teacherOf(core, cls)?.name].filter(Boolean) : [];
+  const prev = d.segments.find(s => s.k === k - 1 && s.status === 'ready');
+  const prompt = transcriptionPrompt({ setting: 'This is a recording of a class discussion at school, led by a teacher.', people, hints: discussionLib.hintsFrom(prev) });
+  const { lines, speakers } = await transcribeAudio(seg.audio, prompt);
+  await repo.updateRecord('discussion', did, x => {
+    const s = x.segments.find(y => y.k === k);
+    Object.assign(s, { lines, speakers: speakers.map(({ assignedName, assignedUserId, ...rest }) => rest), status: 'ready', error: null, transcribedAt: now() });
+    x.speakers = discussionLib.mergeSpeakers(x.segments.filter(y => y.status === 'ready'), x.speakers);
+    x.status = discussionStatus(x);
+    x.analysis = null;
+  });
+}
+
+// What the teacher's page shows
+function discussionView(core, d, cls) {
+  const lines = discussionLib.mergedLines((d.segments || []).filter(s => s.status === 'ready'));
+  const nameFor = label => (d.speakers || []).find(s => s.label === label)?.assignedName || label;
+  return {
+    id: d.id, assignmentId: d.assignmentId, title: d.title, createdAt: d.createdAt, status: discussionStatus(d), recording: !!d.recording,
+    segments: (d.segments || []).sort((a, b) => a.k - b.k).map(s => ({ k: s.k, status: s.status, error: s.error || null, durationSec: s.durationSec || null, lines: (s.lines || []).length, audioUrl: `/api/discussions/${d.id}/segments/${s.k}/audio` })),
+    speakers: d.speakers || [],
+    transcript: lines.map(l => ({ i: l.i, t: l.t, label: l.speaker, speaker: nameFor(l.speaker), text: l.text })),
+    people: [...rosterOf(core, cls).map(r => ({ ...r, role: 'student' })), ...(teacherOf(core, cls) ? [{ ...teacherOf(core, cls), role: 'teacher' }] : [])],
+    analysis: d.analysis || null
+  };
+}
+
+async function discussionRows(a) {
+  const list = await repo.listRecords('discussion', { assignmentId: a.id });
+  return list.sort((x, y) => (x.createdAt < y.createdAt ? 1 : -1)).map(d => ({ id: d.id, title: d.title, createdAt: d.createdAt, status: discussionStatus(d), segments: (d.segments || []).length, analyzedAt: d.analysis?.at || null }));
+}
+
+// A student's own numbers, if the teacher shares them (never anyone else's)
+async function myDiscussionStats(a, me) {
+  if (!a.discussion?.shareOwnStats) return null;
+  const list = await repo.listRecords('discussion', { assignmentId: a.id });
+  return list.filter(d => d.analysis?.measured).map(d => {
+    const r = d.analysis.measured.students.find(s => s.userId === me.id);
+    return { title: d.title, createdAt: d.createdAt, durationSec: d.analysis.measured.durationSec, mine: r ? { talkSec: r.talkSec, turns: r.turns, words: r.words, longestTurnSec: r.longestTurnSec, firstAtText: r.firstAtText, sharePct: r.sharePct } : null };
+  });
+}
+
+// The recording notice, confirmed once per class
+app.post('/api/classes/:id/discussion-consent', requireAuth, ah(async (req, res) => {
+  if (req.body?.confirmed !== true) throw new HttpError(400, 'Tick the box to confirm.');
+  const out = await repo.withCore(core => { const got = teacherClass(req, core); got.cls.discussionConsentAt = now(); return publicClass(core, got.cls, got.me); });
+  res.json({ class: out });
+}));
+
+app.post('/api/assignments/:id/discussions', requireAuth, ah(async (req, res) => {
+  const core = await repo.readCore();
+  const got = await teacherAssignment(req, core);
+  if (got.a.type !== 'discussion') throw new HttpError(400, 'Only discussion assignments have recordings.');
+  if (!got.cls.discussionConsentAt) throw new HttpError(409, 'Confirm the recording notice for this class first.');
+  const d = {
+    id: uid(), assignmentId: got.a.id, classId: got.cls.id, createdBy: got.me.id, createdAt: now(), updatedAt: now(),
+    title: cleanText(req.body?.title, 120) || `${got.a.title} – ${new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`,
+    source: req.body?.source === 'upload' ? 'upload' : 'recorder', recording: req.body?.source !== 'upload', segments: [], speakers: [], status: 'recording', analysis: null
+  };
+  await repo.putRecord('discussion', d);
+  await repo.updateRecord('assignment', got.a.id, x => { x.discussion.discussionIds = [...(x.discussion.discussionIds || []), d.id]; });
+  res.json({ discussion: discussionView(core, d, got.cls) });
+}));
+
+app.get('/api/discussions/:did', requireAuth, ah(async (req, res) => {
+  const core = await repo.readCore();
+  const got = await teacherDiscussion(req, core);
+  const d = await reconcileDiscussion(got.d);
+  res.json({ discussion: discussionView(core, d, got.cls), geminiReady: geminiReady() });
+}));
+
+app.patch('/api/discussions/:did', requireAuth, ah(async (req, res) => {
+  const core = await repo.readCore();
+  const got = await teacherDiscussion(req, core);
+  const d = await repo.updateRecord('discussion', got.d.id, x => { if (cleanText(req.body?.title, 120)) x.title = cleanText(req.body.title, 120); });
+  res.json({ discussion: discussionView(core, d, got.cls) });
+}));
+
+// Segment uploads: the same three steps as project recordings (SECTION 8)
+async function readDiscUploadToken(req, token) {
+  const t = verify(await getSessionSecret(), String(token || ''), 'disc-upload');
+  if (!t || t.exp < Date.now() || t.did !== req.params.did || t.userId !== req.session.userId) throw new HttpError(400, 'That upload has expired or is not valid. Start the upload again.');
+  return t;
+}
+app.post('/api/discussions/:did/uploads', requireAuth, ah(async (req, res) => {
+  const core = await repo.readCore();
+  const got = await teacherDiscussion(req, core);
+  const size = Number(req.body?.size), k = Number(req.body?.k);
+  if (!Number.isInteger(size) || size <= 0) throw new HttpError(400, 'no audio received');
+  if (!Number.isInteger(k) || k < 0 || k > 200) throw new HttpError(400, 'bad segment number');
+  if (size > audioStorage.MAX_AUDIO_BYTES) throw new HttpError(413, 'That file is over 60 MB. Try a shorter or more compressed recording.');
+  const { mimeType, fileExt } = audioMime(req.body?.filename, req.body?.mime);
+  const up = await audioStorage.startUpload({ projectId: `disc-${got.d.id}`, ext: fileExt, mime: mimeType, size });
+  const uploadToken = sign(await getSessionSecret(), { up, did: got.d.id, k, userId: got.me.id, exp: Date.now() + UPLOAD_TOKEN_MS }, 'disc-upload');
+  res.json({ uploadToken, chunkBytes: audioStorage.CHUNK_BYTES });
+}));
+app.put('/api/discussions/:did/uploads/chunk', requireAuth, express.raw({ type: () => true, limit: '6mb' }), ah(async (req, res) => {
+  await teacherDiscussion(req, await repo.readCore());
+  const t = await readDiscUploadToken(req, req.get('X-Upload-Token'));
+  const offset = Number(req.query.offset);
+  const buf = Buffer.isBuffer(req.body) ? req.body : (Buffer.isBuffer(req.rawBody) ? req.rawBody : null);
+  if (!Number.isInteger(offset) || offset < 0 || !buf || !buf.length) throw new HttpError(400, 'That piece of the upload is missing.');
+  res.json(await audioStorage.writeChunk(t.up, offset, buf));
+}));
+// Finish a segment: { uploadToken, duration, last }. `last` ends the recording.
+app.post('/api/discussions/:did/segments', requireAuth, ah(async (req, res) => {
+  const core = await repo.readCore();
+  const got = await teacherDiscussion(req, core);
+  const t = await readDiscUploadToken(req, req.body?.uploadToken);
+  if ((got.d.segments || []).some(s => s.k === t.k)) throw new HttpError(409, 'That part of the recording was already added.');
+  const audio = await audioStorage.finishUpload(t.up);
+  const d = await repo.updateRecord('discussion', got.d.id, x => {
+    x.segments.push({ k: t.k, audio: { ...audio, duration: Number(req.body?.duration) || null }, durationSec: Number(req.body?.duration) || null, status: 'queued', error: null, lines: [], speakers: [], uploadedAt: now() });
+    if (req.body?.last) x.recording = false;
+    x.status = discussionStatus(x); x.updatedAt = now();
+  });
+  await kickDiscussion(d.id);
+  res.json({ discussion: discussionView(core, await repo.getRecord('discussion', d.id), got.cls) });
+}));
+// The recorder stopped (its last segment may already be uploaded)
+app.post('/api/discussions/:did/finish', requireAuth, ah(async (req, res) => {
+  const core = await repo.readCore();
+  const got = await teacherDiscussion(req, core);
+  const d = await repo.updateRecord('discussion', got.d.id, x => { x.recording = false; x.status = discussionStatus(x); });
+  res.json({ discussion: discussionView(core, d, got.cls) });
+}));
+app.get('/api/discussions/:did/segments/:k/audio', requireAuth, ah(async (req, res) => {
+  const got = await teacherDiscussion(req, await repo.readCore());
+  const s = got.d.segments.find(x => x.k === Number(req.params.k));
+  if (!s) throw new HttpError(404, 'recording not found');
+  await audioStorage.streamAudio(s.audio, req, res);
+}));
+app.post('/api/discussions/:did/segments/:k/retranscribe', requireAuth, ah(async (req, res) => {
+  const core = await repo.readCore();
+  const got = await teacherDiscussion(req, core);
+  const k = Number(req.params.k);
+  await repo.updateRecord('discussion', got.d.id, x => { const s = x.segments.find(y => y.k === k); if (s && s.status === 'error') { s.status = 'queued'; s.error = null; } x.status = discussionStatus(x); });
+  await kickDiscussion(got.d.id);
+  res.json({ discussion: discussionView(core, await repo.getRecord('discussion', got.d.id), got.cls) });
+}));
+
+// Who each voice is: { assignments: { "Speaker 1": { name, userId? } | null } }
+app.post('/api/discussions/:did/speakers', requireAuth, ah(async (req, res) => {
+  const core = await repo.readCore();
+  const got = await teacherDiscussion(req, core);
+  const allowed = new Set([...got.cls.studentIds, got.cls.teacherId]);
+  const assignments = req.body?.assignments || {};
+  const d = await repo.updateRecord('discussion', got.d.id, x => {
+    for (const sp of x.speakers || []) {
+      const a = assignments[sp.label];
+      if (a === undefined) continue;
+      if (a === null || !a.name) { sp.assignedName = null; sp.assignedUserId = null; continue; }
+      sp.assignedName = cleanText(String(a.name), 80);
+      sp.assignedUserId = a.userId && allowed.has(a.userId) ? a.userId : null;
+    }
+    x.status = discussionStatus(x); x.analysis = null;
+  });
+  res.json({ discussion: discussionView(core, d, got.cls) });
+}));
+
+// Measured stats (always) and the AI-written summary (when Gemini is set up)
+app.post('/api/discussions/:did/analyze', requireAuth, ah(async (req, res) => {
+  const core = await repo.readCore();
+  const got = await teacherDiscussion(req, core);
+  const { d, cls, a } = { ...got, a: await repo.getRecord('assignment', got.d.assignmentId) };
+  const ready = (d.segments || []).filter(s => s.status === 'ready');
+  if (!ready.length) throw new HttpError(400, 'Nothing has been transcribed yet.');
+  const lines = discussionLib.mergedLines(ready);
+  const roster = rosterOf(core, cls), teacher = teacherOf(core, cls);
+  const measured = discussionLib.measure(lines, d.speakers || [], roster, teacher);
+  let ai = null, aiError = null;
+  if (!geminiReady()) aiError = 'The AI-written summary is unavailable: this server has no Gemini access set up. The measured figures are complete.';
+  else {
+    try {
+      const raw = await geminiJSON([{ text: discussionLib.aiPrompt({ title: d.title, promptText: a?.instructions, lines, speakers: d.speakers || [], roster, teacher }) }], { temperature: 0.2, maxOutputTokens: 6000 });
+      ai = discussionLib.sanitizeAI(raw, { lines, speakers: d.speakers || [], roster, teacher });
+    } catch (err) { aiError = `Gemini could not write the summary: ${err.message}`; }
+  }
+  const analysis = { at: now(), measured, ai, aiError };
+  const saved = await repo.updateRecord('discussion', d.id, x => { x.analysis = analysis; });
+  res.json({ discussion: discussionView(core, saved, cls) });
+}));
+
+app.delete('/api/discussions/:did', requireAuth, ah(async (req, res) => {
+  const core = await repo.readCore();
+  const got = await teacherDiscussion(req, core);
+  for (const s of got.d.segments || []) if (s.audio) await audioStorage.deleteAudio(s.audio);
+  await repo.deleteRecord('discussion', got.d.id);
+  await repo.updateRecord('assignment', got.d.assignmentId, x => { x.discussion.discussionIds = (x.discussion.discussionIds || []).filter(id => id !== got.d.id); });
+  res.json({ ok: true });
+}));
 
 // ═══════════════════════════════════════════════════════════════
 // SECTION 15 — PAGES, ERRORS, BOOT
@@ -2399,6 +2692,11 @@ async function boot() {
   for (const p of Object.values(core.projects)) {
     for (const r of await repo.listResources(p.id)) if (r.type === 'audio' && r.audio.status === 'transcribing') await startTranscription(r.id);
   }
+  // …and discussion segments that were waiting or being transcribed
+  for (const d of await repo.listRecords('discussion', {})) {
+    if ((d.segments || []).some(s => s.status === 'transcribing')) await repo.updateRecord('discussion', d.id, x => { for (const s of x.segments) if (s.status === 'transcribing') s.status = 'queued'; });
+    if ((d.segments || []).some(s => s.status === 'queued' || s.status === 'transcribing')) await kickDiscussion(d.id);
+  }
 }
 
 // `npm start` runs this file directly. On Firebase, index.js loads it instead.
@@ -2411,3 +2709,4 @@ if (require.main === module) {
 
 module.exports = app;
 module.exports.runTranscriptionJob = runTranscriptionJob;
+module.exports.runDiscussionJob = runDiscussionJob;

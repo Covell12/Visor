@@ -5,8 +5,9 @@
 //                /api/**, /privacy and /terms here; everything else is served
 //                straight from public/.
 //   transcribe — runs when the api writes a job to visor_jobs: downloads the
-//                recording, has Gemini transcribe it, saves the result. One
-//                recording per instance at a time (each needs ~200 MB of memory).
+//                recording (or one segment of a class discussion), has Gemini
+//                transcribe it, saves the result. One recording per instance
+//                at a time (each needs ~200 MB of memory).
 //
 // On your computer, `npm start` runs server.js directly and this file isn't used.
 
@@ -39,6 +40,8 @@ exports.transcribe = onDocumentCreated(
     const job = event.data?.data();
     try {
       if (job?.kind === 'transcribe' && job.resourceId) await app.runTranscriptionJob(job.resourceId);
+      // Visor Classroom: one 10-minute segment of a class discussion
+      if (job?.kind === 'discussion' && job.discussionId) await app.runDiscussionJob(job.discussionId, Number(job.k));
     } finally {
       await event.data?.ref.delete().catch(() => {});
     }

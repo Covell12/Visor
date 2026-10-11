@@ -1264,8 +1264,13 @@ function openSpeakerWizard(id, editing = false) {
   const speakers = (r.speakers || []).slice();
   if (!speakers.length) return toast('No separate voices were found in this recording.', 'err');
   const people = [...project.students.map(s => ({ id: s.id, name: s.name, role: 'student', avatarColor: s.avatarColor })), ...(project.teacher ? [{ id: project.teacher.id, name: project.teacher.name, role: 'teacher', avatarColor: project.teacher.avatarColor }] : [])];
+  openVoiceWizard({ id, speakers, people, editing });
+}
+// The same wizard for any set of voices; onFinish(assignments) saves them
+// (Visor Classroom discussions use it with the class roster).
+function openVoiceWizard({ id, speakers, people, editing = false, onFinish = null }) {
   const startAt = editing ? 0 : Math.max(0, speakers.findIndex(s => !s.assignedName));
-  wiz = { id, speakers, people, idx: startAt === -1 ? 0 : startAt, picks: Object.fromEntries(speakers.map(s => [s.label, s.assignedName ? { name: s.assignedName, userId: s.assignedUserId } : null])), other: '' };
+  wiz = { id, speakers, people, onFinish, idx: startAt === -1 ? 0 : startAt, picks: Object.fromEntries(speakers.map(s => [s.label, s.assignedName ? { name: s.assignedName, userId: s.assignedUserId } : null])), other: '' };
   renderWizard();
 }
 function renderWizard() {
@@ -1309,6 +1314,7 @@ async function wizStep(dir, skipping = false) {
 async function wizFinish() {
   const assignments = {};
   for (const [label, p] of Object.entries(wiz.picks)) assignments[label] = p && p.name ? { name: p.name, userId: p.userId || null } : null;
+  if (wiz.onFinish) return wiz.onFinish(assignments);
   try {
     const r = await api(`/api/projects/${project.id}/resources/${wiz.id}/speakers`, { method: 'POST', body: { assignments } });
     const i = project.resources.findIndex(x => x.id === wiz.id); project.resources[i] = r.resource;
