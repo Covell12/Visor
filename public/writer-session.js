@@ -29,12 +29,37 @@ const serverNow = () => Date.now() + WR.serverOffset;
 
 // This tab's surface id. sessionStorage keeps it across a reload of the same
 // tab, so reloading doesn't hand the editing lease to "another" tab; a new tab
-// or the side panel gets its own.
+// or the side panel gets its own. Chrome's Duplicate copies sessionStorage, so
+// while a page holds an id it marks it alive in localStorage (cleared when the
+// page goes away): a copy that finds its id alive takes a new one.
+const wsOwnedSurface = {};
+const SURFACE_ALIVE_MS = 70000; // hidden tabs may only tick once a minute
 function wsSurfaceId(embed) {
   const key = embed ? 'visor-surface-panel' : 'visor-surface';
-  try { const have = sessionStorage.getItem(key); if (have) return have; } catch {}
-  const id = (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2)).slice(0, 18);
-  try { sessionStorage.setItem(key, id); } catch {}
+  if (wsOwnedSurface[key]) return wsOwnedSurface[key];
+  const aliveKey = x => `visor-surface-alive:${x}`;
+  let id = null;
+  try {
+    id = sessionStorage.getItem(key);
+    const seen = id && Number(localStorage.getItem(aliveKey(id)));
+    if (seen && Date.now() - seen < SURFACE_ALIVE_MS) id = null;
+    // forget marks left by pages that never said goodbye
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const k = localStorage.key(i);
+      if (k?.startsWith('visor-surface-alive:') && Date.now() - Number(localStorage.getItem(k)) > SURFACE_ALIVE_MS) localStorage.removeItem(k);
+    }
+  } catch {}
+  if (!id) {
+    id = (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2)).slice(0, 18);
+    try { sessionStorage.setItem(key, id); } catch {}
+  }
+  wsOwnedSurface[key] = id;
+  let timer = null;
+  const mark = () => { try { localStorage.setItem(aliveKey(id), String(Date.now())); } catch {} };
+  const start = () => { mark(); clearInterval(timer); timer = setInterval(mark, 2000); };
+  start();
+  addEventListener('pagehide', () => { clearInterval(timer); try { localStorage.removeItem(aliveKey(id)); } catch {} });
+  addEventListener('pageshow', e => { if (e.persisted) start(); });
   return id;
 }
 

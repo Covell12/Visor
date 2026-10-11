@@ -1535,8 +1535,10 @@ app.delete('/api/assignments/:id', requireAuth, ah(async (req, res) => {
 // ---- Live session board (Section 7.9) ----
 
 const LATE_BEAT_MS = 30 * 1000;
-function liveRow(u, doc, s, a, t) {
-  const row = { student: publicUser(u), docId: doc?.id || null, status: 'not-started', reason: null, awayMs: doc?.stats?.awayMs || 0, words: doc?.stats?.words || 0, pastes: doc?.stats?.pastes || 0, outsidePasteChars: doc?.stats?.externalPasteChars || 0, biggestPaste: doc?.stats?.biggestPaste || 0, sessionMs: null, timeLeftMs: null, ext: null, lock: null, lastActivity: doc?.updatedAt || null, lateBeat: false, aiSite: false, sessionId: null, teacherPaused: false };
+// all: every session of this student's document, so time away is counted
+// from the pauses themselves (doc.stats is only synced now and then)
+function liveRow(u, doc, s, a, t, all = null) {
+  const row = { student: publicUser(u), docId: doc?.id || null, status: 'not-started', reason: null, awayMs: all ? sessionsLib.docSessionStats(all, t).awayMs : doc?.stats?.awayMs || 0, words: doc?.stats?.words || 0, pastes: doc?.stats?.pastes || 0, outsidePasteChars: doc?.stats?.externalPasteChars || 0, biggestPaste: doc?.stats?.biggestPaste || 0, sessionMs: null, timeLeftMs: null, ext: null, lock: null, lastActivity: doc?.updatedAt || null, lateBeat: false, aiSite: false, sessionId: null, teacherPaused: false };
   if (doc?.status === 'submitted') row.status = 'submitted';
   else if (doc?.status === 'returned' && !doc.reopened) row.status = 'returned';
   if (s && s.state !== 'ended') {
@@ -1553,7 +1555,7 @@ function liveRow(u, doc, s, a, t) {
     row.teacherPaused = !!s.teacherPaused;
     if (open) {
       row.reason = open.reason; row.pausedMs = t - Date.parse(open.from);
-      row.awayMs += open.reason === 'teacher' ? 0 : row.pausedMs;
+      if (!all && open.reason !== 'teacher') row.awayMs += row.pausedMs;
       row.status = open.reason === 'teacher' ? 'paused' : open.reason === 'offline' ? 'offline' : 'left';
     } else row.status = 'writing';
   } else if (s && row.status === 'not-started') {
@@ -1586,7 +1588,7 @@ app.get('/api/assignments/:id/live', requireAuth, ah(async (req, res) => {
   const rows = cls.studentIds.map(id => core.users[id]).filter(Boolean).map(u => {
     const doc = freshDocs.find(d => d.studentId === u.id);
     const mine = sessions.filter(s => s.studentId === u.id).sort((x, y) => (x.startedAt < y.startedAt ? 1 : -1));
-    return liveRow(u, doc, mine.find(s => s.state !== 'ended') || mine[0] || null, a, t);
+    return liveRow(u, doc, mine.find(s => s.state !== 'ended') || mine[0] || null, a, t, doc ? mine.filter(s => s.docId === doc.id) : null);
   }).sort((x, y) => x.student.lastName.localeCompare(y.student.lastName));
   res.json({ rows, serverNow: new Date(t).toISOString(), mode: a.writing?.mode, timeLimitMin: a.writing?.timeLimitMin || null });
 }));

@@ -339,7 +339,18 @@ function writerRetrySoon() {
 // Leaving the page: send what's left without waiting for an answer
 function writerFlushBeacon() {
   if (!WR.queue.length || !WR.token) return;
-  const body = JSON.stringify({ baseSeq: WR.seq, ops: WR.queue.slice(0, 500), surfaceId: WR.surfaceId, _session: WR.token });
+  const ops = WR.queue.slice(0, 500);
+  const body = JSON.stringify({ baseSeq: WR.seq, ops, surfaceId: WR.surfaceId, _session: WR.token });
+  // The copy kept on this device remembers the text this send leads to, so a
+  // reload can tell "it arrived" from "it was lost"
+  if (ops.length === WR.queue.length) {
+    try {
+      const stored = JSON.parse(localStorage.getItem(queueKey()) || 'null');
+      let text = WR.confirmedText;
+      for (const op of ops) text = applyTextOp(text, op);
+      if (stored) localStorage.setItem(queueKey(), JSON.stringify({ ...stored, sentText: text }));
+    } catch {}
+  }
   try {
     fetch(`/api/write/${WR.doc.id}/ops`, { method: 'POST', keepalive: true, headers: { 'Content-Type': 'application/json', 'X-Visor-Session': WR.token }, body }).catch(() => {});
   } catch {
@@ -388,6 +399,8 @@ function writerCheckStoredQueue() {
   let stored = null;
   try { stored = JSON.parse(localStorage.getItem(queueKey()) || 'null'); } catch {}
   if (!stored?.ops?.length || WR.queue.length) return;
+  // Sent as the page closed, and the server has it
+  if (stored.sentText != null && stored.sentText === WR.doc.text) return writerClearStoredQueue();
   if (stored.baseSeq !== WR.doc.seq) {
     writerClearStoredQueue();
     writerBanner(`Some writing saved on this device on ${vcDateTime(new Date(stored.savedAt).toISOString())} couldn’t be sent, because the document changed after it. It was discarded.`, 'warn');

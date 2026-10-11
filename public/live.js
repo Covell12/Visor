@@ -12,6 +12,8 @@ const LIVE_STATUS = {
   left: ['Left', 'pill-amber'], offline: ['Offline', 'pill-amber'], ended: ['Ended', 'pill-gray'], submitted: ['Submitted', 'pill-blue'], returned: ['Returned', 'pill-violet']
 };
 const REASON_TEXT = { 'left-tab': 'left the tab', 'left-window': 'left the window', 'exit-fullscreen': 'left full screen', 'ext-missing': 'extension off', offline: 'offline', teacher: 'paused by you' };
+// Why a session ended (endReason)
+const END_TEXT = { teacher: 'ended by you', student: 'ended by the student', submitted: 'submitted', timeout: 'no check-in for 3 minutes', 'time-limit': 'time ran out', 'window-closed': 'writing window closed' };
 let lb = null; // { data, rows, filter, sort, timer, el }
 
 function renderLiveBoard(el, data) {
@@ -87,7 +89,7 @@ function liveRender() {
       const paused = r.pausedMs != null ? r.pausedMs + since : null;
       const statusText = r.status === 'left' ? `Left: ${vcClock(paused)}` : r.status === 'offline' ? `Offline ${vcClock(paused)}` : label;
       const live = ['writing', 'left', 'offline'].includes(r.status);
-      const reason = r.reason && (r.status === 'left' || r.status === 'ended') ? `<div class="tiny muted">${esc(REASON_TEXT[r.reason] || r.reason)}</div>` : '';
+      const reason = r.reason && (r.status === 'left' || r.status === 'ended') ? `<div class="tiny muted">${esc((r.status === 'ended' ? END_TEXT : REASON_TEXT)[r.reason] || r.reason)}</div>` : '';
       const tl = r.timeLeftMs != null ? Math.max(0, r.timeLeftMs - (r.status === 'writing' || r.status === 'left' || r.status === 'offline' ? since : 0)) : null;
       const sess = r.sessionMs != null ? r.sessionMs + (['writing', 'left', 'offline', 'paused'].includes(r.status) ? since : 0) : null;
       return `<tr class="${r.attention.length ? 'attn' : ''}">

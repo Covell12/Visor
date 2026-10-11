@@ -125,6 +125,11 @@ test('the classroom flow, end to end', async t => {
   assert.strictEqual(r.data.pauseCount, 1);
   assert.ok(r.data.awayMs >= 4800 && r.data.awayMs < 8000, `away ${r.data.awayMs} ms`);
   assert.strictEqual(r.data.state, 'active');
+  // the live board counts that time away while the session is still running
+  r = await teacher.get(`/api/assignments/${a.id}/live`);
+  const liveSam = r.data.rows.find(x => x.student.email === 'sam@school.test');
+  assert.strictEqual(liveSam.status, 'writing');
+  assert.ok(liveSam.awayMs >= 4800 && liveSam.awayMs < 8000, `live board away ${liveSam.awayMs} ms`);
 
   // 6. research: the extension (connected with its own token) records a copy;
   //    pasting the same text into the essay picks up where it came from
