@@ -17,7 +17,9 @@ Every class gets a colour and a picture, shown on its tile on Home, in the **Cou
 On the class's **Materials** page, **Add Materials → Writing assignment**, then pick a preset:
 
 - **In-class essay (locked):** 45 minutes, runs in full screen, needs the Visor Chrome extension, students can only paste text from their own essay, AI sites are blocked, and it submits itself when time runs out.
-- **Homework essay (open):** no time limit, pasting allowed, research recorded, AI sites recorded but not blocked.
+- **Homework essay (open):** no time limit, pasting allowed, research recorded, AI sites blocked.
+
+AI sites are blocked by default in both (untick **Block AI sites** to only record visits). Blocking works through the Visor extension, so in an open session a student without the extension isn't blocked; tick **Require the Visor extension** if every student must have it.
 
 Change anything you like (time limit, the window when sessions can start, allowed sites, citation style, document style, word limits, starter text), then **Save and publish**. **Document style** sets how a new essay looks: an MLA essay (Times New Roman 12, double-spaced) or Docs default (Arial 11, 1.15 spacing). Students write in a Google-Docs-style editor with menus, a toolbar, pictures, tables, find and replace and an outline, and everything they do is recorded as before.
 

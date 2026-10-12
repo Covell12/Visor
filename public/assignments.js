@@ -59,7 +59,7 @@ function writingFields(w, showPresets) {
     ${showPresets ? `<div class="kicker" style="margin:16px 0 8px;">Start from a preset</div>
     <div class="preset-row">
       <button type="button" class="choice preset" onclick="applyPreset('in-class')"><div class="t">In-class essay (locked)</div><div class="d">45 minutes · Visor extension required · pasting only from this essay · AI sites blocked · submits at time up</div></button>
-      <button type="button" class="choice preset" onclick="applyPreset('homework')"><div class="t">Homework essay (open)</div><div class="d">No time limit · pasting allowed · research recorded · AI sites flagged, not blocked</div></button>
+      <button type="button" class="choice preset" onclick="applyPreset('homework')"><div class="t">Homework essay (open)</div><div class="d">No time limit · pasting allowed · research recorded · AI sites blocked</div></button>
     </div>` : ''}
     <div class="form-grid">
       <fieldset class="field"><legend>Session type</legend>
@@ -77,7 +77,7 @@ function writingFields(w, showPresets) {
     </div>
     <label class="check-row"><input id="afExt" type="checkbox" ${w.requireExtension ? 'checked' : ''} /> <span>Require the Visor extension to start a session <span class="muted small" id="afExtNote"></span></span></label>
     <label class="check-row"><input id="afResearch" type="checkbox" ${w.researchTracking ? 'checked' : ''} /> <span>Record research during sessions (searches, pages visited and for how long, text copied). Only while a session is running.</span></label>
-    <label class="check-row"><input id="afBlockAi" type="checkbox" ${w.blockAiSites ? 'checked' : ''} /> <span>Block AI sites during sessions (otherwise visits are only recorded)</span></label>
+    <label class="check-row"><input id="afBlockAi" type="checkbox" ${w.blockAiSites ? 'checked' : ''} /> <span>Block AI sites during sessions (on by default; when it's off, visits are only recorded). Blocking works through the Visor extension.</span></label>
     <label class="check-row" id="afPanelRow"><input id="afPanel" type="checkbox" ${w.panelBrowsing !== false ? 'checked' : ''} /> <span>Let students switch to the side panel to research (leaves full screen; blocked and AI sites stay blocked, everything is recorded) <span class="muted small" id="afPanelNote"></span></span></label>
     <label class="check-row"><input id="afCite" type="checkbox" ${w.oneClickCite !== false ? 'checked' : ''} /> <span>Let students cite a page in one click with the Visor extension (Cite this page, right-click, Alt+Shift+C). Sources added by hand always work.</span></label>
     <label class="check-row"><input id="afAuto" type="checkbox" ${w.autoSubmitOnTimeUp ? 'checked' : ''} /> <span>Submit automatically when time runs out</span></label>

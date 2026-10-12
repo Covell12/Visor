@@ -2114,8 +2114,8 @@ function writerRenderIntro() {
     ? `<div class="wr-ext ok">${I.check}<span>Visor extension: connected</span></div>`
     : WR.extOther ? `<div class="wr-ext missing">${I.puzzle}<span>The Visor extension in this browser is connected to ${esc(WR.extOther)}. <a href="/extension/connect" data-link>Connect it to your account</a> to start.</span></div>`
       : `<div class="wr-ext missing">${I.puzzle}<span>${WR.extInfo?.installed ? '<a href="/extension/connect" data-link>Connect the Visor extension</a> to start' : 'Install the Visor extension, then <a href="/extension/connect" data-link>connect it</a> to start'}.</span></div>`;
-  const needsPerm = !WR.embed && (w.researchTracking || w.mode === 'locked') && WR.extPresent && WR.extInfo && !WR.extInfo.hasHostPermission;
-  const permLine = needsPerm ? `<div class="wr-ext missing">${I.alert}<span>${w.mode === 'locked' ? 'Locked sessions need' : 'This assignment records research, which needs'} your OK for the extension to see the pages you visit during the session. <button class="btn btn-ghost btn-sm" onclick="extAllowResearch()">Allow research recording</button></span></div>` : '';
+  const needsPerm = !WR.embed && (w.researchTracking || w.blockAiSites || w.mode === 'locked') && WR.extPresent && WR.extInfo && !WR.extInfo.hasHostPermission;
+  const permLine = needsPerm ? `<div class="wr-ext missing">${I.alert}<span>${w.mode === 'locked' ? 'Locked sessions need' : w.blockAiSites ? 'This assignment blocks AI sites, which needs' : 'This assignment records research, which needs'} your OK for the extension to see the pages you visit during the session. <button class="btn btn-ghost btn-sm" onclick="extAllowResearch()">Allow research recording</button></span></div>` : '';
   const outOfTime = WR.data.timeLeftMs != null && WR.data.timeLeftMs <= 5000;
   const blocked = WR.data.windowProblem || (outOfTime ? 'You’ve used all of your time for this assignment.' : '') || (needsExt && !WR.extPresent && !WR.embed ? '' : '');
   const timeNote = WR.data.timeLeftMs != null && !outOfTime && WR.session ? `<div class="small muted">${vcDur(WR.data.timeLeftMs)} left of your time for this assignment.</div>` : '';

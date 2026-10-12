@@ -698,6 +698,21 @@ test('students get places among what they can see, not the stored positions', as
   assert.deepStrictEqual(r.data.assignments.filter(a => !a.folderId).map(a => [a.title, a.position]), [['One', 0], ['Two', 2], ['Three', 3]]);
 });
 
+test('AI sites are blocked by default, in both presets and with no settings given', async () => {
+  const { PRESETS, defaultWriting } = require('../lib/assignments');
+  assert.strictEqual(PRESETS['in-class'].writing.blockAiSites, true);
+  assert.strictEqual(PRESETS.homework.writing.blockAiSites, true);
+  assert.strictEqual(defaultWriting('open').blockAiSites, true);
+  const teacher = client();
+  await signup(teacher, 'teacher', 'Kit');
+  const cls = await newClass(teacher, 'Debate');
+  const r = await teacher.post(`/api/classes/${cls.id}/assignments`, { type: 'writing', title: 'Plain' });
+  assert.strictEqual(r.data.assignment.writing.blockAiSites, true);
+  assert.ok(r.data.assignment.writing.blockedSites.length > 10);
+  const off = await teacher.post(`/api/classes/${cls.id}/assignments`, { type: 'writing', title: 'Off', writing: { blockAiSites: false } });
+  assert.strictEqual(off.data.assignment.writing.blockAiSites, false, 'a teacher can still turn it off');
+});
+
 /* ---------------- calendar ---------------- */
 
 test('calendar: due dates, discussions and writing windows in a range', async () => {
