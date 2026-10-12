@@ -499,3 +499,51 @@ test('deleting the class and removing teachers: owner only; a co-teacher may lea
   r = await owner.del(`/api/classes/${cls.id}`, { confirmName: 'Art' });
   assert.deepStrictEqual([r.status, r.data], [200, { ok: true }]);
 });
+
+test('after a co-teacher is removed: picture tokens stop working, group-project codes change; students never get the owner’s email', async () => {
+  const owner = client(), co = client(), stu = client(), anon = client();
+  const T = await signup(owner, 'teacher', 'Ola', 'Owner');
+  const CO = await signup(co, 'teacher', 'Cy', 'Co');
+  const cls = await newClass(owner, 'Biology');
+  const S = await signup(stu, 'student', 'Sid', 'Student', { classCode: cls.joinCode });
+  assert.strictEqual((await owner.post(`/api/classes/${cls.id}/teachers`, { email: CO.email })).status, 200);
+
+  // students see the owner's name, never an email
+  let r = await stu.get(`/api/classes/${cls.id}`);
+  assert.deepStrictEqual(r.data.class.teacher, { id: T.id, name: 'Ola Owner', avatarColor: null });
+
+  // a picture, and the co-teacher's token for it from the review
+  const a = (await owner.post(`/api/classes/${cls.id}/assignments`, { type: 'writing', title: 'Cells', writing: { mode: 'open' } })).data.assignment;
+  await owner.post(`/api/assignments/${a.id}/publish`, {});
+  const doc = (await stu.get(`/api/write/${a.id}`)).data.doc;
+  const s = (await stu.post(`/api/write/${doc.id}/sessions`, { surfaceId: 't1', surf: 'tab' })).data;
+  const H = { 'X-Visor-Session': s.token, 'X-Visor-Surface': 't1' };
+  await stu.post(`/api/write/${doc.id}/ops`, { baseSeq: 0, ops: [{ k: 'i', at: 0, s: 'Hi', t: Date.now(), src: 'type' }], surfaceId: 't1' }, H);
+  const image = (await stu.upload(`/api/write/${doc.id}/images`, PNG, H)).data;
+  await stu.post(`/api/write/${doc.id}/submit`, {});
+  const coToken = (await co.get(`/api/review/${doc.id}`)).data.imageToken;
+  const ownerToken = (await owner.get(`/api/review/${doc.id}`)).data.imageToken;
+  r = await anon.get(`/api/images/${image.id}?t=${encodeURIComponent(coToken)}`);
+  assert.strictEqual(r.status, 200, 'works while they teach the class');
+
+  // a group project, whose code the co-teacher can see
+  const g = (await owner.post(`/api/classes/${cls.id}/assignments`, { type: 'group', title: 'Labs', group: { groups: [{ name: 'A', studentIds: [S.id] }] } })).data.assignment;
+  assert.ok(g);
+  const proj = (await co.get('/api/projects')).data.projects.find(p => p.classId === cls.id);
+  assert.ok(proj && proj.code, 'a co-teacher sees the class’s project and its code');
+  assert.deepStrictEqual(proj.teachers.map(t => t.id), [T.id, CO.id]);
+  const stuProj = (await stu.get('/api/projects')).data.projects.find(p => p.id === proj.id);
+  assert.ok(stuProj.teachers.every(t => !t.email) && !stuProj.teacher.email, 'students get no teacher emails on projects');
+
+  // removed: the token and the old code stop working
+  r = await owner.del(`/api/classes/${cls.id}/teachers/${CO.id}`);
+  assert.strictEqual(r.status, 200);
+  r = await anon.get(`/api/images/${image.id}?t=${encodeURIComponent(coToken)}`);
+  assert.strictEqual(r.status, 404);
+  r = await anon.get(`/api/images/${image.id}?t=${encodeURIComponent(ownerToken)}`);
+  assert.strictEqual(r.status, 200, 'the owner’s still works');
+  const after = (await owner.get('/api/projects')).data.projects.find(p => p.id === proj.id);
+  assert.notStrictEqual(after.code, proj.code);
+  r = await anon.get(`/api/extension/group/${proj.code}`);
+  assert.notStrictEqual(r.status, 200, 'the old code is dead');
+});

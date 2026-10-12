@@ -27,7 +27,7 @@ function avatarHtml(person, size = '') {
 function personColor(person, i) { return person?.avatarColor || PALETTE[i % 8]; }
 function projectPerson(idOrName) {
   if (!project) return null;
-  const all = [...(project.students || []), ...(project.teacher ? [project.teacher] : [])];
+  const all = [...(project.students || []), ...(project.teachers?.length ? project.teachers : project.teacher ? [project.teacher] : [])];
   return all.find(p => p.id === idOrName) || all.find(p => p.name.toLowerCase() === String(idOrName || '').toLowerCase()) || null;
 }
 
@@ -425,7 +425,7 @@ function renderProject() {
   $('emptyMain').classList.add('hidden'); $('projectView').classList.remove('hidden');
   const p = project;
   $('projName').textContent = p.name;
-  $('projMeta').innerHTML = `<span>Teacher: ${esc(p.teacher?.name || '—')}</span><span>${p.students.length} student${p.students.length !== 1 ? 's' : ''}</span>${p.docUrl ? `<span><a href="${esc(p.docUrl)}" target="_blank" rel="noopener">Group’s Google Doc ↗</a></span>` : ''}`;
+  $('projMeta').innerHTML = `<span>${(p.teachers?.length || 0) > 1 ? 'Teachers' : 'Teacher'}: ${esc((p.teachers?.length ? p.teachers : p.teacher ? [p.teacher] : []).map(t => t.name).join(', ') || '—')}</span><span>${p.students.length} student${p.students.length !== 1 ? 's' : ''}</span>${p.docUrl ? `<span><a href="${esc(p.docUrl)}" target="_blank" rel="noopener">Group’s Google Doc ↗</a></span>` : ''}`;
   // Visor Classroom: a group project links back to its class and assignment
   const bc = $('projCrumbs');
   if (bc) bc.innerHTML = p.breadcrumb && window.crumbs ? crumbs([['Home', '/'], [p.breadcrumb.className, `/class/${p.breadcrumb.classId}`], ...(p.breadcrumb.assignmentId ? [[p.breadcrumb.assignmentTitle, `/a/${p.breadcrumb.assignmentId}?tab=groups`]] : []), [p.name]]) : '';
@@ -500,7 +500,7 @@ async function loadProjectsQuiet() { try { const r = await api('/api/projects');
 function renderMembers() {
   const p = project;
   const rows = [];
-  if (p.teacher) rows.push(`<div class="row">${avatarHtml(p.teacher)}<div class="grow"><div class="t">${esc(p.teacher.name)} <span class="pill pill-blue">Teacher</span></div><div class="s">${esc(p.teacher.email || '')}</div></div></div>`);
+  for (const t of (p.teachers?.length ? p.teachers : p.teacher ? [p.teacher] : [])) rows.push(`<div class="row">${avatarHtml(t)}<div class="grow"><div class="t">${esc(t.name)} <span class="pill pill-blue">Teacher</span></div><div class="s">${esc(t.email || '')}</div></div></div>`);
   p.students.forEach((s, i) => rows.push(`<div class="row">${avatarHtml(s)}<div class="grow"><div class="t">${esc(s.name)}</div><div class="s">${esc(s.email || '')}</div></div>${p.isTeacher && !p.isDemo ? `<button class="btn-icon" title="Remove from project" onclick="removeStudent('${s.id}')">${I.x}</button>` : ''}</div>`));
   if (!p.students.length) rows.push(`<div class="empty"><div class="ic">${I.users}</div><h4>No students yet</h4><p>${p.isTeacher ? 'Search above by name, or type a student\'s full email address.' : 'Your teacher hasn\'t added anyone yet.'}</p></div>`);
   $('membersList').innerHTML = rows.join('');
@@ -1281,7 +1281,8 @@ function openSpeakerWizard(id, editing = false) {
   const r = project.resources.find(x => x.id === id); if (!r) return;
   const speakers = (r.speakers || []).slice();
   if (!speakers.length) return toast('No separate voices were found in this recording.', 'err');
-  const people = [...project.students.map(s => ({ id: s.id, name: s.name, role: 'student', avatarColor: s.avatarColor })), ...(project.teacher ? [{ id: project.teacher.id, name: project.teacher.name, role: 'teacher', avatarColor: project.teacher.avatarColor }] : [])];
+  const teachers = project.teachers?.length ? project.teachers : project.teacher ? [project.teacher] : [];
+  const people = [...project.students.map(s => ({ id: s.id, name: s.name, role: 'student', avatarColor: s.avatarColor })), ...teachers.map(t => ({ id: t.id, name: t.name, role: 'teacher', avatarColor: t.avatarColor }))];
   openVoiceWizard({ id, speakers, people, editing });
 }
 // The same wizard for any set of voices; onFinish(assignments) saves them

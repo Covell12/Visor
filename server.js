@@ -666,11 +666,19 @@ async function transcribeResource(resourceId) {
   });
 }
 
+// A project's teachers: for a class's group project every teacher of the
+// class (owner first), else the one who made it
+function projectTeacherIds(core, project) {
+  const cls = project.classId ? own(core.classes, project.classId) : null;
+  return cls ? [...new Set([project.teacherId, ...classes.teacherIdsOf(cls)])] : [project.teacherId];
+}
 // Everyone who could be a voice in a project's recording
 function projectPeople(core, project) {
-  const t = core.users[project.teacherId];
   const list = project.studentIds.map(id => core.users[id]).filter(Boolean).map(u => ({ id: u.id, name: `${u.firstName} ${u.lastName}`, role: 'student', avatarColor: u.avatarColor || null }));
-  if (t) list.push({ id: t.id, name: `${t.firstName} ${t.lastName}`, role: 'teacher', avatarColor: t.avatarColor || null });
+  for (const id of projectTeacherIds(core, project)) {
+    const t = own(core.users, id);
+    if (t) list.push({ id: t.id, name: `${t.firstName} ${t.lastName}`, role: 'teacher', avatarColor: t.avatarColor || null });
+  }
   return list;
 }
 
@@ -713,7 +721,9 @@ function publicProject(core, project, me, { resources, resourceCount } = {}) {
   const isTeacher = isProjectTeacher(core, project, me.id);
   const out = {
     id: project.id, name: project.name, code: isTeacher ? project.code : undefined,
-    teacher: publicUser(core.users[project.teacherId]), students: project.studentIds.map(id => publicUser(core.users[id])).filter(Boolean),
+    teacher: isTeacher ? publicUser(core.users[project.teacherId]) : nameOnly(core.users[project.teacherId]),
+    teachers: projectTeacherIds(core, project).map(id => own(core.users, id)).filter(Boolean).map(u => (isTeacher ? publicUser(u) : nameOnly(u))),
+    students: project.studentIds.map(id => publicUser(core.users[id])).filter(Boolean),
     showAnalysis: !!project.showAnalysis, isTeacher, createdAt: project.createdAt,
     classId: project.classId || null, assignmentId: project.assignmentId || null,
     hasAnalysis: !!project.lastAnalyzedAt, lastAnalyzedAt: project.lastAnalyzedAt || null,
@@ -1123,14 +1133,17 @@ async function analyzeProject(core, project) {
   const sum = contributors.reduce((s, c) => s + c.pct, 0);
   if (sum && sum !== 100 && contributors.length) contributors[0].pct += 100 - sum;
   for (const c of contributors) c.role = classifyRole(c);
-  const fairnessScore = calculateFairness(contributors);
+  // Teachers are never part of the group's workload
+  const teacherIds = new Set(members.filter(m => m.role === 'teacher').map(m => m.id));
+  const fairnessScore = calculateFairness(contributors.filter(c => !teacherIds.has(c.id)));
   const silentMembers = students.filter(m => !contributors.some(c => c.id === m.id)).map(m => m.name);
 
   // Prompt
   const L = [];
   L.push(`PROJECT: ${project.name}`);
   L.push(`STUDENTS: ${students.map(s => s.name).join(', ') || '(none added yet)'}`);
-  L.push(`TEACHER: ${members.find(m => m.role === 'teacher')?.name || '?'}`);
+  const teacherNames = members.filter(m => m.role === 'teacher').map(m => m.name);
+  L.push(`${teacherNames.length > 1 ? 'TEACHERS' : 'TEACHER'}: ${teacherNames.join(', ') || '?'}`);
   if (silentMembers.length) L.push(`STUDENTS WITH NO TRACKED ACTIVITY IN ANY SOURCE: ${silentMembers.join(', ')}`);
   L.push('', '=== SOURCE 1: DOCUMENT REPORTS (Visor extension = every edit and paste; Google Drive = periodic saved snapshots) ===');
   if (!extReports.length) L.push('(none)');
@@ -1191,7 +1204,7 @@ Return ONLY JSON in exactly this shape:
   let ai = null;
   try {
     // The teacher is never part of the workload (the prompt says so; this keeps the fill-in step from adding them back)
-    ai = sanitizeAIReport(await geminiJSON([{ text: prompt }], { temperature: 0.3, maxOutputTokens: 5000 }), contributors.filter(c => c.isMember !== false && c.id !== project.teacherId));
+    ai = sanitizeAIReport(await geminiJSON([{ text: prompt }], { temperature: 0.3, maxOutputTokens: 5000 }), contributors.filter(c => c.isMember !== false && !teacherIds.has(c.id)));
   } catch (err) {
     console.error('gemini report error:', err.message);
     errors.push(`Gemini could not write the report: ${err.message}`);
@@ -1283,6 +1296,9 @@ async function classSummary(cls, isTeacher, meId, loaded = {}) {
 
 // A class's teachers, owner first: [{ id, name, avatarColor, owner }], with
 // each one's email when withEmail (the class's own teachers only)
+// A teacher as a student sees them: a name and a colour, no email
+const nameOnly = u => (u ? { id: u.id, name: fullName(u), avatarColor: u.avatarColor || null } : null);
+
 function publicTeachers(core, cls, withEmail = false) {
   return classes.teacherIdsOf(cls).map(id => own(core.users, id)).filter(Boolean).map(u => {
     const t = { id: u.id, name: fullName(u), avatarColor: u.avatarColor || null, owner: u.id === cls.teacherId };
@@ -1296,7 +1312,7 @@ function publicClass(core, cls, me) {
   const isTeacher = classes.isClassTeacher(cls, me.id);
   const base = {
     id: cls.id, name: cls.name, color: classes.colorFor(cls), archived: !!cls.archived, createdAt: cls.createdAt,
-    isTeacher, isOwner: cls.teacherId === me.id, teacher: publicUser(core.users[cls.teacherId]), teachers: publicTeachers(core, cls, isTeacher),
+    isTeacher, isOwner: cls.teacherId === me.id, teacher: isTeacher ? publicUser(core.users[cls.teacherId]) : nameOnly(core.users[cls.teacherId]), teachers: publicTeachers(core, cls, isTeacher),
     studentCount: cls.studentIds.length
   };
   if (!isTeacher) return base;
@@ -1391,6 +1407,8 @@ app.delete('/api/classes/:id/teachers/:userId', requireAuth, ah(async (req, res)
     // Removing the owner is refused below (400), whoever asks
     if (!got.isOwner && userId !== got.me.id && userId !== got.cls.teacherId) throw new HttpError(403, 'Only the class owner can remove another teacher.');
     classes.removeTeacher(got.cls, userId);
+    // They saw the class's group-project codes, which work without signing in: new codes
+    for (const p of Object.values(core.projects)) if (p.classId === got.cls.id) p.code = newProjectCode(core);
     return got.isOwner ? { class: publicClass(core, got.cls, got.me) } : { ok: true, left: true };
   });
   res.json(out);
@@ -2437,6 +2455,11 @@ app.get('/api/images/:id', ah(async (req, res) => {
   if (typeof req.query.t === 'string' && req.query.t) {
     const t = verify(await getSessionSecret(), req.query.t, 'img');
     ok = !!t && t.docId === rec.docId && t.exp > Date.now();
+    // ...and whoever it was given to is still the student or a teacher of the class
+    if (ok) {
+      const core = await repo.readCore();
+      ok = t.uid === rec.studentId || classes.isClassTeacher(own(core.classes, rec.classId), t.uid);
+    }
   }
   if (!ok && req.session?.userId) {
     const core = await repo.readCore();
