@@ -1538,7 +1538,7 @@ const LATE_BEAT_MS = 30 * 1000;
 // all: every session of this student's document, so time away is counted
 // from the pauses themselves (doc.stats is only synced now and then)
 function liveRow(u, doc, s, a, t, all = null) {
-  const row = { student: publicUser(u), docId: doc?.id || null, status: 'not-started', reason: null, awayMs: all ? sessionsLib.docSessionStats(all, t).awayMs : doc?.stats?.awayMs || 0, words: doc?.stats?.words || 0, pastes: doc?.stats?.pastes || 0, outsidePasteChars: doc?.stats?.externalPasteChars || 0, biggestPaste: doc?.stats?.biggestPaste || 0, sessionMs: null, timeLeftMs: null, ext: null, lock: null, lastActivity: doc?.updatedAt || null, lateBeat: false, aiSite: false, sessionId: null, teacherPaused: false };
+  const row = { student: publicUser(u), docId: doc?.id || null, status: 'not-started', reason: null, awayMs: all ? sessionsLib.docSessionStats(all, t).awayMs : doc?.stats?.awayMs || 0, words: doc?.stats?.words || 0, pastes: doc?.stats?.pastes || 0, outsidePasteChars: doc?.stats?.externalPasteChars || 0, biggestPaste: doc?.stats?.biggestPaste || 0, sessionMs: null, timeLeftMs: null, ext: null, lock: null, lastActivity: doc?.updatedAt || null, lateBeat: false, aiSite: false, sessionId: null, teacherPaused: false, where: null, researching: false };
   if (doc?.status === 'submitted') row.status = 'submitted';
   else if (doc?.status === 'returned' && !doc.reopened) row.status = 'returned';
   if (s && s.state !== 'ended') {
@@ -1553,6 +1553,9 @@ function liveRow(u, doc, s, a, t, all = null) {
     row.lateBeat = t - Date.parse(s.lastBeat) > LATE_BEAT_MS;
     row.aiSite = (s.events || []).some(e => e.type === 'ai-site');
     row.teacherPaused = !!s.teacherPaused;
+    // Writing in the side panel (and researching on other tabs right now)?
+    row.where = doc?.lease?.surf === 'panel' && doc.lease.sessionId === s.id ? 'panel' : 'tab';
+    row.researching = !!s.research;
     if (open) {
       row.reason = open.reason; row.pausedMs = t - Date.parse(open.from);
       if (!all && open.reason !== 'teacher') row.awayMs += row.pausedMs;
@@ -1810,6 +1813,8 @@ app.post('/api/write/:docId/sessions', ah(async (req, res) => {
   const surfaceId = String(body.surfaceId || '').slice(0, 60);
   if (!surfaceId) throw new HttpError(400, 'surfaceId is required');
   const surf = body.surf === 'panel' ? 'panel' : 'tab';
+  // A locked session starts in full screen, which the side panel can't do
+  if (surf === 'panel' && got.a.writing?.mode === 'locked') throw new HttpError(409, 'Start locked sessions from the Visor tab in full screen.');
   const list = await sweepDocSessions(got.doc, got.a);
   const doc = await repo.getRecord('doc', got.doc.id);
   let active = list.find(s => s.state !== 'ended') || null;
@@ -1824,6 +1829,7 @@ app.post('/api/write/:docId/sessions', ah(async (req, res) => {
   if (takeover?.reuse) {
     // The same student opened another tab: it joins the running session.
     s = await repo.updateRecord('session', active.id, x => {
+      sessionsLib.leaseMoved(x, surf, t);
       x.surfaces[surfaceId] = { kind: surf, focused: true, visible: true, fullscreen: body.fullscreen !== false, lastBeat: new Date(t).toISOString() };
       x.lastBeat = new Date(t).toISOString();
       sessionsLib.addEvent(x, { t, type: 'lease', surf, takeover: true });
@@ -1875,7 +1881,7 @@ app.post('/api/write/:docId/ops', ah(async (req, res) => {
     if (s.teacherPaused) throw new HttpError(423, 'Your teacher paused the session.');
     if (doc.status === 'submitted') throw new HttpError(409, 'This document has been submitted.');
     const surfaceId = String(body.surfaceId || '');
-    if (!doc.lease || doc.lease.sessionId !== s.id || doc.lease.surfaceId !== surfaceId) throw new HttpError(409, 'Another window is writing in this document.', { notLeaseHolder: true, lease: doc.lease, ...writing.resyncData(doc) });
+    if (!sessionsLib.holdsLease(doc.lease, s.id, surfaceId, tok.surf)) throw new HttpError(409, 'Another window is writing in this document.', { notLeaseHolder: true, lease: doc.lease, ...writing.resyncData(doc) });
     const chunkIds = writing.chunkIdsFor(doc.id, Number(body.baseSeq), body.ops.length);
     const chunks = {};
     if (Number(body.baseSeq) === doc.seq) for (const id of chunkIds) chunks[id] = await t.get('opchunk', id);
@@ -1896,16 +1902,24 @@ app.post('/api/write/:docId/ops', ah(async (req, res) => {
   res.json(out);
 }));
 
-// Beat: { surfaceId, surf, focused, visible, fullscreen, extPresent, extLock, online, events, offlinePause, seq, wantText }
+// Beat: { surfaceId, surf, focused, visible, fullscreen, extPresent, extLock, online, events, offlinePause, seq, wantText, browser? }
+// browser (the side panel only): { focused, blocked }, from the extension:
+// a Chrome window has focus, and whether it shows Visor's blocked page.
 app.post('/api/write/:docId/beat', ah(async (req, res) => {
   const { tok, s: s0 } = await liveSession(req);
   const a = await repo.getRecord('assignment', s0.assignmentId);
   const body = req.body || {};
+  const surf = body.surf === 'panel' ? 'panel' : 'tab';
+  const lease = (await repo.getRecord('doc', s0.docId))?.lease;
+  const holdsLease = sessionsLib.holdsLease(lease, s0.id, String(body.surfaceId || 'tab').slice(0, 60), tok.surf);
+  const panelLease = !!lease && lease.sessionId === s0.id && lease.surf === 'panel';
+  const b = body.browser;
+  const browser = surf === 'panel' && b && typeof b === 'object' ? { focused: !!b.focused, blocked: !!b.blocked } : undefined;
   let endedNow = null, pausesBefore = s0.pauses.length;
   const s = await repo.updateRecord('session', s0.id, x => {
     const t = Date.now();
     endedNow = sessionsLib.sweep(x, t, { windowEnd: a?.writing?.windowEnd });
-    if (x.state !== 'ended') sessionsLib.applyBeat(x, { ...body, surf: body.surf === 'panel' ? 'panel' : 'tab' }, t);
+    if (x.state !== 'ended') sessionsLib.applyBeat(x, { ...body, surf, holdsLease, panelLease, browser }, t);
   });
   if (endedNow) await afterSessionEnded(s, a);
   else if (s.pauses.length !== pausesBefore) await syncDocStats(s.docId);
@@ -1915,18 +1929,38 @@ app.post('/api/write/:docId/beat', ah(async (req, res) => {
   res.json(out);
 }));
 
-// Hand the editing lease to this surface: { surfaceId, surf }
+// Hand the editing lease to this surface: { surfaceId, surf }. Or, from the
+// tab, to the side panel as a whole: { give: 'panel' } (any copy of the panel
+// may then write; see sessionsLib.holdsLease).
 app.post('/api/write/:docId/lease', ah(async (req, res) => {
-  const { s: s0 } = await liveSession(req);
+  const { tok, s: s0 } = await liveSession(req);
   if (s0.state === 'ended') return res.status(409).json({ error: 'Your writing session has ended.', ...endedReply(s0) });
   const body = req.body || {};
+  const PANEL_OFF = 'Side-panel mode is turned off for this assignment.';
+  if (body.give === 'panel') {
+    if (!sessionsLib.panelAllowed(s0)) throw new HttpError(409, PANEL_OFF);
+    const t = Date.now();
+    const lease = { surfaceId: 'panel', sessionId: s0.id, surf: 'panel', at: new Date(t).toISOString() };
+    const doc = await repo.updateRecord('doc', s0.docId, d => { d.lease = lease; });
+    await repo.updateRecord('session', s0.id, x => {
+      // Counts as present for a moment while the panel loads, so the handoff
+      // records no pause
+      sessionsLib.leaseMoved(x, 'panel', t, { handoff: true });
+      x.lastBeat = new Date(t).toISOString();
+      sessionsLib.addEvent(x, { t, type: 'lease', surf: 'panel', handoff: true });
+      sessionsLib.evaluateFocus(x, t);
+    });
+    return res.json({ lease, doc: docView(doc) });
+  }
   const surfaceId = String(body.surfaceId || '').slice(0, 60);
   if (!surfaceId) throw new HttpError(400, 'surfaceId is required');
   const surf = body.surf === 'panel' ? 'panel' : 'tab';
+  if ((surf === 'panel' || tok.surf === 'panel') && !sessionsLib.panelAllowed(s0)) throw new HttpError(409, PANEL_OFF);
   const t = Date.now();
   const lease = { surfaceId, sessionId: s0.id, surf, at: new Date(t).toISOString() };
   const doc = await repo.updateRecord('doc', s0.docId, d => { d.lease = lease; });
   await repo.updateRecord('session', s0.id, x => {
+    sessionsLib.leaseMoved(x, surf, t);
     x.surfaces[surfaceId] = { kind: surf, focused: true, visible: true, fullscreen: x.surfaces[surfaceId]?.fullscreen ?? true, lastBeat: new Date(t).toISOString() };
     x.lastBeat = new Date(t).toISOString();
     sessionsLib.addEvent(x, { t, type: 'lease', surf });
@@ -1995,9 +2029,11 @@ async function sourceDocFor(req) {
 const activeSessionOf = async docId => (await repo.listRecords('session', { docId })).find(s => s.state !== 'ended') || null;
 
 // Add a source (the cite button, or the student by hand). The same page twice
-// is one source. Returns { source, existing }.
+// is one source. Returns { source, existing }. The extension's one-click cite
+// sends via: 'extension', which the teacher can turn off.
 app.post('/api/write/:docId/sources', ah(async (req, res) => {
   const got = await sourceDocFor(req);
+  if (req.body?.via === 'extension' && got.a.writing?.oneClickCite === false) throw new HttpError(403, 'One-click citing is turned off for this assignment.');
   const style = got.a.writing?.citationStyle || 'mla';
   const t = Date.now();
   const s = await activeSessionOf(got.doc.id);
@@ -2070,7 +2106,7 @@ async function allOps(docId) {
 // sources all make a new report
 function processKey(doc, sessions, researchChunks) {
   return [PROCESS_VERSION, doc.seq, (doc.sources || []).length, doc.status,
-    sessions.map(s => `${s.id}:${(s.events || []).length}:${(s.pauses || []).length}:${s.state}`).join(','),
+    sessions.map(s => `${s.id}:${(s.events || []).length}:${(s.pauses || []).length}:${s.state}:${(s.researchSpans || []).length}:${!!s.research}`).join(','),
     researchChunks.reduce((n, c) => n + (c.events || []).length, 0)].join('|');
 }
 
@@ -2097,7 +2133,7 @@ async function processReportFor(core, doc, a) {
   });
   return report;
 }
-const PROCESS_VERSION = 3;
+const PROCESS_VERSION = 4;
 
 app.get('/api/review/:docId', ah(async (req, res) => {
   const got = await teacherDocFor(req);
@@ -2260,7 +2296,8 @@ app.post('/api/ext/session/beat', extAuth, ah(async (req, res) => {
     const t = Date.now();
     x.extension = { ...(x.extension || {}), lastBeat: new Date(t).toISOString(), lockActive, hasHostPermission, present: true, version: String(req.body?.version || x.extension?.version || '').slice(0, 20) };
   });
-  res.json({ active: true, sessionId: updated.id, state: updated.state, deadlineAt: updated.deadlineAt, startedAt: updated.startedAt });
+  // Which surface writes ('tab' or 'panel'), so the extension's research mode follows it
+  res.json({ active: true, sessionId: updated.id, state: updated.state, deadlineAt: updated.deadlineAt, startedAt: updated.startedAt, leaseSurf: doc.lease?.sessionId === s.id ? doc.lease.surf : null });
 }));
 
 // Research events from the extension: { sessionToken, docId, events: [...] }

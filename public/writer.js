@@ -39,7 +39,7 @@ function srcForInputType(type, composing) {
 
 /* ====================== the page ====================== */
 VisorRouter.add('/write/:id', async (el, { id }, query) => {
-  Object.assign(WR, { assignmentId: id, embed: query.get('embed') === 'panel', events: [], offline: null, offlinePause: null, queue: [], seq: 0, confirmedText: '', copied: new Set(), copiedHashes: new Set(), hashWaits: [], pendingSrc: null, lastBeforeInput: null, composing: false, saving: false, lastLock: undefined, banner: null, data: null, session: null, token: null, lease: null });
+  Object.assign(WR, { assignmentId: id, embed: query.get('embed') === 'panel', events: [], offline: null, offlinePause: null, queue: [], seq: 0, confirmedText: '', copied: new Set(), copiedHashes: new Set(), hashWaits: [], pendingSrc: null, lastBeforeInput: null, composing: false, saving: false, lastLock: undefined, banner: null, data: null, session: null, token: null, lease: null, panelCtx: null, researchSent: undefined });
   WR.surf = WR.embed ? 'panel' : 'tab';
   WR.surfaceId = wsSurfaceId(WR.embed);
   WR.startError = null; WR.extOther = null; WR.refreshSig = null;
@@ -63,6 +63,7 @@ VisorRouter.add('/write/:id', async (el, { id }, query) => {
   else writerCheckStoredQueue();
   return () => {
     wsUninstall(); writerFlush({ unload: true });
+    WR.barObserver?.disconnect(); WR.barObserver = null;
     if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
     document.body.classList.remove('writing', 'embed');
     // A citation arriving after leaving the editor must not land in it
@@ -88,11 +89,26 @@ function embedAuth() {
   });
 }
 
+// Side panel: { source:'visor-ext', type:'PANEL_CONTEXT', chromeFocused, onBlockedPage }
+// from the extension page around this one, on every change and every 5 s.
+// While the panel holds the lease, time on another (unblocked) tab is research.
+window.addEventListener('message', e => {
+  const m = e.data;
+  if (!m || m.source !== 'visor-ext' || m.type !== 'PANEL_CONTEXT') return;
+  if (!WR.embed || e.source !== window.parent || e.origin !== WR.embedOrigin) return;
+  const ctx = { focused: !!m.chromeFocused, blocked: !!m.onBlockedPage };
+  const changed = !WR.panelCtx || WR.panelCtx.focused !== ctx.focused || WR.panelCtx.blocked !== ctx.blocked;
+  WR.panelCtx = ctx;
+  if (!changed || !WR.data) return;
+  writerApplyLock();
+  wsBeat();
+});
+
 function writerRender(el) {
   const { assignment: a, class: cls } = WR.data;
   el.innerHTML = `<div class="wr ${WR.embed ? 'wr-embed' : ''}">
     <header class="wr-bar">
-      <div class="wr-title">${WR.embed ? '' : `<a class="wr-back" href="/a/${a.id}" data-link aria-label="Back to the assignment">←</a>`}<div><div class="wr-h">${esc(a.title)}</div>${WR.embed ? '' : `<div class="tiny muted">${esc(cls.name)}</div>`}</div></div>
+      <div class="wr-title">${WR.embed ? '' : `<a class="wr-back" href="/a/${a.id}" data-link aria-label="Back to the assignment">←</a>`}<div class="wr-title-text"><div class="wr-h">${esc(a.title)}</div>${WR.embed ? '' : `<div class="tiny muted">${esc(cls.name)}</div>`}</div></div>
       <div class="wr-status" id="wrStatus" aria-live="polite"></div>
       <div class="wr-actions" id="wrActions"></div>
     </header>
@@ -128,6 +144,9 @@ function writerRender(el) {
       </div>
     </div>
   </div>`;
+  WR.barObserver?.disconnect();
+  WR.barObserver = window.ResizeObserver ? new ResizeObserver(writerSyncBarHeight) : null;
+  WR.barObserver?.observe(el.querySelector('.wr-bar'));
   writerSetupQuill();
   try { if (localStorage.getItem('visor-serif') === '1') writerToggleSerif(true); } catch {}
   writerLoadServerText(WR.doc, { force: true });
@@ -450,6 +469,12 @@ function writerToggleSerif(force) {
   try { localStorage.setItem('visor-serif', on ? '1' : '0'); } catch {}
 }
 
+// The formatting bar sticks right under the header, however tall the header gets
+// (also set straight after each redraw, in case the observer is slow to report)
+function writerSyncBarHeight() {
+  const bar = document.querySelector('.wr .wr-bar'), wr = document.querySelector('.wr');
+  if (bar && wr) wr.style.setProperty('--wr-bar-h', `${bar.offsetHeight}px`);
+}
 // Re-draw everything that depends on the session state. The header and the
 // start card are only rebuilt when something they show changed (beats arrive
 // every 10 seconds; rebuilding each time blanked the timer and closed the
@@ -459,7 +484,7 @@ function writerRefresh(force) {
   const a = WR.data.assignment, w = a.writing, doc = WR.doc;
   const active = wsActive();
   const status = doc.status;
-  const sig = JSON.stringify([active, status, doc.submittedAt, doc.reopened, !!doc.feedback, !!WR.session, WR.session?.state === 'ended', WR.extPresent, WR.extOther, WR.extInfo?.installed, WR.extInfo?.hasHostPermission, WR.data.timeLeftMs, WR.data.windowProblem, WR.startError, WR.starting]);
+  const sig = JSON.stringify([active, status, doc.submittedAt, doc.reopened, !!doc.feedback, !!WR.session, WR.session?.state === 'ended', WR.extPresent, WR.extOther, WR.extInfo?.installed, WR.extInfo?.hasHostPermission, WR.data.timeLeftMs, WR.data.windowProblem, WR.startError, WR.starting, isLeaseHolder()]);
   if (!force && sig === WR.refreshSig) { writerSetSaved(WR.offline ? 'offline' : WR.queue.length ? 'unsaved' : 'saved'); writerUpdateCounts(); writerApplyLock(); return; }
   WR.refreshSig = sig;
   // Status line
@@ -472,13 +497,18 @@ function writerRefresh(force) {
   // Actions
   const acts = [];
   if (active) {
-    if (!WR.embed && extOk && window.VisorExt) acts.push(`<button class="btn btn-ghost btn-sm" onclick="VisorExt.openPanel(WR.doc.id).then(r=>{ if(!r.ok) toast(r.error||'Click the Visor icon in Chrome’s toolbar to open the side panel.','err'); })">Open side panel</button>`);
+    // Locked sessions that may use the side panel move the writing there to research
+    const research = w.mode === 'locked' && wsPanelAllowed() && isLeaseHolder();
+    if (!WR.embed && extOk && window.VisorExt && research) acts.push(`<button class="btn btn-ghost btn-sm" onclick="wsResearchMode()">Research in side panel</button>`);
+    // (Locked sessions otherwise stay in full screen, where the panel can't show)
+    else if (!WR.embed && extOk && window.VisorExt && w.mode !== 'locked') acts.push(`<button class="btn btn-ghost btn-sm" onclick="VisorExt.openPanel(WR.doc.id).then(r=>{ if(!r.ok) toast(r.error||'Click the Visor icon in Chrome’s toolbar to open the side panel.','err'); })">Open side panel</button>`);
     acts.push(`<button class="btn btn-ghost btn-sm" onclick="wsEnd()">End session</button>`);
     acts.push(`<button class="btn btn-primary btn-sm" onclick="wsSubmit()">Submit</button>`);
   } else if (status !== 'submitted' && WR.session && !WR.embed) {
     acts.push(`<button class="btn btn-primary btn-sm" onclick="wsSubmit()">Submit</button>`);
   }
   $('wrActions').innerHTML = acts.join('');
+  writerSyncBarHeight();
   writerRenderIntro();
   writerRenderSources();
   writerUpdateCounts();
@@ -517,7 +547,8 @@ function writerRenderIntro() {
     ${blocked ? `<div class="callout amber" style="margin-top:10px;">${esc(blocked)}</div>` : ''}
     <div id="wrStartErr" class="form-error ${WR.startError ? '' : 'hidden'}" style="margin-top:12px;">${esc(WR.startError || '')}</div>
     <div class="btn-row" style="margin-top:14px;">
-      <button class="btn btn-primary btn-lg" id="wrStartBtn" onclick="wsStart()" ${blocked || WR.starting ? 'disabled' : ''}>${WR.starting ? '<span class="spinner spinner-sm"></span> Starting…' : `${I.pen}${ended ? 'Start a new session' : 'Start writing session'}`}</button>
+      ${WR.embed && w.mode === 'locked' ? '<div class="small muted">Start locked sessions from the Visor tab.</div>'
+        : `<button class="btn btn-primary btn-lg" id="wrStartBtn" onclick="wsStart()" ${blocked || WR.starting ? 'disabled' : ''}>${WR.starting ? '<span class="spinner spinner-sm"></span> Starting…' : `${I.pen}${ended ? 'Start a new session' : 'Start writing session'}`}</button>`}
       ${ended && !WR.embed ? `<button class="btn btn-ghost btn-lg" onclick="wsSubmit()">Submit</button>` : ''}
     </div>
     ${w.mode === 'locked' && !WR.embed ? '<div class="tiny muted" style="margin-top:8px;">The session runs in full screen. Leaving full screen or the Visor tab pauses your writing.</div>' : ''}
@@ -530,7 +561,8 @@ const LOCK_TEXT = {
   'exit-fullscreen': ['Session paused: you left full screen.', 'Locked sessions run in full screen.'],
   offline: ['Offline: your writing is saved on this device.', 'Writing turns back on when the connection does.'],
   'ext-missing': ['Visor’s extension was turned off.', 'Turn it back on, then reload this page to keep writing.'],
-  teacher: ['Your teacher paused the session.', 'Writing turns back on when they resume it.']
+  teacher: ['Your teacher paused the session.', 'Writing turns back on when they resume it.'],
+  'blocked-site': ['You’re on a blocked site.', 'Time on blocked sites counts as time away. Go back to another tab to keep researching.']
 };
 
 // Enable or lock the editor; show the paused or mirror card. Runs every
@@ -544,12 +576,23 @@ function writerApplyLock() {
   if (reason === WR.lastLock) return;
   const prev = WR.lastLock;
   WR.lastLock = reason;
-  if (canWrite && prev && prev !== 'mirror' && prev !== 'not-started' && prev !== 'ended') setTimeout(() => WR.quill.focus(), 0);
+  // (Not while the side panel's student is on another tab: that would pull them back)
+  if (canWrite && prev && prev !== 'mirror' && prev !== 'not-started' && prev !== 'ended' && document.hasFocus()) setTimeout(() => WR.quill.focus(), 0);
   if (!canWrite && prev === null) WR.awaySince = Date.now();
   const ov = $('wrOverlay');
   if (!wsActive() || canWrite) { ov.classList.add('hidden'); ov.innerHTML = ''; return; }
   ov.classList.remove('hidden');
   if (reason === 'mirror') {
+    const w = WR.data.assignment.writing;
+    const locked = w.mode === 'locked';
+    if (locked && !WR.embed && WR.lease?.surf === 'panel') {
+      ov.innerHTML = `<div class="wr-card-pause" role="status"><b>Writing in the side panel</b><p>Sites you open are recorded. Blocked and AI sites stay blocked.</p><button class="btn btn-primary" onclick="wsBackToFullscreen()">Back to full screen</button></div>`;
+      return;
+    }
+    if (locked && WR.embed && !wsPanelAllowed()) {
+      ov.innerHTML = `<div class="wr-card-pause" role="status"><b>Writing in the Visor tab</b><p>This assignment stays in full screen, so you can’t write here.</p></div>`;
+      return;
+    }
     const where = WR.lease?.surf === 'panel' ? 'Writing in side panel' : WR.embed ? 'Writing in the Visor tab' : 'Writing in another Visor tab';
     ov.innerHTML = `<div class="wr-card-pause" role="status"><b>${where}</b><p>This copy shows the text as it’s written there.</p><button class="btn btn-primary" onclick="wsTakeLease()">Write here instead</button></div>`;
     return;
@@ -588,11 +631,13 @@ function writerInsertCite(text) {
 
 async function writerCite(meta) {
   if (!WR.data || !meta) return;
+  if (WR.data.assignment.writing.oneClickCite === false) return; // turned off for this assignment
+  if (WR.embed && document.hidden) return; // another copy of the side panel is the one on screen
   if (!wsActive()) { toast('Start a writing session to add citations.', 'err'); return; }
   if (!isLeaseHolder()) return; // the other editor (tab or side panel) takes it
   if (WR.session.pause?.reason === 'teacher') { toast('Your teacher paused the session.', 'err'); return; }
   try {
-    const r = await wapi(`/api/write/${WR.doc.id}/sources`, { method: 'POST', body: { source: meta } });
+    const r = await wapi(`/api/write/${WR.doc.id}/sources`, { method: 'POST', body: { source: meta, via: 'extension' } });
     WR.doc.sources = r.sources;
     writerInsertCite(r.source.inText);
     writerRenderSources(); writerUpdateCounts();
@@ -613,7 +658,8 @@ window.addEventListener('message', e => {
 // Toolbar: re-cite a source already in the list
 function writerInsertCitationMenu() {
   const list = WR.doc?.sources || [];
-  if (!list.length) return toast('No sources yet. Use the Visor extension’s “Cite this page” on a page you’re using.');
+  const w = WR.data.assignment.writing;
+  if (!list.length) return toast(w.oneClickCite === false ? `No sources yet. Add one by hand under ${VisorCiteFormat.headingFor(w.citationStyle)}.` : 'No sources yet. Use the Visor extension’s “Cite this page” on a page you’re using.');
   if (!wsActive() || !isLeaseHolder()) return toast('Start a writing session to add citations.', 'err');
   openModal({ title: 'Insert a citation', sub: 'Adds the in-text citation where your cursor is.', body: `<div class="stack">${list.map(s => `<button class="choice cite-pick" data-id="${esc(s.id)}"><div class="t">${esc(s.inText)}</div><div class="d">${esc(s.title || s.url)}</div></button>`).join('')}</div>`, footer: `<button class="btn btn-ghost" onclick="closeModal()">Cancel</button>` });
   document.querySelectorAll('.cite-pick').forEach(b => b.onclick = () => {
@@ -634,7 +680,7 @@ function writerRenderSources() {
     ${bib.items.length ? `<ol class="wr-bib">${bib.items.map(i => `<li><span class="wr-bib-text">${i.html}</span>
       <span class="wr-bib-tools">${i.source.check?.length ? `<button class="chip-check" onclick="writerEditSource('${esc(i.source.id)}')">Check: ${esc(i.source.check.join(', '))}</button>` : ''}
       ${editable ? `<button class="btn-icon" aria-label="Edit this source" onclick="writerEditSource('${esc(i.source.id)}')">${I.edit}</button><button class="btn-icon" aria-label="Remove this source" onclick="writerDeleteSource('${esc(i.source.id)}')">${I.trash}</button>` : ''}</span></li>`).join('')}</ol>`
-      : `<p class="muted small">Sources you cite with the Visor extension show up here, formatted in ${esc({ mla: 'MLA', apa: 'APA', chicago: 'Chicago' }[style])}. ${editable ? `<button class="linklike" onclick="writerEditSource(null)">Add one by hand</button>` : ''}</p>`}
+      : `<p class="muted small">${WR.data.assignment.writing.oneClickCite === false ? 'Add your sources by hand. They show up here' : 'Sources you cite with the Visor extension show up here'}, formatted in ${esc({ mla: 'MLA', apa: 'APA', chicago: 'Chicago' }[style])}. ${editable ? `<button class="linklike" onclick="writerEditSource(null)">Add one by hand</button>` : ''}</p>`}
     ${bib.items.length && editable ? `<button class="btn btn-ghost btn-sm" onclick="writerEditSource(null)">${I.plusSm}Add a source by hand</button>` : ''}
   </section>`;
 }

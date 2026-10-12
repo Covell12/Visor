@@ -61,6 +61,8 @@ function writingFields(w, showPresets) {
     <label class="check-row"><input id="afExt" type="checkbox" ${w.requireExtension ? 'checked' : ''} /> <span>Require the Visor extension to start a session <span class="muted small" id="afExtNote"></span></span></label>
     <label class="check-row"><input id="afResearch" type="checkbox" ${w.researchTracking ? 'checked' : ''} /> <span>Record research during sessions (searches, pages visited and for how long, text copied). Only while a session is running.</span></label>
     <label class="check-row"><input id="afBlockAi" type="checkbox" ${w.blockAiSites ? 'checked' : ''} /> <span>Block AI sites during sessions (otherwise visits are only recorded)</span></label>
+    <label class="check-row" id="afPanelRow"><input id="afPanel" type="checkbox" ${w.panelBrowsing !== false ? 'checked' : ''} /> <span>Let students switch to the side panel to research (leaves full screen; blocked and AI sites stay blocked, everything is recorded) <span class="muted small" id="afPanelNote"></span></span></label>
+    <label class="check-row"><input id="afCite" type="checkbox" ${w.oneClickCite !== false ? 'checked' : ''} /> <span>Let students cite a page in one click with the Visor extension (Cite this page, right-click, Alt+Shift+C). Sources added by hand always work.</span></label>
     <label class="check-row"><input id="afAuto" type="checkbox" ${w.autoSubmitOnTimeUp ? 'checked' : ''} /> <span>Submit automatically when time runs out</span></label>
     <details class="more"><summary>Sites, starter text and pauses</summary>
       <div class="field" id="afAllowedWrap"><label for="afAllowed">Allowed sites in locked sessions <span class="label-note">optional</span></label><textarea id="afAllowed" class="input mono small" style="min-height:70px;" placeholder="One per line, e.g. en.wikipedia.org&#10;Leave empty to allow any site that isn't blocked">${esc(siteLines(w.allowedSites))}</textarea></div>
@@ -76,6 +78,7 @@ function applyPreset(key) {
   $('afLimit').value = w.timeLimitMin ?? ''; $('afPaste').value = w.allowPaste;
   $('afExt').checked = w.requireExtension; $('afResearch').checked = w.researchTracking;
   $('afBlockAi').checked = w.blockAiSites; $('afAuto').checked = w.autoSubmitOnTimeUp;
+  if (w.mode === 'locked') $('afPanel').checked = w.panelBrowsing !== false;
   document.querySelectorAll('.preset').forEach(b => b.classList.toggle('selected', b.getAttribute('onclick').includes(key)));
   syncWritingForm();
   toast(`${CFG.writingPresets[key].label} settings filled in`);
@@ -86,6 +89,10 @@ function syncWritingForm() {
   $('afExt').disabled = locked;
   $('afExtNote').textContent = locked ? '(always on for locked sessions)' : '';
   $('afAllowedWrap').classList.toggle('dim', !locked);
+  // The side panel only matters in locked sessions (open ones can always use it)
+  $('afPanel').disabled = !locked;
+  $('afPanelRow').classList.toggle('dim', !locked);
+  $('afPanelNote').textContent = locked ? '' : '(locked sessions only)';
 }
 
 function collectWriting() {
@@ -98,6 +105,7 @@ function collectWriting() {
     minWords: $('afMin').value || null, maxWords: $('afMax').value || null,
     requireExtension: $('afExt').checked, researchTracking: $('afResearch').checked,
     blockAiSites: $('afBlockAi').checked, autoSubmitOnTimeUp: $('afAuto').checked,
+    panelBrowsing: $('afPanel').checked, oneClickCite: $('afCite').checked,
     allowedSites: lines('afAllowed'), blockedSites: lines('afBlocked'),
     templateText: $('afTemplate').value, pauseGraceSec: $('afGrace').value || 0
   };
@@ -223,7 +231,8 @@ function renderAssignmentOverview(body) {
       ['Research', w.researchTracking ? 'Recorded during sessions' : 'Not recorded'],
       ['AI sites', `${w.blockAiSites ? 'Blocked' : 'Recorded, not blocked'} (${w.blockedSites.length} sites)`],
       ['Allowed sites', w.mode === 'locked' ? (w.allowedSites.length ? w.allowedSites.join(', ') : 'Any site that isn’t blocked') : 'Not limited (open session)'],
-      ['Citations', STYLE_NAME[w.citationStyle]],
+      ...(w.mode === 'locked' ? [['Side panel', w.panelBrowsing !== false ? 'Students can switch to it to research (blocked and AI sites stay blocked)' : 'Off: locked sessions stay in full screen']] : []),
+      ['Citations', `${STYLE_NAME[w.citationStyle]}${w.oneClickCite === false ? ' · one-click citing off' : ''}`],
       ['Length', w.minWords || w.maxWords ? `${w.minWords || 0}–${w.maxWords || '∞'} words` : 'Any'],
       ['Starter text', w.templateText ? `${w.templateText.length.toLocaleString()} characters` : 'None'],
       ['Time up', w.autoSubmitOnTimeUp ? 'Submits automatically' : 'Session ends; student submits'],

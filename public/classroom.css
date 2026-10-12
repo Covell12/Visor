@@ -126,8 +126,10 @@ body.embed .route-view { min-height: 100vh; }
 .wr-title { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1; }
 .wr-back { text-decoration: none; font-size: 20px; color: var(--ink-2); width: 34px; height: 34px; display: inline-flex; align-items: center; justify-content: center; border-radius: 10px; }
 .wr-back:hover { background: var(--blue-soft); }
+.wr-title-text { min-width: 0; overflow: hidden; }   /* lets a long title end in "…" instead of running over the status */
 .wr-h { font-weight: 700; font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.wr-status { display: flex; align-items: center; gap: 12px; font-size: 13px; }
+.wr-status { display: flex; align-items: center; gap: 4px 12px; font-size: 13px; flex-wrap: wrap; min-width: 0; }
+.wr-status > * { white-space: nowrap; }
 .wr-rec { display: inline-flex; align-items: center; gap: 7px; color: var(--red); font-weight: 700; }
 .wr-timer { font-weight: 700; font-size: 14px; }
 .wr-timer.low { color: var(--red); }
@@ -155,7 +157,7 @@ body.embed .route-view { min-height: 100vh; }
 .wr-score { font-size: 26px; font-weight: 800; margin: 2px 0 6px; }
 
 .wr-paper-wrap { max-width: 760px; margin: 0 auto; }
-.wr-toolbar.ql-toolbar.ql-snow { position: sticky; top: 62px; z-index: 10; background: #fff; border: 0; border-bottom: 1px solid var(--line); border-radius: var(--r) var(--r) 0 0; padding: 8px 10px; display: flex; align-items: center; flex-wrap: wrap; gap: 2px; box-shadow: var(--shadow-sm); font-family: var(--font); }
+.wr-toolbar.ql-toolbar.ql-snow { position: sticky; top: var(--wr-bar-h, 62px); z-index: 10; background: #fff; border: 0; border-bottom: 1px solid var(--line); border-radius: var(--r) var(--r) 0 0; padding: 8px 10px; display: flex; align-items: center; flex-wrap: wrap; gap: 2px; box-shadow: var(--shadow-sm); font-family: var(--font); }
 .wr-toolbar .ql-formats { margin-right: 8px !important; }
 .wr-tb-spacer { flex: 1; }
 .wr-wc { font-size: 12.5px; color: var(--ink-2); margin-right: 6px; font-variant-numeric: tabular-nums; }
@@ -178,7 +180,10 @@ body.embed .route-view { min-height: 100vh; }
 /* Side panel: compact */
 .wr-embed { padding: 0 10px 40px; }
 .wr-embed .wr-bar { padding: 8px 0; }
-.wr-embed .wr-toolbar.ql-toolbar.ql-snow { top: 50px; padding: 4px 6px; }
+/* The panel's own header already shows the title, "Session active" and the timer */
+.wr-embed .wr-title, .wr-embed .wr-rec, .wr-embed .wr-timer { display: none; }
+.wr-embed .wr-actions { margin-left: auto; }
+.wr-embed .wr-toolbar.ql-toolbar.ql-snow { padding: 4px 6px; }
 .wr-embed .wr-toolbar .ql-formats { margin-right: 2px !important; }
 .wr-embed #wrCiteBtn, .wr-embed #wrSerifBtn { display: none; }
 .wr-embed .wr-paper .ql-editor { padding: 18px 16px 40px; }

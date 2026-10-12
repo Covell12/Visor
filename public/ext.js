@@ -42,6 +42,8 @@ const VisorExt = (() => {
     startSession: ({ docId, assignmentId, sessionToken, settings }) => send('SESSION_START', { docId, assignmentId, sessionToken, settings }, 4000),
     endSession: docId => send('SESSION_END', { docId }),
     openPanel: docId => send('OPEN_PANEL', { docId }, 3000).then(r => (r.timeout ? { ok: false, error: 'The Visor extension didn’t answer.' } : r)),
+    // Locked sessions: while the side panel writes, only blocked and AI sites stay blocked
+    researchMode: (docId, on) => send('RESEARCH_MODE', { docId, on }),
     // Opens the extension's own small window asking to allow research recording
     // The answer can be lost if the extension's worker slept while the window
     // was open, so the permission itself is checked again afterwards

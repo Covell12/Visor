@@ -126,6 +126,18 @@ test('pace compared with the student’s usual typing in this class', () => {
   assert.ok(!/usual|in line/.test(at(null)), 'no comparison without earlier work');
 });
 
+test('research with the side panel open: its own figure and note, never time away', () => {
+  const st = makeDoc('');
+  typeText(st, 0, 'A short typed answer.');
+  const spans = [{ from: new Date(T0 + 60e3).toISOString(), to: new Date(T0 + 240e3).toISOString() }];
+  const sessions = [session('sess1', T0, T0 + 600e3, { researchSpans: spans }), session('sess2', T0 + 3600e3, T0 + 3700e3, { researchSpans: [{ from: new Date(T0 + 3610e3).toISOString(), to: new Date(T0 + 3630e3).toISOString() }] })];
+  const r = P.build({ doc: st.doc, ops: st.log, sessions, studentName: 'Sam' });
+  assert.deepStrictEqual(r.sessions.map(s => s.researchMs), [180e3, 20e3]);
+  assert.strictEqual(r.totals.researchMs, 200e3);
+  assert.strictEqual(r.totals.awayMs, 0);
+  assert.deepStrictEqual(r.notes.map(n => n.text), ['Researched on other tabs with the side panel open for 3 min in session 1.']);
+});
+
 test('a quiet, typed essay gets no warnings', () => {
   const st = makeDoc('');
   typeText(st, 0, 'A short typed answer.');

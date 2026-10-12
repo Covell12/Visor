@@ -25,6 +25,8 @@ Students open the assignment and click **Start writing session**. Then:
 
 - Writing is only on while the Visor tab has focus. If a student leaves it, writing stops at once and the pause is recorded, with its length and reason. They see the same "Away 2m 14s" you see.
 - The extension records their research (searches, pages and time on them, text copied), adds citations with **Cite this page** (or Alt+Shift+C), and in locked sessions keeps them on the allowed sites.
+- In a locked session a student can click **Research in side panel**: they leave full screen and keep writing in Chrome's side panel while they browse. Blocked and AI sites stay blocked, every page is recorded, and time on other tabs counts as research time, not time away. Untick "Let students switch to the side panel" to keep a locked assignment in full screen.
+- Untick "Let students cite a page in one click" if students should write their citations themselves. Sources added by hand still work.
 
 Open the assignment's **Live** tab to watch: status, time left, words, pastes, time away, and whether the extension and lockdown are on. **Needs attention** filters to students who've been away over a minute, lost the extension, visited an AI site, or pasted a big block from outside. You can pause, message, add time or end a session for one student or everyone.
 

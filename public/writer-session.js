@@ -6,7 +6,12 @@
 
    Focus rule (Section 6.4): a surface is focused when the page is visible AND
    the document has focus. The editor accepts input only while its surface is
-   focused, holds the lease, and the session is active. */
+   focused, holds the lease, and the session is active.
+
+   Side-panel research: once the side panel holds the lease, time on other
+   Chrome tabs is research, not time away. The panel's parent page tells this
+   page whether Chrome has focus and whether it shows Visor's blocked page
+   (PANEL_CONTEXT, kept in WR.panelCtx). */
 
 'use strict';
 
@@ -22,7 +27,9 @@ const WR = {
   offlinePause: null,    // { from, to } to report once back online
   extPresent: false, extInfo: null, extMissingSince: null,
   timers: [], listeners: [], warned: false, timeUpShown: false, lastBeatAt: 0,
-  seenMessage: null, unloadWarn: false
+  seenMessage: null, unloadWarn: false,
+  panelCtx: null,         // side panel: { focused, blocked } from the extension (PANEL_CONTEXT)
+  researchSent: undefined // the tab: the research mode last sent to the extension
 };
 
 const serverNow = () => Date.now() + WR.serverOffset;
@@ -82,7 +89,15 @@ function wsRearmExtension(p) {
   VisorExt.startSession({ docId: WR.doc.id, assignmentId: WR.data.assignment.id, sessionToken: WR.token, settings: wsExtSettings() }).catch(() => {});
 }
 const wsActive = () => WR.session && WR.session.state !== 'ended';
-const isLeaseHolder = () => !!(WR.lease && WR.lease.surfaceId === WR.surfaceId && WR.session && WR.lease.sessionId === WR.session.id);
+// A lease handed to the side panel belongs to every copy of it (Chrome can give each tab its own)
+const isLeaseHolder = () => !!(WR.lease && WR.session && WR.lease.sessionId === WR.session.id && (WR.lease.surfaceId === WR.surfaceId || (WR.lease.surf === 'panel' && WR.embed)));
+// May this session write in the side panel? Locked ones only if the teacher allows it
+// May this session use the side panel? The running session's own answer (set
+// when it started) wins over the assignment's current setting.
+const wsPanelAllowed = () => {
+  if (wsActive() && typeof WR.session.panelResearch === 'boolean') return WR.session.panelResearch;
+  const w = WR.data.assignment.writing; return w.mode !== 'locked' || w.panelBrowsing !== false;
+};
 
 // fetch with the session token (and the extension token inside the side panel)
 async function wapi(path, { method = 'GET', body, keepalive = false } = {}) {
@@ -128,15 +143,27 @@ function lockReason() {
   if (mode === 'locked' && !WR.embed && WR.extKnown && !WR.extPresent) return 'ext-missing';
   const f = surfaceFocus();
   if (!f.visible) return 'left-tab';
-  if (!f.focused) return 'left-window';
+  if (!f.focused) {
+    // The side panel, while the student researches on another tab: no pause
+    // card; clicking back into the editor is enough to type
+    if (WR.embed && wsPanelAllowed()) {
+      if (WR.panelCtx?.focused && !WR.panelCtx.blocked) return null;
+      if (WR.panelCtx?.blocked) return 'blocked-site';
+    }
+    return 'left-window';
+  }
   if (mode === 'locked' && !WR.embed && !f.fullscreen) return 'exit-fullscreen';
   return null;
 }
 
 /* ---- beats ---- */
+// A hidden copy of the side panel (another tab's, while Chrome has focus)
+// doesn't report: the copy on screen does. Once Chrome loses focus it
+// reports again, so the time away is recorded.
+const wsQuietCopy = () => WR.embed && document.hidden && WR.panelCtx?.focused !== false;
 let beatInFlight = false, beatAgain = false;
 async function wsBeat() {
-  if (!wsActive() || !WR.token) return;
+  if (!wsActive() || !WR.token || wsQuietCopy()) return;
   if (beatInFlight) { beatAgain = true; return; }
   beatInFlight = true;
   const f = surfaceFocus();
@@ -145,7 +172,10 @@ async function wsBeat() {
   try {
     const r = await wapi(`/api/write/${WR.doc.id}/beat`, { method: 'POST', body: {
       surfaceId: WR.surfaceId, surf: WR.surf, ...f, online: !WR.offline, extPresent: WR.extKnown ? WR.extPresent : undefined, extLock: WR.extInfo?.lockActive,
-      events, offlinePause, seq: WR.seq, wantText: !isLeaseHolder()
+      events, offlinePause, seq: WR.seq,
+      // Every copy of the side panel may hold the lease, so each keeps up with the others' writing
+      wantText: WR.embed ? true : !isLeaseHolder(),
+      browser: WR.embed && WR.panelCtx ? WR.panelCtx : undefined
     } });
     WR.lastBeatAt = Date.now();
     if (WR.offline) wsBackOnline();
@@ -163,6 +193,7 @@ async function wsBeat() {
 function wsOnBeat(r) {
   WR.serverOffset = Date.parse(r.serverNow) - Date.now();
   const wasHolder = isLeaseHolder();
+  const wasPanel = WR.lease?.surf === 'panel';
   WR.session = { ...WR.session, ...r };
   WR.lease = r.lease;
   if (r.teacherMessage && r.teacherMessage.id !== wsSeenMessage()) { wsSeenMessage(r.teacherMessage.id); writerBanner(`Message from your teacher: ${r.teacherMessage.text}`, 'teacher'); }
@@ -172,7 +203,26 @@ function wsOnBeat(r) {
   if (!isLeaseHolder() && r.text != null) writerLoadServerText({ text: r.text, formats: r.formats, seq: r.seq });
   // Just became a mirror: this beat didn't ask for the text, so ask again now
   else if (!isLeaseHolder() && r.seq !== WR.seq) beatAgain = true;
+  // Another copy of the side panel wrote: catch up, but never go back to older text
+  else if (WR.embed && isLeaseHolder() && r.text != null && r.seq > WR.seq && !WR.queue.length && !flushing) writerLoadServerText({ text: r.text, formats: r.formats, seq: r.seq });
+  wsKeepResearchInStep(wasPanel);
   writerRefresh();
+}
+
+// The tab, in a locked session that may use the side panel: the extension's
+// research mode (only blocked and AI sites stay blocked) follows the lease.
+function wsSendResearch(on) {
+  WR.researchSent = on;
+  VisorExt.researchMode(WR.doc.id, on).catch(() => {});
+}
+function wsKeepResearchInStep(wasPanel) {
+  if (WR.embed || !window.VisorExt || !WR.extPresent || !wsActive()) return;
+  if (WR.data.assignment.writing.mode !== 'locked' || !wsPanelAllowed()) return;
+  const inPanel = WR.lease?.surf === 'panel' && WR.lease.sessionId === WR.session.id;
+  if (inPanel) {
+    if (WR.researchSent !== true) wsSendResearch(true);
+    if (!wasPanel && document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  } else if (isLeaseHolder() && WR.researchSent !== false) wsSendResearch(false);
 }
 
 // The server says the session is over (time limit, timeout, window, teacher…)
@@ -250,7 +300,10 @@ async function wsStart() {
 // What the extension needs to run the session (Section 8.3)
 function wsExtSettings() {
   const w = WR.data.assignment.writing;
-  return { mode: w.mode, researchTracking: w.researchTracking, allowedSites: w.allowedSites, blockedSites: w.blockedSites, blockAiSites: w.blockAiSites, citationStyle: w.citationStyle, title: WR.data.assignment.title, origin: location.origin, deadlineAt: WR.session?.deadlineAt || null, startedAt: WR.session?.startedAt || null };
+  return { mode: w.mode, researchTracking: w.researchTracking, allowedSites: w.allowedSites, blockedSites: w.blockedSites, blockAiSites: w.blockAiSites, citationStyle: w.citationStyle, oneClickCite: w.oneClickCite !== false, panelBrowsing: w.panelBrowsing !== false,
+    // Where the writing is now, so an extension that lost its state (a browser
+    // restart) starts in the right mode
+    research: !!(WR.session && WR.lease && WR.lease.sessionId === WR.session.id && WR.lease.surf === 'panel'), title: WR.data.assignment.title, origin: location.origin, deadlineAt: WR.session?.deadlineAt || null, startedAt: WR.session?.startedAt || null };
 }
 
 // A session (new, taken over, or the one already running) is ours now
@@ -279,6 +332,38 @@ async function wsTakeLease() {
     if (e.data?.ended) return wsSessionEnded(e.data);
     toast(e.message, 'err');
   }
+}
+
+// The tab, locked session: write in the side panel and research in other
+// tabs (blocked and AI sites stay blocked). The panel opens first, while this
+// click still counts as a user gesture.
+async function wsResearchMode() {
+  const opened = VisorExt.openPanel(WR.doc.id);
+  wsSendResearch(true);
+  // What's typed here goes first: once the panel holds the lease it would be refused
+  await writerFlush();
+  try {
+    const r = await wapi(`/api/write/${WR.doc.id}/lease`, { method: 'POST', body: { give: 'panel' } });
+    WR.lease = r.lease;
+  } catch (e) {
+    wsSendResearch(false);
+    if (e.data?.ended) return wsSessionEnded(e.data);
+    toast(e.message, 'err');
+    return;
+  }
+  if (document.fullscreenElement) await document.exitFullscreen().catch(() => {});
+  writerRefresh();
+  wsBeat();
+  const r = await opened;
+  if (!r || !r.ok) toast('Click the Visor icon in Chrome’s toolbar to open the side panel.', 'err');
+}
+
+// Back from the side panel: full screen first (it needs this click's gesture),
+// then the lease, then the extension's usual lockdown
+async function wsBackToFullscreen() {
+  await document.documentElement.requestFullscreen().catch(() => {});
+  await wsTakeLease();
+  if (isLeaseHolder() && window.VisorExt) wsSendResearch(false);
 }
 
 async function wsEnd() {
@@ -336,6 +421,8 @@ function wsInstall() {
   on(window, 'offline', () => { if (wsActive()) wsGoOffline(); });
   on(window, 'beforeunload', e => { if (wsActive() && isLeaseHolder() && WR.data.assignment.writing.mode === 'locked') { e.preventDefault(); e.returnValue = ''; } });
   on(window, 'pagehide', () => writerFlush({ unload: true }));
+  // A hidden copy of the side panel doesn't report on the clock
+  // (wsBeat keeps a hidden copy of the side panel quiet while Chrome is in use)
   WR.timers.push(setInterval(wsBeat, 10000));
   WR.timers.push(setInterval(wsTick, 1000));
   WR.timers.push(setInterval(() => writerFlush(), 1500));

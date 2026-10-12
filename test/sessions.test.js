@@ -62,8 +62,9 @@ test('the teacher’s grace period lengthens the allowance', () => {
   assert.strictEqual(s.pauses.length, 1);
 });
 
-test('locked mode: leaving full screen pauses; the side panel doesn’t need it', () => {
-  const s = start({ mode: 'locked' });
+test('locked mode: leaving full screen pauses; the side panel doesn’t need it when the teacher allows it', () => {
+  const s = start({ mode: 'locked', panelBrowsing: true });
+  assert.strictEqual(s.panelResearch, true);
   beat(s, 5, { fullscreen: false });
   S.evaluateFocus(s, sec(9));
   assert.strictEqual(s.pauses[0].reason, 'exit-fullscreen');
@@ -75,6 +76,185 @@ test('locked mode: leaving full screen pauses; the side panel doesn’t need it'
   beat(s, 20.5, { fullscreen: false, focused: false });
   S.evaluateFocus(s, sec(30));
   assert.strictEqual(s.state, 'active');
+  // a session started before the setting existed may use the panel too
+  const old = start({ mode: 'locked' });
+  delete old.panelResearch;
+  S.applyBeat(old, { surfaceId: 'panel1', surf: 'panel', focused: true }, sec(20));
+  beat(old, 20.5, { fullscreen: false, focused: false });
+  S.evaluateFocus(old, sec(30));
+  assert.strictEqual(old.state, 'active');
+});
+
+// Side-panel research: the panel holds the lease, the student is on another tab
+const panelBeat = (s, t, b) => S.applyBeat(s, { surfaceId: 'panel1', surf: 'panel', focused: false, visible: true, holdsLease: true, ...b }, sec(t));
+const iso = t => new Date(sec(t)).toISOString();
+// The tab hands the lease to the panel, leaves full screen and goes out of view
+function intoPanel(w) {
+  const s = start(w);
+  panelBeat(s, 5, { focused: true });
+  beat(s, 5.5, { fullscreen: false, focused: false, visible: false });
+  return s;
+}
+
+test('(a) locked, side panel allowed: another tab is research, not time away', () => {
+  const s = intoPanel({ mode: 'locked', panelBrowsing: true });
+  const researching = { browser: { focused: true, blocked: false } };
+  panelBeat(s, 10, researching);
+  beat(s, 15, { fullscreen: false, focused: false, visible: false });   // the tab's beats don't end it
+  panelBeat(s, 20, researching);
+  panelBeat(s, 30, researching);
+  S.evaluateFocus(s, sec(35));
+  assert.strictEqual(s.state, 'active');
+  assert.strictEqual(s.pauses.length, 0);
+  assert.deepStrictEqual(s.research, { since: sec(10) });
+  assert.strictEqual(S.docSessionStats([s], sec(35)).researchMs, 25000, 'an open span counts up to now');
+  panelBeat(s, 40, { focused: true });                                    // back in the panel's editor
+  assert.strictEqual(s.research, null);
+  assert.deepStrictEqual(s.researchSpans, [{ from: iso(10), to: iso(40) }]);
+  const st = S.docSessionStats([s], sec(50));
+  assert.strictEqual(st.researchMs, 30000);
+  assert.strictEqual(st.awayMs, 0, 'research is never time away');
+  assert.strictEqual(S.clientView(s, sec(50)).pauseCount, 0);
+});
+
+test('(b) on Visor’s blocked page, the side panel doesn’t count: a blocked-site pause', () => {
+  const s = intoPanel({ mode: 'locked', panelBrowsing: true });
+  panelBeat(s, 10, { browser: { focused: true, blocked: true } });
+  S.evaluateFocus(s, sec(13));
+  assert.strictEqual(s.state, 'paused');
+  assert.strictEqual(s.pauses[0].reason, 'blocked-site');
+  assert.ok(S.PAUSE_REASONS.includes('blocked-site'));
+  assert.strictEqual(s.research || null, null);
+  // back to an allowed tab: the pause ends and research starts
+  panelBeat(s, 20, { browser: { focused: true, blocked: false } });
+  assert.strictEqual(s.state, 'active');
+  assert.strictEqual(S.docSessionStats([s], sec(20)).awayMs, 10000);
+  assert.deepStrictEqual(s.research, { since: sec(20) });
+});
+
+test('(c) leaving Chrome with the side panel open is time away (left the window)', () => {
+  const s = intoPanel({ mode: 'locked', panelBrowsing: true });
+  panelBeat(s, 10, { browser: { focused: true, blocked: false } });
+  panelBeat(s, 20, { browser: { focused: false, blocked: false } });      // another app
+  assert.deepStrictEqual(s.researchSpans, [{ from: iso(10), to: iso(20) }]);
+  S.evaluateFocus(s, sec(25));
+  assert.strictEqual(s.state, 'paused');
+  assert.strictEqual(s.pauses[0].reason, 'left-window');
+  assert.strictEqual(s.pauses[0].from, iso(20));
+});
+
+test('(d) locked, side panel turned off: the panel doesn’t count, so leaving full screen pauses', () => {
+  const s = start({ mode: 'locked', panelBrowsing: false });
+  assert.strictEqual(s.panelResearch, false);
+  S.applyBeat(s, { surfaceId: 'panel1', surf: 'panel', focused: true, visible: true, holdsLease: true }, sec(20));
+  beat(s, 20.5, { fullscreen: false, focused: false });
+  S.evaluateFocus(s, sec(30));
+  assert.strictEqual(s.state, 'paused');
+  assert.strictEqual(s.pauses[0].reason, 'exit-fullscreen');
+  // and research on another tab doesn't count either
+  panelBeat(s, 40, { browser: { focused: true, blocked: false } });
+  assert.strictEqual(s.state, 'paused');
+  assert.strictEqual(s.research || null, null);
+});
+
+test('(e) open mode: research with the side panel works the same; the span closes when the session ends', () => {
+  const s = intoPanel({ mode: 'open' });
+  assert.strictEqual(s.panelResearch, true);
+  // a copy of the panel without the lease isn't researching
+  panelBeat(s, 8, { surfaceId: 'panel2', holdsLease: false, browser: { focused: true, blocked: false } });
+  assert.strictEqual(s.research || null, null);
+  panelBeat(s, 10, { browser: { focused: true, blocked: false } });
+  panelBeat(s, 20, { browser: { focused: true, blocked: false } });
+  S.evaluateFocus(s, sec(25));
+  assert.strictEqual(s.pauses.length, 0);
+  S.endSession(s, 'student', sec(30));
+  assert.strictEqual(s.research, null);
+  assert.deepStrictEqual(s.researchSpans, [{ from: iso(10), to: iso(30) }]);
+  assert.strictEqual(S.docSessionStats([s], sec(60)).researchMs, 20000);
+});
+
+test('a handoff to the side panel is present only while the panel loads, and never backdates time away', () => {
+  const s = start({ mode: 'locked', panelBrowsing: true });
+  beat(s, 100, {});
+  S.leaseMoved(s, 'panel', sec(100), { handoff: true });                       // the tab gave the lease to the panel
+  beat(s, 101, { fullscreen: false, focused: false, visible: true, panelLease: true });
+  S.evaluateFocus(s, sec(110));
+  assert.strictEqual(s.pauses.length, 0, 'no pause while the panel loads');
+  const researching = { browser: { focused: true, blocked: false } };
+  for (let t = 112; t <= 700; t += 10) panelBeat(s, t, researching);           // ten minutes of research
+  panelBeat(s, 705, { browser: { focused: false, blocked: false } });          // left Chrome
+  S.evaluateFocus(s, sec(710));
+  assert.strictEqual(s.pauses.length, 1);
+  assert.ok(Date.parse(s.pauses[0].from) >= sec(702), `time away starts when the student left, not before: ${s.pauses[0].from}`);
+  assert.strictEqual(s.pauses[0].reason, 'left-window');
+  const st = S.docSessionStats([s], sec(710));
+  assert.ok(st.researchMs >= 580000, `the research time stays: ${st.researchMs}`);
+  assert.ok(st.awayMs < 10000, `away is only the last few seconds: ${st.awayMs}`);
+});
+
+test('a copy of the side panel that went quiet doesn’t backdate time away', () => {
+  const s = start({ mode: 'open' });
+  const researching = { browser: { focused: true, blocked: false } };
+  S.applyBeat(s, { surfaceId: 'copyA', surf: 'panel', focused: false, visible: true, holdsLease: true, ...researching }, sec(10));
+  beat(s, 11, { focused: false, visible: false, panelLease: true });
+  for (let t = 20; t <= 560; t += 10) S.applyBeat(s, { surfaceId: 'copyB', surf: 'panel', focused: false, visible: true, holdsLease: true, ...researching }, sec(t));
+  S.applyBeat(s, { surfaceId: 'copyB', surf: 'panel', focused: false, visible: true, holdsLease: true, browser: { focused: false } }, sec(565));
+  S.evaluateFocus(s, sec(570));
+  assert.strictEqual(s.pauses.length, 1);
+  assert.ok(Date.parse(s.pauses[0].from) >= sec(560), `starts at the last research beat or later: ${s.pauses[0].from}`);
+});
+
+test('research ends when the tab takes the lease back (Back to full screen)', () => {
+  const s = intoPanel({ mode: 'locked', panelBrowsing: true });
+  const researching = { browser: { focused: true, blocked: false } };
+  panelBeat(s, 10, researching);
+  panelBeat(s, 300, researching);
+  S.leaseMoved(s, 'tab', sec(305));                                            // the lease route
+  beat(s, 306, { holdsLease: true });                                          // full screen, writing again
+  for (let t = 316; t <= 2100; t += 10) beat(s, t, { holdsLease: true });
+  S.endSession(s, 'student', sec(2100));
+  const st = S.docSessionStats([s], sec(2100));
+  assert.strictEqual(st.researchMs, 295000, 'only the time in research mode');
+  assert.strictEqual(s.pauses.length, 0);
+  // the same through a tab beat alone (a takeover the lease route didn't see)
+  const s2 = intoPanel({ mode: 'locked', panelBrowsing: true });
+  panelBeat(s2, 10, researching);
+  beat(s2, 100, { holdsLease: true });
+  assert.strictEqual(s2.research, null);
+  assert.deepStrictEqual(s2.researchSpans, [{ from: iso(10), to: iso(100) }]);
+});
+
+test('an offline blip while researching isn’t also research time', () => {
+  const s = intoPanel({ mode: 'open' });
+  const researching = { browser: { focused: true, blocked: false } };
+  panelBeat(s, 10, researching);
+  panelBeat(s, 60, { ...researching, offlinePause: { from: sec(12), to: sec(37) } });
+  S.endSession(s, 'student', sec(60));
+  const st = S.docSessionStats([s], sec(60));
+  assert.strictEqual(st.awayMs, 25000);
+  assert.strictEqual(st.researchMs, 2000 + 0, 'research up to the outage; it starts again at the next research beat');
+});
+
+test('while the side panel holds the lease, the tab’s beats don’t change why the student is away', () => {
+  const s = intoPanel({ mode: 'locked', panelBrowsing: true });
+  panelBeat(s, 10, { browser: { focused: false } });                           // left Chrome
+  beat(s, 10.5, { fullscreen: false, focused: false, visible: true, panelLease: true });
+  beat(s, 11, { fullscreen: false, focused: false, visible: false, panelLease: true });
+  S.evaluateFocus(s, sec(20));
+  assert.strictEqual(s.pauses.length, 1);
+  assert.strictEqual(s.pauses[0].reason, 'left-window');
+});
+
+test('the lease handed to the side panel belongs to every copy of it', () => {
+  const lease = { surfaceId: 'panel', sessionId: 's1', surf: 'panel' };
+  assert.strictEqual(S.holdsLease(lease, 's1', 'copy-2', 'panel'), true);
+  assert.strictEqual(S.holdsLease(lease, 's1', 'tab1', 'tab'), false);
+  assert.strictEqual(S.holdsLease(lease, 's2', 'copy-2', 'panel'), false);
+  const tabLease = { surfaceId: 'tab1', sessionId: 's1', surf: 'tab' };
+  assert.strictEqual(S.holdsLease(tabLease, 's1', 'tab1', 'tab'), true);
+  assert.strictEqual(S.holdsLease(tabLease, 's1', 'tab2', 'tab'), false);
+  assert.strictEqual(S.holdsLease(tabLease, 's1', 'copy-2', 'panel'), false);
+  assert.strictEqual(S.holdsLease(null, 's1', 'tab1', 'tab'), false);
 });
 
 test('locked mode: the extension turned off mid-session pauses with reason ext-missing', () => {

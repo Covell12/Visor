@@ -11,7 +11,7 @@ const LIVE_STATUS = {
   'not-started': ['Not started', 'pill-gray'], writing: ['Writing', 'pill-green'], paused: ['Paused by you', 'pill-violet'],
   left: ['Left', 'pill-amber'], offline: ['Offline', 'pill-amber'], ended: ['Ended', 'pill-gray'], submitted: ['Submitted', 'pill-blue'], returned: ['Returned', 'pill-violet']
 };
-const REASON_TEXT = { 'left-tab': 'left the tab', 'left-window': 'left the window', 'exit-fullscreen': 'left full screen', 'ext-missing': 'extension off', offline: 'offline', teacher: 'paused by you' };
+const REASON_TEXT = { 'left-tab': 'left the tab', 'left-window': 'left the window', 'exit-fullscreen': 'left full screen', 'ext-missing': 'extension off', offline: 'offline', teacher: 'paused by you', 'blocked-site': 'on a blocked site' };
 // Why a session ended (endReason)
 const END_TEXT = { teacher: 'ended by you', student: 'ended by the student', submitted: 'submitted', timeout: 'no check-in for 3 minutes', 'time-limit': 'time ran out', 'window-closed': 'writing window closed' };
 let lb = null; // { data, rows, filter, sort, timer, el }
@@ -90,11 +90,13 @@ function liveRender() {
       const statusText = r.status === 'left' ? `Left: ${vcClock(paused)}` : r.status === 'offline' ? `Offline ${vcClock(paused)}` : label;
       const live = ['writing', 'left', 'offline'].includes(r.status);
       const reason = r.reason && (r.status === 'left' || r.status === 'ended') ? `<div class="tiny muted">${esc((r.status === 'ended' ? END_TEXT : REASON_TEXT)[r.reason] || r.reason)}</div>` : '';
+      // Writing in the side panel (running sessions only)
+      const where = r.where === 'panel' ? `<div class="tiny muted">${r.researching ? 'side panel · researching' : 'side panel'}</div>` : '';
       const tl = r.timeLeftMs != null ? Math.max(0, r.timeLeftMs - (r.status === 'writing' || r.status === 'left' || r.status === 'offline' ? since : 0)) : null;
       const sess = r.sessionMs != null ? r.sessionMs + (['writing', 'left', 'offline', 'paused'].includes(r.status) ? since : 0) : null;
       return `<tr class="${r.attention.length ? 'attn' : ''}">
         <td><div class="roster-name">${avatarHtml(r.student, 'avatar-sm')}<span><b>${esc(r.student.name)}</b>${r.attention.length ? `<div class="tiny attn-text">${I.alert}${esc(r.attention.join(' · '))}</div>` : ''}</span></div></td>
-        <td><span class="pill ${pill}" ${r.status === 'left' || r.status === 'offline' ? `data-tick="${r.status}" data-base="${paused}"` : ''}>${esc(statusText)}</span>${reason}</td>
+        <td><span class="pill ${pill}" ${r.status === 'left' || r.status === 'offline' ? `data-tick="${r.status}" data-base="${paused}"` : ''}>${esc(statusText)}</span>${reason}${where}</td>
         <td class="mono" ${sess != null && (live || r.status === 'paused') ? `data-tick="up" data-base="${sess}"` : ''}>${sess != null ? vcClock(sess) : '—'}</td>
         <td class="mono ${tl != null && tl < 300000 ? 'low' : ''}" ${tl != null && live ? `data-tick="down" data-base="${tl}"` : ''}>${tl != null ? vcClock(tl) : '—'}</td>
         <td class="mono">${r.words.toLocaleString()}</td>

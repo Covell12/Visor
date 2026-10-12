@@ -396,3 +396,100 @@ test('a paste made before its copy reached the server is matched on review; the 
   r = await teacher.get(`/api/review/${doc.id}`);
   assert.ok(r.data.report.research.searches.some(x => x.query === 'teen sleep'));
 });
+
+test('side-panel research and one-click citing: settings, sources, the lease as a role, starting', async () => {
+  const teacher = client(), stu = client();
+  await teacher.post('/api/auth/signup', { email: 'rt@school.test', password: 'secret12', firstName: 'Rae', lastName: 'Teacher', role: 'teacher' });
+  const cls = (await teacher.post('/api/classes', { name: 'Research' })).data.class;
+  await stu.post('/api/auth/signup', { email: 'rs@school.test', password: 'secret12', firstName: 'Ray', lastName: 'Student', role: 'student', over13: true, classCode: cls.joinCode });
+
+  // Settings: both on by default; the describe line and the locked preset say so
+  let r = await teacher.get('/api/config');
+  assert.strictEqual(r.data.writingPresets['in-class'].writing.panelBrowsing, true);
+  assert.strictEqual(r.data.writingPresets.homework.writing.oneClickCite, true);
+  r = await teacher.post(`/api/classes/${cls.id}/assignments`, { type: 'writing', title: 'In-class essay', writing: { mode: 'locked' } });
+  const a = r.data.assignment;
+  assert.strictEqual(a.writing.oneClickCite, true);
+  assert.strictEqual(a.writing.panelBrowsing, true);
+  r = await teacher.get(`/api/assignments/${a.id}`);
+  assert.match(r.data.describe, /AI sites are blocked · you can switch to the side panel to research · cite in MLA$/);
+  r = await teacher.patch(`/api/assignments/${a.id}`, { writing: { oneClickCite: false } });
+  assert.strictEqual(r.data.assignment.writing.oneClickCite, false);
+  assert.strictEqual(r.data.assignment.writing.panelBrowsing, true, 'a setting not sent is kept');
+  r = await teacher.get(`/api/assignments/${a.id}`);
+  assert.match(r.data.describe, /cite in MLA · one-click citing is off$/);
+  r = await teacher.post(`/api/classes/${cls.id}/assignments`, { type: 'writing', title: 'Homework', writing: { mode: 'open' } });
+  assert.ok(!/side panel/.test((await teacher.get(`/api/assignments/${r.data.assignment.id}`)).data.describe), 'open sessions don’t mention it');
+  await teacher.post(`/api/assignments/${a.id}/publish`, {});
+
+  // Starting a locked session from the side panel is refused
+  const X = { 'X-Visor-Token': (await stu.post('/api/ext/token')).data.token };
+  const doc = (await stu.get(`/api/write/${a.id}`)).data.doc;
+  r = await stu.post(`/api/write/${doc.id}/sessions`, { surfaceId: 'p1', surf: 'panel', extPresent: true, fullscreen: true }, X);
+  assert.strictEqual(r.status, 409);
+  assert.strictEqual(r.data.error, 'Start locked sessions from the Visor tab in full screen.');
+  // From the tab, with the extension's acknowledgement
+  await stu.post('/api/ext/session/ack', { docId: doc.id, version: '9.0', hasHostPermission: true }, X);
+  r = await stu.post(`/api/write/${doc.id}/sessions`, { surfaceId: 't1', surf: 'tab', extPresent: true, fullscreen: true });
+  assert.strictEqual(r.status, 200);
+  const H = { 'X-Visor-Session': r.data.token };
+  r = await stu.post('/api/ext/session/beat', { docId: doc.id, lockActive: true }, X);
+  assert.strictEqual(r.data.leaseSurf, 'tab');
+
+  // One-click citing is off: the extension's cite is refused, a source by hand isn't
+  const source = { title: 'Why teens need sleep', url: 'https://example.org/sleep' };
+  r = await stu.post(`/api/write/${doc.id}/sources`, { source, via: 'extension' });
+  assert.strictEqual(r.status, 403);
+  assert.strictEqual(r.data.error, 'One-click citing is turned off for this assignment.');
+  r = await stu.post(`/api/write/${doc.id}/sources`, { source });
+  assert.strictEqual(r.status, 200);
+  assert.strictEqual(r.data.sources.length, 1);
+
+  // The tab hands the lease to the side panel: any copy of the panel may write
+  r = await stu.post(`/api/write/${doc.id}/lease`, { give: 'panel' }, H);
+  assert.strictEqual(r.status, 200);
+  assert.strictEqual(r.data.lease.surf, 'panel');
+  r = await stu.post('/api/ext/session/beat', { docId: doc.id, lockActive: true }, X);
+  assert.strictEqual(r.data.leaseSurf, 'panel');
+  r = await teacher.get(`/api/assignments/${a.id}/live`);
+  const row = r.data.rows.find(x => x.student.email === 'rs@school.test');
+  assert.strictEqual(row.where, 'panel');
+  assert.strictEqual(row.status, 'writing', 'the handoff records no pause');
+  const P = { 'X-Visor-Session': (await stu.get(`/api/write/${a.id}?surf=panel`, X)).data.token };
+  r = await stu.post(`/api/write/${doc.id}/ops`, { baseSeq: 0, ops: [{ k: 'i', at: 0, s: 'Sleep', t: Date.now(), src: 'type' }], textHash: sha('Sleep'), surfaceId: 'panel-copy-2' }, P);
+  assert.strictEqual(r.status, 200);
+  // …but the tab doesn't, nor a tab posing as another surface
+  r = await stu.post(`/api/write/${doc.id}/ops`, { baseSeq: 1, ops: [{ k: 'i', at: 5, s: '!', t: Date.now(), src: 'type' }], surfaceId: 't1' }, H);
+  assert.strictEqual(r.status, 409);
+  assert.strictEqual(r.data.notLeaseHolder, true);
+  r = await stu.post(`/api/write/${doc.id}/ops`, { baseSeq: 1, ops: [{ k: 'i', at: 5, s: '!', t: Date.now(), src: 'type' }], surfaceId: 'panel-copy-2' }, H);
+  assert.strictEqual(r.status, 409, 'a tab token isn’t the side panel');
+  // A panel beat researching on another tab keeps the session active
+  r = await stu.post(`/api/write/${doc.id}/beat`, { surfaceId: 'panel-copy-3', surf: 'panel', focused: false, visible: true, browser: { focused: true, blocked: false }, seq: 0, wantText: true }, P);
+  assert.strictEqual(r.data.state, 'active');
+  assert.strictEqual(r.data.text, 'Sleep', 'every copy of the panel gets the text it hasn’t seen');
+  const sess = await require('../lib/repo').getRecord('session', r.data.id);
+  assert.ok(sess.research, 'the route passed on the lease and the browser state: research time started');
+  // Back to full screen: the tab takes the lease again
+  r = await stu.post(`/api/write/${doc.id}/lease`, { surfaceId: 't1', surf: 'tab' }, H);
+  assert.strictEqual(r.data.lease.surf, 'tab');
+
+  // A locked assignment that keeps students in full screen refuses the side panel
+  r = await teacher.post(`/api/classes/${cls.id}/assignments`, { type: 'writing', title: 'Full screen only', writing: { mode: 'locked', panelBrowsing: false } });
+  const b = r.data.assignment;
+  assert.strictEqual(b.writing.panelBrowsing, false);
+  assert.ok(!/side panel/.test((await teacher.get(`/api/assignments/${b.id}`)).data.describe));
+  await teacher.post(`/api/assignments/${b.id}/publish`, {});
+  const doc2 = (await stu.get(`/api/write/${b.id}`)).data.doc;
+  await stu.post('/api/ext/session/ack', { docId: doc2.id, version: '9.0', hasHostPermission: true }, X);
+  r = await stu.post(`/api/write/${doc2.id}/sessions`, { surfaceId: 't2', surf: 'tab', extPresent: true, fullscreen: true });
+  const H2 = { 'X-Visor-Session': r.data.token };
+  r = await stu.post(`/api/write/${doc2.id}/lease`, { give: 'panel' }, H2);
+  assert.strictEqual(r.status, 409);
+  assert.strictEqual(r.data.error, 'Side-panel mode is turned off for this assignment.');
+  const P2 = { 'X-Visor-Session': (await stu.get(`/api/write/${b.id}?surf=panel`, X)).data.token };
+  r = await stu.post(`/api/write/${doc2.id}/lease`, { surfaceId: 'p2', surf: 'panel' }, P2);
+  assert.strictEqual(r.status, 409, 'nor can the panel take it itself');
+  r = await stu.post('/api/ext/session/beat', { docId: doc2.id, lockActive: true }, X);
+  assert.strictEqual(r.data.leaseSurf, 'tab');
+});
