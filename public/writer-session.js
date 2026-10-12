@@ -304,7 +304,9 @@ async function wsStart() {
 // What the extension needs to run the session (Section 8.3)
 function wsExtSettings() {
   const w = WR.data.assignment.writing;
-  return { mode: w.mode, researchTracking: w.researchTracking, allowedSites: w.allowedSites, blockedSites: w.blockedSites, blockAiSites: w.blockAiSites, citationStyle: w.citationStyle, oneClickCite: w.oneClickCite !== false, panelBrowsing: w.panelBrowsing !== false,
+  return { mode: w.mode, researchTracking: w.researchTracking, allowedSites: w.allowedSites, blockedSites: w.blockedSites, blockAiSites: w.blockAiSites, citationStyle: w.citationStyle,
+    // No one-click citing when the assignment has no Works Cited (students write their own)
+    oneClickCite: w.oneClickCite !== false && w.worksCited !== 'off', panelBrowsing: w.panelBrowsing !== false,
     // Where the writing is now, so an extension that lost its state (a browser
     // restart) starts in the right mode
     research: !!(WR.session && WR.lease && WR.lease.sessionId === WR.session.id && WR.lease.surf === 'panel'), title: WR.data.assignment.title, origin: location.origin, deadlineAt: WR.session?.deadlineAt || null, startedAt: WR.session?.startedAt || null };

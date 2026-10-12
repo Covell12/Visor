@@ -334,3 +334,23 @@ a.mat-title:hover { color: var(--brand); text-decoration: underline; }
 @media (max-width: 480px) {
   .topbar .brand span { display: none; }
 }
+
+/* ---------- motion: everything moves the same calm way ----------
+   One easing (quick start, soft landing) and short durations everywhere;
+   nothing moves for people who ask their system for less motion. */
+:root { --ease: cubic-bezier(.2, .7, .2, 1); interpolate-size: allow-keywords; }
+@keyframes vxMenuIn { from { opacity: 0; transform: translateY(-4px) scale(.985); } to { opacity: 1; transform: none; } }
+.dd-menu:not(.hidden), .menu:not(.hidden) { animation: vxMenuIn .16s var(--ease); transform-origin: top right; }
+.dd-menu:not(.right):not(.hidden) { transform-origin: top left; }
+/* A new page fades up into place (router.js adds .route-enter for a moment) */
+@keyframes vxPageIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.route-view.route-enter > * { animation: vxPageIn .24s var(--ease) both; }
+/* <details> open and close smoothly */
+details::details-content { height: 0; overflow: clip; transition: height .3s var(--ease), content-visibility .3s allow-discrete; }
+details[open]::details-content { height: auto; }
+details > summary { transition: color .15s; }
+.course-nav a, .side-stat, .ev-row, .cm-item, .dd-item, .topnav > a, .topnav-btn, .upd-class, .swatch, .crumbs a { transition: background-color .15s, color .15s, border-color .15s, box-shadow .15s; }
+.course-art { transition: filter .2s, opacity .2s; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; transition-delay: 0s !important; scroll-behavior: auto !important; }
+}

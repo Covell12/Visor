@@ -62,6 +62,12 @@ const VisorRouter = (() => {
     if (!hit) { history.replaceState(null, '', '/'); return render(); }
     setNav(path);
     document.body.classList.toggle('writing', /^\/write\//.test(path));
+    if (!/^\/write\//.test(path)) document.body.classList.remove('writing-focus');
+    // The new page fades up into place (portal.css, .route-enter)
+    const rv = $('routeView');
+    rv.classList.add('route-enter');
+    clearTimeout(rv._enterT);
+    rv._enterT = setTimeout(() => rv.classList.remove('route-enter'), 450);
     if (hit.r.shell) { showShell(); }
     else { showRouteView(); $('routeView').innerHTML = ''; window.scrollTo(0, 0); }
     try {

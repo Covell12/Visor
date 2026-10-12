@@ -147,28 +147,51 @@ function writerRender(el) {
   WR.outlineOpen = !WR.embed && writerPref('visor-outline', '0') === '1';
   const z = writerPref('visor-zoom', null);
   WR.zoomSetting = z === 'fit' ? 'fit' : WR_ZOOMS.includes(Number(z)) ? Number(z) : (window.innerWidth < 900 ? 'fit' : 100);
-  el.innerHTML = `<div class="wr dx ${WR.embed ? 'wr-embed' : ''}">
+  // Works Cited, as the teacher set it: a page after the essay, a side panel, or off
+  const works = writerWorksMode();
+  // The side panel embed has no room for a second panel: its sources sit under the page
+  const sourcesBelow = works === 'page' || (works === 'panel' && WR.embed);
+  WR.sideOpen = works !== 'off' && !WR.embed && writerPref(`visor-side:${a.id}`, works === 'panel' && window.innerWidth >= 1280 ? '1' : '0') === '1';
+  el.innerHTML = `<div class="wr dx ${WR.embed ? 'wr-embed' : ''} wr-works-${works}">
     <header class="wr-bar">
-      <div class="wr-bar-row">
-        <div class="wr-title">${WR.embed ? '' : `<a class="wr-back" href="/a/${a.id}" data-link aria-label="Back to the assignment">←</a>`}<div class="wr-title-text"><div class="wr-h">${esc(a.title)}</div>${WR.embed ? '' : `<div class="tiny muted">${esc(cls.name)}</div>`}</div></div>
-        <div class="wr-status" id="wrStatus" aria-live="polite"></div>
-        <div class="wr-actions" id="wrActions"></div>
+      <div class="wr-head">
+        ${WR.embed ? '' : `<a class="wr-logo" href="/a/${a.id}" data-link aria-label="Back to the assignment" title="Back to the assignment"><img src="/logo.png" alt="" /></a>`}
+        <div class="wr-head-main">
+          <div class="wr-title-row">
+            <div class="wr-title"><h1 class="wr-h" title="${esc(a.title)}">${esc(a.title)}</h1></div>
+            ${WR.embed ? '' : `<a class="wr-cls" href="/class/${cls.id}" data-link title="Go to ${esc(cls.name)}">${esc(cls.name)}</a>`}
+            <span class="wr-saved" id="wrSaved" role="status"></span>
+          </div>
+          <div id="dxMenubar" class="dx-menubar-slot"></div>
+        </div>
+        <div class="wr-head-right">
+          <div class="wr-status" id="wrStatus" aria-live="polite"></div>
+          <div class="wr-actions" id="wrActions"></div>
+          ${WR.embed ? '' : writerUserMenu()}
+        </div>
       </div>
-      <div id="dxMenubar" class="dx-menubar-slot"></div>
     </header>
     <div id="dxToolbar" class="dx-toolbar-slot"></div>
-    <div id="wrBanner" class="wr-banner-slot"></div>
-    <div id="wrIntro" class="dx-intro"></div>
-    <div id="dxCanvas" class="dx-canvas${WR.outlineOpen ? ' dx-outline-on' : ''}">
+    <div id="dxCanvas" class="dx-canvas${WR.outlineOpen ? ' dx-outline-on' : ''}${WR.sideOpen ? ' dx-side-on' : ''}">
       <aside id="dxOutline" class="dx-outline" aria-label="Outline"></aside>
       <div class="dx-pages" id="dxPages">
+        <!-- Above the page, exactly as wide as it at any zoom: banners, the
+             Instructions dropdown and the start card -->
+        <div class="dx-above">
+          <div id="wrBanner" class="wr-banner-slot"></div>
+          ${WR.embed ? '' : '<section id="wrInstr" class="wr-instr-drop"></section>'}
+          <div id="wrIntro" class="dx-intro"></div>
+        </div>
         <div class="wr-paper dx-page ${style}" id="wrPaper">
           <div id="wrEditor"></div>
           <div id="dxBreaks" class="dx-breaks" aria-hidden="true"></div>
           <div id="wrOverlay" class="wr-overlay hidden"></div>
         </div>
-        <div id="wrSources" class="dx-sources ${style}"></div>
+        ${sourcesBelow ? `<div id="wrSources" class="dx-sources ${style}"></div>` : ''}
       </div>
+      ${works !== 'off' && !WR.embed ? `<aside id="wrSide" class="dx-side" aria-label="Sources" ${WR.sideOpen ? '' : 'inert'}><div class="dx-side-inner">
+        <div class="dx-side-head"><b>Sources</b><span class="dx-side-style">${esc({ mla: 'MLA', apa: 'APA', chicago: 'Chicago' }[w.citationStyle] || 'MLA')}</span><button type="button" class="btn-icon" aria-label="Close sources" title="Close" onclick="writerToggleSources(false)">${I.x}</button></div>
+        <div class="dx-side-body" id="wrSideBody"></div></div></aside>` : ''}
     </div>
     <div id="dxPrint" class="dx-print"></div>
   </div>`;
@@ -190,8 +213,27 @@ function writerRender(el) {
   writerApplyZoom(false);
   writerMountUi();
   writerLoadServerText(WR.doc, { force: true });
+  writerRenderInstructions();
   writerRefresh();
   writerSyncBarHeight();
+}
+
+// 'page' (a Works Cited page after the essay; older assignments), 'panel' or 'off'
+function writerWorksMode() {
+  const v = WR.data?.assignment?.writing?.worksCited;
+  return v === 'panel' || v === 'off' ? v : 'page';
+}
+// The avatar at the right of the header (the site's own bar is hidden here)
+function writerUserMenu() {
+  if (!window.ddHtml || !me) return '';
+  return '<div class="wr-user">' + ddHtml({ id: 'wrUser', btnClass: 'wr-avatar', btn: avatarHtml(me, 'avatar-sm'), label: `${me.name}: menu`, right: true, items: [
+    { header: me.name },
+    { label: 'Home', icon: PI.list, href: '/' },
+    { label: 'This assignment', icon: I.doc, href: `/a/${WR.data.assignment.id}` },
+    'sep',
+    { label: 'Profile settings', icon: I.gear, onclick: 'openProfile()' },
+    { label: 'Sign out', icon: I.x, onclick: 'signOut()' }
+  ] }) + '</div>';
 }
 
 // DocsUI (docs-ui.js) builds the menus, toolbar, dialogs, find panel and
@@ -220,7 +262,10 @@ function writerMountUi() {
         getImageSelection: safe(() => writerImageSelection(), null),
         getSelectionRect: safe(() => writerSelectionRect(), null),
         getLink: safe(() => writerGetLink(), null),
-        docStyle: WR.docStyle, zoom: WR.zoomSetting, pageBreaks: WR.pageBreaks, spellcheck: WR.spellcheck, outlineOpen: WR.outlineOpen
+        docStyle: WR.docStyle, zoom: WR.zoomSetting, pageBreaks: WR.pageBreaks, spellcheck: WR.spellcheck, outlineOpen: WR.outlineOpen,
+        // Citation tools only when the assignment has a Works Cited page or panel.
+        // The word count floats (as in Docs); the side panel keeps its toolbar chips.
+        citations: writerWorksMode() !== 'off', wcChip: !!WR.embed, sourcesChip: !!WR.embed
       });
       WR.docsUI = true;
     } catch (e) {
@@ -237,8 +282,8 @@ function writerFallbackBar() {
   const el = $('dxToolbar'); if (!el) return;
   el.innerHTML = `<div class="dx-fallback-bar" role="toolbar" aria-label="Essay">
     <span class="wr-wc" id="wrWords" aria-live="off">0 words</span>
-    <button type="button" class="wr-tb-btn" id="wrSourcesBtn" onclick="writerToggleSources()">Sources (0)</button>
-    <button type="button" class="wr-tb-btn" id="wrCiteBtn" onclick="writerInsertCitationMenu()">Insert citation</button>
+    ${writerWorksMode() === 'off' ? '' : `<button type="button" class="wr-tb-btn" id="wrSourcesBtn" onclick="writerToggleSources()">Sources (0)</button>
+    <button type="button" class="wr-tb-btn" id="wrCiteBtn" onclick="writerInsertCitationMenu()">Insert citation</button>`}
   </div>`;
 }
 
@@ -1074,6 +1119,7 @@ function writerUpdateCounts(now) {
   const el = $('wrWords'); if (el) el.textContent = WR.wordsLabel;
   const n = (WR.doc?.sources || []).length;
   const sb = $('wrSourcesBtn'); if (sb) sb.textContent = `Sources (${n})`;
+  const hc = $('wrSrcCount'); if (hc) hc.textContent = n ? String(n) : '';
   writerScheduleUi();
 }
 function writerWordStats() {
@@ -1184,7 +1230,7 @@ function writerPushUi() {
     canEdit, canUndo: canEdit && !!hist?.stack.undo.length, canRedo: canEdit && !!hist?.stack.redo.length,
     formats, inTable: formats.table != null, onImage: !!writerImageAt(), hasSelection: r.length > 0,
     zoom: WR.zoomSetting, pageBreaks: WR.pageBreaks, spellcheck: WR.spellcheck, outlineOpen: WR.outlineOpen,
-    sourcesCount: sources.length, citationAllowed: sources.length > 0,
+    sourcesCount: sources.length, citationAllowed: writerWorksMode() !== 'off' && sources.length > 0,
     // also: the document style, the outline's version, and the find counts after edits
     docStyle: WR.docStyle, outlineRev: WR.outlineRev || 0, pages: WR.pages || 1
   };
@@ -1252,7 +1298,8 @@ function writerExec(cmd, value) {
       try { return document.execCommand(cmd); } catch { return false; } finally { WR.pendingSrc = null; }
     }
     case 'paste': toast(`Use ${WR_IS_MAC ? '⌘V' : 'Ctrl+V'} to paste`); return true;
-    case 'sources': writerToggleSources(); return true;
+    case 'sources': if (writerWorksMode() === 'off') return false; writerToggleSources(); return true;
+    case 'instructions': writerToggleInstructions(true); return true;
     case 'wordCount':
       if (WR.docsUI && typeof window.DocsUI?.openWordCount === 'function') { try { DocsUI.openWordCount(); return true; } catch (e) { console.error(e); } }
       writerWordCountDialog(); return true;
@@ -1937,6 +1984,7 @@ function writerEssayHtml() {
   return `<div class="dx-print-essay ${WR_DF.styleClass(WR.docStyle)}"><div class="ql-editor">${q.root.innerHTML}</div></div>`;
 }
 function writerWorksHtml() {
+  if (writerWorksMode() !== 'page') return '';
   const bib = VisorCiteFormat.bibliography(WR.doc?.sources || [], WR.data.assignment.writing.citationStyle);
   if (!bib.items.length) return '';
   return `<section class="dx-print-works ${WR_DF.styleClass(WR.docStyle)}"><h2>${esc(bib.heading)}</h2><ol class="wr-bib">${bib.items.map(i => `<li><span class="wr-bib-text">${i.html}</span></li>`).join('')}</ol></section>`;
@@ -2022,7 +2070,7 @@ function writerWordCountDialog() {
   const s = writerWordStats();
   const fmt = n => Number(n || 0).toLocaleString();
   const row = (label, k) => `<tr><td>${label}</td><td class="num">${s.selection && k !== 'pages' ? `${fmt(s.selection[k])} of ${fmt(s[k])}` : fmt(s[k])}</td></tr>`;
-  const float = writerPref('visor-wc-float', '0') === '1';
+  const float = writerPref('visor-wc-float', '1') === '1';
   openModal({ title: 'Word count', body: `<table class="dx-wc-table">${row('Pages', 'pages')}${row('Words', 'words')}${row('Characters', 'chars')}${row('Characters excluding spaces', 'charsNoSpaces')}</table>
     <label class="check-row" style="margin:14px 0 0;"><input type="checkbox" id="dxWcFloat" ${float ? 'checked' : ''}> <span>Display word count while typing</span></label>`,
     footer: `<button class="btn btn-primary" onclick="closeModal();writerFocus()">OK</button>` });
@@ -2030,13 +2078,22 @@ function writerWordCountDialog() {
 }
 
 /* ====================== UI state ====================== */
+// The cloud next to the title, as in Docs: saved, saving, or offline
+const WR_CLOUD = {
+  saved: '<path d="M7 18h10.5a4.5 4.5 0 0 0 .5-8.97A6 6 0 0 0 6.34 10 4 4 0 0 0 7 18z"/><path d="m9.5 13.5 1.8 1.8 3.4-3.6"/>',
+  saving: '<path d="M7 18h10.5a4.5 4.5 0 0 0 .5-8.97A6 6 0 0 0 6.34 10 4 4 0 0 0 7 18z"/><path d="M12 11v4M10.3 12.7 12 11l1.7 1.7"/>',
+  offline: '<path d="M7 18h10.5a4.5 4.5 0 0 0 1.6-.3M20.9 14.6A4.5 4.5 0 0 0 18 9.03 6 6 0 0 0 9.3 5.6M6.34 10A4 4 0 0 0 7 18"/><path d="m3 3 18 18"/>'
+};
 function writerSetSaved(state) {
   WR.saveState = state;
   const el = $('wrSaved'); if (!el) return;
+  const key = state === 'offline' ? 'offline' : state === 'saved' ? 'saved' : 'saving';
+  if (el.dataset.state === key) return;
+  el.dataset.state = key;
   el.className = `wr-saved ${state}`;
   // Short, so the header doesn't move as it changes (the paused card says more when offline)
-  el.textContent = { saved: 'Saved', saving: 'Saving…', unsaved: 'Saving…', offline: 'Offline' }[state] || '';
-  el.title = state === 'offline' ? 'Offline: your writing is saved on this device' : '';
+  el.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${WR_CLOUD[key]}</svg><span>${{ saved: 'Saved', saving: 'Saving…', offline: 'Offline' }[key]}</span>`;
+  el.title = key === 'offline' ? 'Offline: your writing is saved on this device and sent when you’re back online' : key === 'saved' ? 'All your writing is saved to Visor' : 'Saving to Visor…';
 }
 function writerBanner(text, kind = 'info') {
   const el = $('wrBanner'); if (!el) return;
@@ -2069,25 +2126,34 @@ function writerRefresh(force) {
   // Status line
   const extOk = WR.extPresent;
   $('wrStatus').innerHTML = active
-    ? `<span class="wr-rec"><i class="live-dot"></i>Session active</span><span class="wr-timer mono" id="wrTimer"></span><span class="wr-saved" id="wrSaved"></span>`
-    : status === 'submitted' ? `<span class="pill pill-green">Submitted</span><span class="tiny muted">${esc(vcDateTime(doc.submittedAt))}</span>`
+    ? `<span class="wr-rec" title="Writing session in progress: your writing is recorded"><i class="live-dot"></i><span class="wr-rec-t">Recording</span><span class="wr-timer mono" id="wrTimer"></span></span>`
+    : status === 'submitted' ? `<span class="pill pill-green" title="${esc(vcDateTime(doc.submittedAt))}">Submitted</span>`
       : status === 'returned' ? `<span class="pill pill-violet">Returned</span>` : '';
   writerSetSaved(WR.offline ? 'offline' : WR.queue.length ? 'unsaved' : 'saved');
   // Actions
   const acts = [];
+  const works = writerWorksMode();
+  if (!WR.embed) {
+    acts.push(`<button type="button" class="wr-hbtn" id="wrInstrBtn" aria-controls="wrInstr" aria-expanded="${!!WR.instrShown}" onclick="writerToggleInstructions()" title="Instructions">${PI.down.replace('<svg', '<svg class="wr-hchev"')}<span>Instructions</span></button>`);
+    if (works !== 'off') acts.push(`<button type="button" class="wr-hbtn" id="wrSideBtn" aria-controls="wrSide" aria-expanded="${!!WR.sideOpen}" onclick="writerToggleSources()" title="${works === 'page' ? 'Your sources and the Works Cited page' : 'Your sources'}">${PI.book}<span>Sources</span><span class="wr-hcount" id="wrSrcCount">${(doc.sources || []).length || ''}</span></button>`);
+  }
   if (active) {
     // Locked sessions that may use the side panel move the writing there to research
     const research = w.mode === 'locked' && wsPanelAllowed() && isLeaseHolder();
     if (!WR.embed && extOk && window.VisorExt && research) acts.push(`<button class="btn btn-ghost btn-sm" onclick="wsResearchMode()">Research in side panel</button>`);
     // (Locked sessions otherwise stay in full screen, where the panel can't show)
     else if (!WR.embed && extOk && window.VisorExt && w.mode !== 'locked') acts.push(`<button class="btn btn-ghost btn-sm" onclick="VisorExt.openPanel(WR.doc.id).then(r=>{ if(!r.ok) toast(r.error||'Click the Visor icon in Chrome’s toolbar to open the side panel.','err'); })">Open side panel</button>`);
-    acts.push(`<button class="btn btn-ghost btn-sm" onclick="wsEnd()">End session</button>`);
-    acts.push(`<button class="btn btn-primary btn-sm" onclick="wsSubmit()">Submit</button>`);
+    acts.push(`<button class="btn btn-ghost btn-sm wr-end" onclick="wsEnd()">End session</button>`);
+    acts.push(`<button class="btn btn-primary btn-sm wr-submit" onclick="wsSubmit()">${PI.send}Submit</button>`);
   } else if (status !== 'submitted' && WR.session && !WR.embed) {
-    acts.push(`<button class="btn btn-primary btn-sm" onclick="wsSubmit()">Submit</button>`);
+    acts.push(`<button class="btn btn-primary btn-sm wr-submit" onclick="wsSubmit()">${PI.send}Submit</button>`);
   }
   $('wrActions').innerHTML = acts.join('');
+  // While a session runs the editor has the whole window (the site's bar slides
+  // away, as in Docs); outside one the bar stays, to get around the site
+  document.body.classList.toggle('writing-focus', !!active && !WR.embed);
   writerSyncBarHeight();
+  writerSyncInstructions();
   writerRenderIntro();
   writerRenderSources();
   writerUpdateCounts();
@@ -2101,11 +2167,9 @@ function writerRefresh(force) {
 function writerRenderIntro() {
   const el = $('wrIntro'); if (!el) return;
   const a = WR.data.assignment, w = a.writing, doc = WR.doc;
-  if (wsActive()) {
-    el.innerHTML = WR.embed || !a.instructions ? '' : `<details class="wr-instr"><summary>Instructions</summary><div>${esc(a.instructions).replace(/\n/g, '<br>')}</div></details>`;
-    return;
-  }
-  const instr = !WR.embed && a.instructions ? `<div class="wr-instr-open">${esc(a.instructions).replace(/\n/g, '<br>')}</div>` : '';
+  if (wsActive()) { el.innerHTML = ''; return; }
+  // The side panel has no Instructions dropdown: they stay on its card
+  const instr = WR.embed && a.instructions ? `<div class="wr-instr-open">${esc(a.instructions).replace(/\n/g, '<br>')}</div>` : '';
   if (doc.status === 'submitted') { el.innerHTML = `<div class="card card-pad wr-card">${instr}<div class="wr-card-line">${I.check}<span>Submitted ${esc(vcDateTime(doc.submittedAt))}${doc.autoSubmitted ? ' (automatically, when time ran out)' : ''}. Your teacher will return it with feedback.</span></div></div>`; return; }
   const fb = doc.feedback ? `<div class="wr-feedback"><div class="kicker">Feedback from your teacher</div>${doc.feedback.score != null ? `<div class="wr-score">${esc(String(doc.feedback.score))}${doc.feedback.outOf ? ` <span class="muted">/ ${esc(String(doc.feedback.outOf))}</span>` : ''}</div>` : ''}${doc.feedback.comment ? `<div>${esc(doc.feedback.comment).replace(/\n/g, '<br>')}</div>` : ''}</div>` : '';
   if (doc.status === 'returned' && !doc.reopened) { el.innerHTML = `<div class="card card-pad wr-card">${fb || '<div>Your teacher returned this.</div>'}</div>`; return; }
@@ -2122,7 +2186,8 @@ function writerRenderIntro() {
   const ended = WR.session && WR.session.state === 'ended';
   el.innerHTML = `<div class="card card-pad wr-card">
     ${fb}${ended ? '' : instr}
-    <div class="wr-describe">${esc(WR.data.describe)}</div>
+    <div class="wr-start-h">${ended ? 'Your session ended' : doc.status === 'returned' ? 'Your teacher reopened this for more writing' : 'Ready when you are'}</div>
+    ${WR.embed ? `<div class="wr-describe">${esc(WR.data.describe)}</div>` : `<div class="wr-describe">${ended ? 'Your writing is saved. Start another session to keep going, or submit it.' : 'Everything you write is saved as you go. The instructions and the rules for this assignment are above.'}</div>`}
     ${extLine}${permLine}${timeNote}
     ${blocked ? `<div class="callout amber" style="margin-top:10px;">${esc(blocked)}</div>` : ''}
     <div id="wrStartErr" class="form-error ${WR.startError ? '' : 'hidden'}" style="margin-top:12px;">${esc(WR.startError || '')}</div>
@@ -2193,7 +2258,59 @@ function writerApplyLock() {
    cursor as a src:'cite' op and adds the full entry to the document's sources
    (kept outside the op-logged text, so it never counts as typed words). */
 
-function writerToggleSources() { $('wrSources')?.scrollIntoView({ block: 'start', behavior: 'smooth' }); }
+// The Sources side panel slides in to the right of the page (on = force open
+// or closed). The side panel embed has no room for it: its list is under the page.
+function writerToggleSources(on) {
+  if (writerWorksMode() === 'off') return;
+  const canvas = $('dxCanvas'), side = $('wrSide');
+  if (!canvas || !side) { $('wrSources')?.scrollIntoView({ block: 'start', behavior: 'smooth' }); return; }
+  WR.sideOpen = on === undefined ? !WR.sideOpen : !!on;
+  canvas.classList.toggle('dx-side-on', WR.sideOpen);
+  side.toggleAttribute('inert', !WR.sideOpen);
+  $('wrSideBtn')?.setAttribute('aria-expanded', String(WR.sideOpen));
+  writerSetPref(`visor-side:${WR.data.assignment.id}`, WR.sideOpen ? '1' : '0');
+  if (WR.sideOpen) setTimeout(() => side.querySelector('.dx-side-body button, .dx-side-body a')?.focus({ preventScroll: true }), 260);
+}
+
+/* ---- the Instructions dropdown, under the toolbar ----
+   Open before a session starts (and whenever the student opens it), folded
+   away while they write unless they keep it open. Their choice is kept per
+   assignment on this device. */
+function writerInstrOpen() {
+  if (WR.instrChoice != null) return WR.instrChoice;
+  const saved = writerPref(`visor-instr:${WR.data.assignment.id}`, null);
+  if (saved != null) return saved === '1';
+  return !wsActive() && !['submitted'].includes(WR.doc?.status);
+}
+function writerRenderInstructions() {
+  const el = $('wrInstr'); if (!el || !WR.data) return;
+  const a = WR.data.assignment, w = a.writing || {};
+  const sum = [a.dueAt ? vcDue(a.dueAt) : '', w.mode === 'locked' ? 'Locked session' : 'Open session', w.timeLimitMin ? `${w.timeLimitMin} minutes` : 'no time limit'].filter(Boolean).join(' · ');
+  el.innerHTML = `<button type="button" class="wr-instr-head" aria-expanded="false" aria-controls="wrInstrBody" onclick="writerToggleInstructions()">
+      <span class="wr-instr-chev" aria-hidden="true">${PI.down}</span><span class="wr-instr-t">Instructions</span><span class="wr-instr-sum">${esc(sum)}</span></button>
+    <div class="wr-instr-body" id="wrInstrBody" role="region" aria-label="Instructions"><div class="wr-instr-inner"><div class="wr-instr-pad">
+      ${a.instructions ? `<div class="wr-instr-text">${esc(a.instructions).replace(/\n/g, '<br>')}</div>` : '<div class="wr-instr-text muted">Your teacher didn’t write instructions for this one.</div>'}
+      <div class="wr-instr-rules"><span class="wr-instr-k">How this assignment works</span>${esc(WR.data.describe)}</div>
+    </div></div></div>`;
+  writerSyncInstructions();
+}
+function writerSyncInstructions() {
+  const el = $('wrInstr'); if (!el) return;
+  const open = writerInstrOpen();
+  WR.instrShown = open;
+  el.classList.toggle('open', open);
+  el.querySelector('.wr-instr-head')?.setAttribute('aria-expanded', String(open));
+  el.querySelector('.wr-instr-body')?.toggleAttribute('inert', !open);
+  $('wrInstrBtn')?.setAttribute('aria-expanded', String(open));
+}
+// open: true from Help → Assignment instructions (also scrolls up to them)
+function writerToggleInstructions(open) {
+  if (!$('wrInstr')) return;
+  WR.instrChoice = open === true ? true : !writerInstrOpen();
+  writerSetPref(`visor-instr:${WR.data.assignment.id}`, WR.instrChoice ? '1' : '0');
+  writerSyncInstructions();
+  if (WR.instrChoice) window.scrollTo({ top: 0, behavior: 'smooth' });
+}
 
 // Insert text at the cursor as a citation op, even if the editor is locked
 // because the student is on the research page right now.
@@ -2214,7 +2331,7 @@ function writerInsertCite(text) {
 
 async function writerCite(meta) {
   if (!WR.data || !meta) return;
-  if (WR.data.assignment.writing.oneClickCite === false) return; // turned off for this assignment
+  if (WR.data.assignment.writing.oneClickCite === false || writerWorksMode() === 'off') return; // turned off for this assignment
   if (WR.embed && document.hidden) return; // another copy of the side panel is the one on screen
   if (!wsActive()) { toast('Start a writing session to add citations.', 'err'); return; }
   if (!isLeaseHolder()) return; // the other editor (tab or side panel) takes it
@@ -2225,7 +2342,7 @@ async function writerCite(meta) {
     writerInsertCite(r.source.inText);
     writerRenderSources(); writerUpdateCounts();
     toast(r.existing ? `Cited again: ${r.source.title}` : `Cited: ${r.source.title}`);
-    if (r.source.check?.length && !r.existing) setTimeout(() => toast(`Check: ${r.source.check.join(', ')}. Add it in Sources below.`, 'err'), 2600);
+    if (r.source.check?.length && !r.existing) setTimeout(() => toast(`Check: ${r.source.check.join(', ')}. Fix it under Sources.`, 'err'), 2600);
   } catch (e) { toast(e.message, 'err'); }
 }
 
@@ -2250,52 +2367,165 @@ function writerCiteSource(id) {
 function writerInsertCitationMenu() {
   const list = WR.doc?.sources || [];
   const w = WR.data.assignment.writing;
-  if (!list.length) return toast(w.oneClickCite === false ? `No sources yet. Add one by hand under ${VisorCiteFormat.headingFor(w.citationStyle)}.` : 'No sources yet. Use the Visor extension’s “Cite this page” on a page you’re using.');
+  if (writerWorksMode() === 'off') return;
+  if (!list.length) return toast(w.oneClickCite === false ? 'No sources yet. Add one by hand under Sources.' : 'No sources yet. Use the Visor extension’s “Cite this page” on a page you’re using.');
   if (!wsActive() || !isLeaseHolder()) return toast('Start a writing session to add citations.', 'err');
   openModal({ title: 'Insert a citation', sub: 'Adds the in-text citation where your cursor is.', body: `<div class="stack">${list.map(s => `<button class="choice cite-pick" data-id="${esc(s.id)}"><div class="t">${esc(s.inText)}</div><div class="d">${esc(s.title || s.url)}</div></button>`).join('')}</div>`, footer: `<button class="btn btn-ghost" onclick="closeModal()">Cancel</button>` });
   document.querySelectorAll('.cite-pick').forEach(b => b.onclick = () => { closeModal(); writerCiteSource(b.dataset.id); });
 }
 
-// Works Cited / References / Bibliography: a second page under the essay
+// The sources: the Works Cited page under the essay ('page'; in the side panel
+// embed, a list there for 'panel' too) and the Sources side panel
 function writerRenderSources() {
-  const el = $('wrSources'); if (!el || !WR.data) return;
+  if (!WR.data) return;
+  const works = writerWorksMode();
+  if (works === 'off') return;
   const style = WR.data.assignment.writing.citationStyle;
   const bib = VisorCiteFormat.bibliography(WR.doc?.sources || [], style);
   const editable = WR.doc.status !== 'submitted' && !(WR.doc.status === 'returned' && !WR.doc.reopened);
-  el.innerHTML = `<section class="wr-works" aria-label="${esc(bib.heading)}"><h2>${esc(bib.heading)}</h2>
-    ${bib.items.length ? `<ol class="wr-bib">${bib.items.map(i => `<li><span class="wr-bib-text">${i.html}</span>
-      <span class="wr-bib-tools">${i.source.check?.length ? `<button class="chip-check" onclick="writerEditSource('${esc(i.source.id)}')">Check: ${esc(i.source.check.join(', '))}</button>` : ''}
-      ${editable ? `<button class="btn-icon" aria-label="Edit this source" onclick="writerEditSource('${esc(i.source.id)}')">${I.edit}</button><button class="btn-icon" aria-label="Remove this source" onclick="writerDeleteSource('${esc(i.source.id)}')">${I.trash}</button>` : ''}</span></li>`).join('')}</ol>`
-      : `<p class="muted small">${WR.data.assignment.writing.oneClickCite === false ? 'Add your sources by hand. They show up here' : 'Sources you cite with the Visor extension show up here'}, formatted in ${esc({ mla: 'MLA', apa: 'APA', chicago: 'Chicago' }[style])}. ${editable ? `<button class="linklike" onclick="writerEditSource(null)">Add one by hand</button>` : ''}</p>`}
-    ${bib.items.length && editable ? `<button class="btn btn-ghost btn-sm" onclick="writerEditSource(null)">${I.plusSm}Add a source by hand</button>` : ''}
-  </section>`;
+  const styleName = esc({ mla: 'MLA', apa: 'APA', chicago: 'Chicago' }[style] || 'MLA');
+  const tools = i => `<span class="wr-bib-tools">${i.source.check?.length ? `<button class="chip-check" onclick="writerEditSource('${esc(i.source.id)}')">Check: ${esc(i.source.check.join(', '))}</button>` : ''}
+      ${editable ? `<button class="btn-icon" aria-label="Edit this source" title="Edit" onclick="writerEditSource('${esc(i.source.id)}')">${I.edit}</button><button class="btn-icon" aria-label="Remove this source" title="Remove" onclick="writerDeleteSource('${esc(i.source.id)}')">${I.trash}</button>` : ''}</span>`;
+  const empty = `${WR.data.assignment.writing.oneClickCite === false ? 'Your sources show up here' : 'Sources you add here or cite with the Visor extension show up here'}, formatted in ${styleName}.`;
+  const page = $('wrSources');
+  if (page) {
+    const heading = works === 'page' ? bib.heading : 'Sources';
+    page.innerHTML = `<section class="wr-works" aria-label="${esc(heading)}"><h2>${esc(heading)}</h2>
+      ${bib.items.length ? `<ol class="wr-bib">${bib.items.map(i => `<li><span class="wr-bib-text">${i.html}</span>${tools(i)}</li>`).join('')}</ol>`
+        : `<p class="muted small">${empty}</p>`}
+      ${editable ? `<div class="wr-works-add"><button class="btn btn-ghost btn-sm" onclick="writerEditSource(null)">${I.plusSm}Add a source</button><button class="btn btn-ghost btn-sm" onclick="writerEditSource(null, 'write')">${I.edit}Write a source</button></div>` : ''}
+    </section>`;
+  }
+  const side = $('wrSideBody');
+  if (side) {
+    const canCite = wsActive() && isLeaseHolder();
+    side.innerHTML = `<p class="dx-side-note">${works === 'page' ? `These make the ${esc(bib.heading)} page after your essay. <button class="linklike" onclick="$('wrSources')?.scrollIntoView({ block: 'start', behavior: 'smooth' })">Go to it</button>` : 'Your teacher asked for your sources here, not as a page in the essay.'}</p>
+      ${bib.items.length ? `<ol class="dx-side-list">${bib.items.map(i => `<li class="dx-src">
+        <div class="dx-src-text">${i.html}</div>
+        <div class="dx-src-row"><span class="dx-src-in">${esc(i.source.inText || '')}</span>
+          ${editable && canCite ? `<button class="btn btn-ghost btn-sm" onclick="writerCiteSource('${esc(i.source.id)}')" title="Add ${esc(i.source.inText || 'the citation')} where your cursor is">Cite</button>` : ''}${tools(i)}</div></li>`).join('')}</ol>`
+        : `<div class="dx-side-empty">${empty}</div>`}
+      ${editable ? `<div class="dx-side-adds"><button class="btn btn-primary btn-sm" onclick="writerEditSource(null)">${I.plusSm}Add a source</button><button class="btn btn-ghost btn-sm" onclick="writerEditSource(null, 'write')">${I.edit}Write a source</button></div>
+        <p class="dx-side-hint">Add one from a link, a DOI or an ISBN (Visor fills in what it can find), or write or paste it yourself.</p>` : ''}`;
+  }
+  const hc = $('wrSrcCount'); if (hc) hc.textContent = bib.items.length ? String(bib.items.length) : '';
   writerScheduleUi();
 }
 
-function writerEditSource(id) {
+/* ---- the source dialog ----
+   Three ways to add a source, as in Docs' citation tool:
+     From a link   a link, a DOI or an ISBN: Visor fills in what it can find
+                   (server: POST …/sources/lookup), then the details tab opens
+                   with the rest to check
+     Details       the fields, with a live preview of the citation
+     Write         the whole citation pasted or typed, as the student wants it
+   tab: 'link' | 'details' | 'write' (a new source starts on the link). */
+const WR_SRC_FIELDS = ['title', 'authors', 'siteName', 'publisher', 'published', 'type', 'url', 'journal', 'doi', 'volume', 'issue', 'pages'];
+function writerEditSource(id, tab) {
   const s = id ? (WR.doc.sources || []).find(x => x.id === id) : { type: 'webpage', authors: [] };
   if (!s) return;
-  const f = (k, label, ph = '') => `<div class="field"><label for="se-${k}">${label}</label><input id="se-${k}" class="input" value="${esc(s[k] || '')}" placeholder="${esc(ph)}" /></div>`;
-  openModal({ title: id ? 'Edit source' : 'Add a source', sub: 'Fix anything the page didn’t say, like the author or the date.', wide: true, body: `
-    ${f('title', 'Title')}
-    <div class="field"><label for="se-authors">Authors <span class="label-note">one per line</span></label><textarea id="se-authors" class="input" style="min-height:70px;">${esc((s.authors || []).join('\n'))}</textarea></div>
-    <div class="input-row">${f('siteName', 'Website or publication')}${f('publisher', 'Publisher', 'if different')}</div>
-    <div class="input-row">${f('published', 'Date published', 'YYYY-MM-DD')}
-      <div class="field"><label for="se-type">Kind</label><select id="se-type" class="input">${['webpage', 'article', 'journal', 'video', 'book'].map(t => `<option value="${t}" ${s.type === t ? 'selected' : ''}>${{ webpage: 'Web page', article: 'Article', journal: 'Journal article', video: 'Video', book: 'Book' }[t]}</option>`).join('')}</select></div></div>
-    ${f('url', 'Link', 'https://…')}
-    <div class="input-row">${f('journal', 'Journal')}${f('doi', 'DOI')}</div>
-    <div class="input-row">${f('volume', 'Volume')}${f('issue', 'Issue')}</div>
-    ${f('pages', 'Pages', 'e.g. 45-67')}
+  const style = WR.data.assignment.writing.citationStyle || 'mla';
+  const styleName = { mla: 'MLA', apa: 'APA', chicago: 'Chicago' }[style] || 'MLA';
+  const written = s.type === 'written';
+  WR.srcTab = tab || (written ? 'write' : id ? 'details' : 'link');
+  const f = (k, label, ph = '') => `<div class="field"><label for="se-${k}">${label}</label><input id="se-${k}" class="input" value="${esc(written ? '' : s[k] || '')}" placeholder="${esc(ph)}" /></div>`;
+  const tabBtn = (k, label) => `<button type="button" role="tab" data-tab="${k}" aria-selected="false">${label}</button>`;
+  openModal({ title: id ? 'Edit source' : 'Add a source', sub: `Formatted in ${styleName}.`, wide: true, body: `
+    <div class="seg src-tabs" role="tablist" aria-label="How to add it">${id ? '' : tabBtn('link', 'From a link')}${tabBtn('details', 'Fill in the details')}${tabBtn('write', 'Write it yourself')}</div>
+    <div class="src-pane" data-pane="link" role="tabpanel">
+      <div class="field"><label for="seQuery">Link, DOI or ISBN</label>
+        <div class="src-find"><input id="seQuery" class="input" placeholder="https://… · 10.1000/xyz123 · 978-0-…" autocomplete="off" /><button type="button" class="btn btn-primary" id="seFind">Find</button></div>
+        <div class="hint">Visor reads the page (or looks the DOI or ISBN up) and fills in what it can find. You check it and add anything it missed.</div></div>
+    </div>
+    <div class="src-pane" data-pane="details" role="tabpanel">
+      <div id="seFound" class="src-found hidden" role="status"></div>
+      ${f('title', 'Title')}
+      <div class="field"><label for="se-authors">Authors <span class="label-note">one per line</span></label><textarea id="se-authors" class="input" style="min-height:70px;">${esc(written ? '' : (s.authors || []).join('\n'))}</textarea></div>
+      <div class="input-row">${f('siteName', 'Website or publication')}${f('publisher', 'Publisher', 'if different')}</div>
+      <div class="input-row">${f('published', 'Date published', 'YYYY-MM-DD')}
+        <div class="field"><label for="se-type">Kind</label><select id="se-type" class="input">${['webpage', 'article', 'journal', 'video', 'book'].map(t => `<option value="${t}" ${s.type === t ? 'selected' : ''}>${{ webpage: 'Web page', article: 'Article', journal: 'Journal article', video: 'Video', book: 'Book' }[t]}</option>`).join('')}</select></div></div>
+      ${f('url', 'Link', 'https://…')}
+      <div class="input-row">${f('journal', 'Journal')}${f('doi', 'DOI')}</div>
+      <div class="input-row">${f('volume', 'Volume')}${f('issue', 'Issue')}</div>
+      ${f('pages', 'Pages', 'e.g. 45-67')}
+    </div>
+    <div class="src-pane" data-pane="write" role="tabpanel">
+      <div class="field"><label for="se-written">The citation</label><textarea id="se-written" class="input" style="min-height:96px;" maxlength="1500" placeholder="Paste a citation, or type it in ${styleName} style. Put a title in *asterisks* to make it italic.">${esc(written ? s.written || '' : '')}</textarea></div>
+      <div class="field"><label for="se-inTextWritten">In-text citation <span class="label-note">optional</span></label><input id="se-inTextWritten" class="input" maxlength="120" value="${esc(written ? s.inTextWritten || '' : '')}" placeholder="${style === 'apa' ? '(Smith, 2021)' : '(Smith 12)'}" /><div class="hint">What goes in your essay when you cite it. Left empty, Visor makes one from the first word.</div></div>
+    </div>
+    <div class="src-preview" aria-live="polite"><div class="src-preview-k">Preview</div><div id="sePreview" class="src-preview-t"></div><div id="sePreviewIn" class="src-preview-in"></div></div>
     <div id="seErr" class="form-error hidden"></div>`,
-    footer: `<button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="writerSaveSource(${id ? `'${esc(id)}'` : 'null'})">Save</button>` });
+    footer: `<button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="seSave">${id ? 'Save' : 'Add source'}</button>` });
+  const body = $('modalBody');
+  const show = k => {
+    WR.srcTab = k;
+    body.querySelectorAll('.src-tabs [data-tab]').forEach(b => { const on = b.dataset.tab === k; b.setAttribute('aria-selected', String(on)); b.setAttribute('aria-pressed', String(on)); });
+    body.querySelectorAll('.src-pane').forEach(p => p.classList.toggle('on', p.dataset.pane === k));
+    body.querySelector('.src-preview').classList.toggle('hidden', k === 'link');
+    $('seSave').disabled = k === 'link';
+    writerSourcePreview();
+    setTimeout(() => (k === 'link' ? $('seQuery') : k === 'write' ? $('se-written') : $('se-title'))?.focus(), 30);
+  };
+  body.querySelectorAll('.src-tabs [data-tab]').forEach(b => b.addEventListener('click', () => show(b.dataset.tab)));
+  body.addEventListener('input', e => { e.target.classList?.remove('needs'); writerSourcePreview(); });
+  body.addEventListener('change', writerSourcePreview);
+  $('seFind').onclick = () => writerLookupSource();
+  $('seQuery').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); writerLookupSource(); } });
+  $('seSave').onclick = () => modalBusy(() => writerSaveSource(id));
+  show(WR.srcTab);
+}
+// What the dialog would save, from the tab that's open
+function writerSourceForm() {
+  const v = k => $(`se-${k}`)?.value || '';
+  if (WR.srcTab === 'write') return { type: 'written', written: v('written'), inTextWritten: v('inTextWritten') };
+  return { title: v('title'), authors: v('authors').split('\n').map(x => x.trim()).filter(Boolean), siteName: v('siteName'), publisher: v('publisher'), published: v('published'), type: v('type'), url: v('url'), journal: v('journal'), doi: v('doi'), volume: v('volume'), issue: v('issue'), pages: v('pages') };
+}
+function writerSourcePreview() {
+  const out = $('sePreview'); if (!out || WR.srcTab === 'link') return;
+  const src = writerSourceForm();
+  const empty = src.type === 'written' ? !src.written.trim() : !src.title.trim() && !src.url.trim();
+  if (empty) { out.innerHTML = '<span class="muted">The citation shows up here as you fill it in.</span>'; $('sePreviewIn').textContent = ''; return; }
+  try {
+    const f = VisorCiteFormat.format(src, WR.data.assignment.writing.citationStyle || 'mla');
+    out.innerHTML = f.html;
+    $('sePreviewIn').textContent = f.inText ? `In your essay: ${f.inText}` : '';
+  } catch { out.textContent = ''; }
+}
+// From a link: ask the server, fill the details, and say what's missing
+async function writerLookupSource() {
+  const q = $('seQuery')?.value.trim();
+  if (!q) { formError('seErr', 'Paste a link, a DOI or an ISBN.'); return; }
+  const btn = $('seFind');
+  btn.disabled = true; btn.innerHTML = '<span class="spinner spinner-sm"></span> Finding…';
+  formError('seErr', '');
+  try {
+    const r = await wapi(`/api/write/${WR.doc.id}/sources/lookup`, { method: 'POST', body: { query: q } });
+    const src = r.source || {};
+    for (const k of WR_SRC_FIELDS) {
+      const el = $(`se-${k}`); if (!el) continue;
+      const val = k === 'authors' ? (src.authors || []).join('\n') : k === 'url' ? src.canonicalUrl || src.url || '' : src[k] || '';
+      if (k === 'type') { if (val) el.value = val; } else el.value = val;
+    }
+    const names = { title: 'the title', authors: 'the author', published: 'the date', siteName: 'the website', publisher: 'the publisher', journal: 'the journal' };
+    const missing = (r.missing || []).map(k => names[k] || k);
+    const box = $('seFound');
+    box.classList.remove('hidden');
+    box.classList.toggle('warn', missing.length > 0);
+    box.innerHTML = missing.length ? `${I.alert}<span>Found it. Visor couldn’t find ${missing.join(', ').replace(/, ([^,]*)$/, ' or $1')}: fill ${missing.length > 1 ? 'them' : 'it'} in if you can.</span>`
+      : `${I.check}<span>Found it. Check the details, then add the source.</span>`;
+    for (const k of r.missing || []) $(`se-${k}`)?.classList.add('needs');
+    WR.srcTab = 'details';
+    $('modalBody').querySelector('.src-tabs [data-tab="details"]').click();
+  } catch (e) { formError('seErr', e.message); }
+  finally { if (btn.isConnected) { btn.disabled = false; btn.textContent = 'Find'; } }
 }
 async function writerSaveSource(id) {
-  const v = k => $(`se-${k}`).value;
-  const source = { title: v('title'), authors: v('authors').split('\n').map(x => x.trim()).filter(Boolean), siteName: v('siteName'), publisher: v('publisher'), published: v('published'), type: v('type'), url: v('url'), journal: v('journal'), doi: v('doi'), volume: v('volume'), issue: v('issue'), pages: v('pages') };
+  const source = writerSourceForm();
+  if (source.type === 'written' && !source.written.trim()) { formError('seErr', 'Write or paste the citation.'); return; }
   try {
     const r = id ? await wapi(`/api/write/${WR.doc.id}/sources/${id}`, { method: 'PATCH', body: { source } }) : await wapi(`/api/write/${WR.doc.id}/sources`, { method: 'POST', body: { source } });
     WR.doc.sources = r.sources; closeModal(); writerRenderSources(); writerUpdateCounts();
-    if (!id && wsActive() && isLeaseHolder()) toast('Added. Use “Insert citation” to cite it in your essay.');
+    if (!id) toast(r.existing ? 'You already have that source.' : wsActive() && isLeaseHolder() ? 'Added. Click Cite next to it to cite it where your cursor is.' : 'Added.');
   } catch (e) { formError('seErr', e.message); }
 }
 async function writerDeleteSource(id) {

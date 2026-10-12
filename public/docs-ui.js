@@ -331,7 +331,7 @@
   const notTable = () => !S.inTable;
   const onImage = () => !!S.onImage;
 
-  const MENUS = [['file', 'File'], ['edit', 'Edit'], ['view', 'View'], ['insert', 'Insert'], ['format', 'Format'], ['tools', 'Tools']];
+  const MENUS = [['file', 'File'], ['edit', 'Edit'], ['view', 'View'], ['insert', 'Insert'], ['format', 'Format'], ['tools', 'Tools'], ['help', 'Help']];
   function menuItems(key) {
     switch (key) {
       case 'file': return [
@@ -365,7 +365,7 @@
         { label: 'Link', icon: 'link', sc: 'mod+k', edits: true, run: () => openLink() },
         SEP,
         { label: 'Special characters', icon: 'omega', edits: true, run: openSpecialChars },
-        { label: 'Citation', icon: 'quote', edits: true, enabled: () => S.citationAllowed !== false, hidden: () => !sourcesList().length, sub: citationItems }
+        { label: 'Citation', icon: 'quote', edits: true, enabled: () => S.citationAllowed !== false, hidden: () => M.opts.citations === false || !sourcesList().length, sub: citationItems }
       ];
       case 'format': return [
         { label: 'Text', icon: 'text', edits: true, sub: () => [
@@ -402,8 +402,10 @@
       case 'tools': return [
         { label: 'Word count', icon: 'wordCount', sc: 'mod+shift+c', run: openWordCount },
         { label: 'Check spelling', checked: () => S.spellcheck !== false, run: () => setView('spellcheck', 'spellcheck', S.spellcheck === false) },
-        { label: 'Works Cited sources', icon: 'book', run: () => act('sources', undefined, { keep: true }) },
-        SEP,
+        { label: 'Sources', icon: 'book', hidden: () => M.opts.citations === false, run: () => act('sources', undefined, { keep: true }) }
+      ];
+      case 'help': return [
+        { label: 'Assignment instructions', icon: 'book', run: () => act('instructions', undefined, { keep: true }) },
         { label: 'Keyboard shortcuts', icon: 'keyboard', sc: 'mod+/', run: openShortcuts }
       ];
     }
@@ -891,20 +893,19 @@
     C.wc = el('button', 'dui-chip dui-chip-wc'); C.wc.type = 'button'; C.wc.tabIndex = -1;
     C.wc.dataset.tip = tipText('Word count', 'mod+shift+c');
     C.wc.addEventListener('click', () => { hideTip(); openWordCount(); });
-    T.ctrls.push(C.wc);
-    G('wc', 9, { side: 'right', rank: 9, on: () => !!wordsText() }, [C.wc]);
+    // The word count lives in the floating chip (as in Docs) unless the writer wants it here
+    if (M.opts.wcChip) { T.ctrls.push(C.wc); G('wc', 9, { side: 'right', rank: 9, on: () => !!wordsText() }, [C.wc]); }
     C.sources = el('button', 'dui-chip dui-chip-src', `${ic('book')}<span></span>`); C.sources.type = 'button'; C.sources.tabIndex = -1;
     C.sources.dataset.tip = 'Show your Works Cited sources';
     C.sources.addEventListener('click', () => { hideTip(); act('sources', undefined, { keep: true }); });
-    T.ctrls.push(C.sources);
-    G('src', 9, { side: 'right', rank: 3 }, [C.sources]);
+    // Sources sit in the writer's header unless it asks for them here
+    if (M.opts.sourcesChip && M.opts.citations !== false) { T.ctrls.push(C.sources); G('src', 9, { side: 'right', rank: 3 }, [C.sources]); }
     C.cite = el('button', 'dui-chip dui-chip-cite', `${ic('quote')}<span>Insert citation</span>`); C.cite.type = 'button'; C.cite.tabIndex = -1;
     C.cite.setAttribute('aria-haspopup', 'dialog'); C.cite.setAttribute('aria-expanded', 'false');
     C.cite.dataset.tip = 'Add an in-text citation where your cursor is';
     C.cite._edits = true;
     C.cite.addEventListener('click', e => { if (C.cite.getAttribute('aria-disabled') === 'true') return; hideTip(); togglePop(C.cite, citePicker, { kb: kbOf(e), edits: true, label: 'Insert a citation', align: 'end', cls: 'dui-pop-cite' }); });
-    T.ctrls.push(C.cite);
-    G('cite', 9, { side: 'right', rank: 2.5, on: () => S.citationAllowed === true }, [C.cite]);
+    if (M.opts.citations !== false) { T.ctrls.push(C.cite); G('cite', 9, { side: 'right', rank: 2.5, on: () => S.citationAllowed === true }, [C.cite]); }
 
     C.more = tbBtn('more', 'More', null, (e, b) => togglePop(b, () => T.ovfWrap, { kb: kbOf(e), owner: 'more', label: 'More tools', align: 'end', cls: 'dui-pop-more', onOpen: L => { if (kbOf(e)) { const f = L.el.querySelector('button:not([aria-disabled="true"]), input'); if (f) f.focus(); } } }), { popup: 'dialog', cls: 'dui-more' });
     T.moreG = el('div', 'dui-g dui-g-more'); T.moreG.appendChild(C.more);
@@ -1298,7 +1299,8 @@
   const byId = id => document.getElementById(id);
   const closeDlg = () => { if (typeof window.closeModal === 'function') window.closeModal(); };
 
-  function wcFloatOn() { return lsGet('visor-wc-float') === '1'; }
+  // On unless the student turned it off (Tools → Word count)
+  function wcFloatOn() { return lsGet('visor-wc-float') !== '0'; }
   function openWordCount() {
     if (!M) return;
     const wc = call('wordCount') || {};

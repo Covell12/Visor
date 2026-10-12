@@ -2,7 +2,8 @@
    Tabs: Document (with "Color by source"), Replay (replay-web.js), Process
    (the engine's view from app.js plus what only Visor's editor can measure),
    Research (the extension's log), Feedback. "Print / Save as PDF" prints the
-   essay, its Works Cited and, optionally, a one-page process summary.
+   essay, its Works Cited (when the assignment has a Works Cited page) and,
+   optionally, a one-page process summary.
 
    Everything here is a measurement. The notes for the teacher are written by
    rules (lib/process.js), not by AI, and none of them is a verdict. */
@@ -116,12 +117,31 @@ function rvEssayHtml(doc) {
   q.setContents(rvDelta(doc), 'silent');
   return q.root.innerHTML;
 }
+// Where the assignment keeps its sources: 'page' (a Works Cited page after the
+// essay; also older assignments without the setting), 'panel' or 'off'
+function rvWorksCited() {
+  const v = rv?.data?.assignment?.writing?.worksCited;
+  return v === 'panel' || v === 'off' ? v : 'page';
+}
 function rvBibHtml({ print = false } = {}) {
   const { doc, assignment: a } = rv.data;
   const bib = VisorCiteFormat.bibliography(doc.sources || [], a.writing?.citationStyle || 'mla');
   if (!bib.items.length) return '';
   const items = bib.items.map(i => `<li><span class="rv-bib-text">${i.html}</span>${!print && i.source.check?.length ? `<span class="rv-check" title="The student should check this source">Check: ${esc(i.source.check.join(', '))}</span>` : ''}</li>`).join('');
   return `<section class="rv-works ${print ? '' : `rv-page ${rvStyleClass()}`}" aria-label="${esc(bib.heading)}"><h2>${esc(bib.heading)}</h2><ol class="rv-bib">${items}</ol></section>`;
+}
+// Without a Works Cited page the sources aren't part of the essay: a separate
+// card under it, never printed. With citations off, any sources the student
+// added before then.
+function rvSourcesCardHtml() {
+  const wc = rvWorksCited();
+  if (wc === 'page') return '';
+  const { doc, assignment: a } = rv.data;
+  const bib = VisorCiteFormat.bibliography(doc.sources || [], a.writing?.citationStyle || 'mla');
+  if (!bib.items.length) return '';
+  const note = wc === 'panel' ? 'From the side panel next to the essay. Not part of the essay, and not printed.' : 'Added before citations were turned off for this assignment. Not part of the essay, and not printed.';
+  const items = bib.items.map(i => `<li><span class="rv-bib-text">${i.html}</span>${i.source.check?.length ? `<span class="rv-check" title="The student should check this source">Check: ${esc(i.source.check.join(', '))}</span>` : ''}</li>`).join('');
+  return `<section class="card card-pad rv-sources-card" aria-label="Sources"><div class="rv-sources-h"><h3 class="section-title">Sources</h3><span class="tiny muted">${note}</span></div><ol class="rv-bib">${items}</ol></section>`;
 }
 // The legend: each source's share of the text, and pictures as a count
 function rvLegend(surv) {
@@ -138,8 +158,9 @@ function rvDocument(body) {
     </div>
     <div class="rv-canvas">
       <div class="rv-page rv-essay ${rvStyleClass()}${rv.colored ? ' rv-colored' : ''}"><div id="rvQuill"></div></div>
-      ${rvBibHtml()}
-    </div>`;
+      ${rvWorksCited() === 'page' ? rvBibHtml() : ''}
+    </div>
+    ${rvSourcesCardHtml()}`;
   const q = rvReadOnlyQuill($('rvQuill'), rv.colored ? ['srccat'] : []);
   let d = rvDelta(doc);
   if (rv.colored) d = d.compose(rvSourceDelta(doc.text || '', surv.runs));
@@ -263,7 +284,8 @@ function rvPrintDialog() {
     footer: `<button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="rvPrint($('prSummary').checked)">Print</button>` });
 }
 // The essay on letter pages with 1 in margins, in its document style
-// (review-doc.css), then Works Cited on a new page, then the optional summary.
+// (review-doc.css), then Works Cited on a new page (only when the assignment
+// has a Works Cited page), then the optional summary.
 let rvPrinting = false;
 async function rvPrint(withSummary) {
   if (!rv || rvPrinting) return;
@@ -276,7 +298,7 @@ async function rvPrint(withSummary) {
   area.innerHTML = `<article class="rv-print-essay ${rvStyleClass()}">
       <header class="rv-print-head"><div class="rv-print-name">${esc(student.name)}</div><div>${esc(cls.name)}</div><div>${esc(a.title)}</div><div>${doc.submittedAt ? esc(new Date(doc.submittedAt).toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' })) : ''}</div></header>
       <div class="ql-editor rv-print-body">${rvEssayHtml(doc)}</div>
-      ${rvBibHtml({ print: true })}
+      ${rvWorksCited() === 'page' ? rvBibHtml({ print: true }) : ''}
     </article>
     ${withSummary ? `<article class="rv-print-summary">
       <h1>Writing process summary</h1>

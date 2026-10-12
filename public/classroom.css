@@ -109,51 +109,109 @@ details.more[open] summary { margin-bottom: 12px; }
    is doc-format.css (.doc-style-mla / .doc-style-docs); the menus, toolbar,
    find panel and outline are docs-editor.css. */
 body.writing { background: #F9FBFD; }
-body.writing .topbar { position: static; }
+/* The site's bar scrolls away above the editor; while a session runs the
+   editor has the whole window (writer.js adds .writing-focus) and the bar
+   slides up out of the way, as Docs has no site bar */
+body.writing #appView > .topbar { position: relative; transition: margin-top .35s var(--ease, ease), visibility 0s; }
+body.writing.writing-focus #appView > .topbar { margin-top: -62px; visibility: hidden; transition: margin-top .35s var(--ease, ease), visibility 0s .35s; }
+body.writing .route-view { min-height: 100vh; }
+/* The editor's own avatar menu only while the site's bar is away */
+body:not(.writing-focus) .wr-user { display: none; }
+/* Outside a session the site's bar is there, so the editor's own icon isn't */
+body:not(.writing-focus) .wr-logo { display: none; }
+body:not(.writing-focus) .wr-title-row { padding-left: 7px; }
+a.wr-cls { text-decoration: none; transition: border-color .15s, color .15s; }
+a.wr-cls:hover { border-color: var(--brand); color: var(--brand); }
 body.embed #appView > .topbar { display: none; }
 body.embed .route-view { min-height: 100vh; }
 /* Scrolling to the caret keeps it clear of the sticky header and toolbar */
 html:has(body.writing), body.writing { scroll-padding-top: calc(var(--dx-sticky-h, 120px) + 16px); scroll-padding-bottom: 32px; }
 .wr { --dx-canvas: #F9FBFD; --dx-page-shadow: 0 1px 3px 1px rgba(60,64,67,.15), 0 1px 2px rgba(60,64,67,.12); padding: 0 0 80px; }
-.wr-bar { position: sticky; top: 0; z-index: 30; background: #fff; border-bottom: 1px solid var(--line); padding: 8px 16px 0; }
-.wr-bar-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding-bottom: 6px; min-height: 40px; }
+/* The header, as in Docs: the Visor icon (back to the assignment), the
+   title with its class and the save cloud, the menus under the title, and on
+   the right the session, Instructions, Sources, End and Submit, and the avatar */
+.wr-bar { position: sticky; top: 0; z-index: 30; background: #F9FBFD; padding: 8px 16px 2px; }
+.wr-head { display: flex; align-items: flex-start; gap: 10px; }
+.wr-logo { flex: none; width: 40px; height: 40px; margin-top: 2px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; transition: background-color .15s; }
+.wr-logo:hover { background: #E8EEF2; }
+.wr-logo img { width: 30px; height: auto; }
+.wr-head-main { flex: 1; min-width: 0; }
+.wr-title-row { display: flex; align-items: center; gap: 10px; min-width: 0; min-height: 28px; padding: 2px 0 0 7px; }
 .dx-menubar-slot:empty { display: none; }
-.wr-title { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1; }
-.wr-back { text-decoration: none; font-size: 20px; color: var(--ink-2); width: 34px; height: 34px; display: inline-flex; align-items: center; justify-content: center; border-radius: 10px; }
-.wr-back:hover { background: var(--blue-soft); }
-.wr-title-text { min-width: 0; overflow: hidden; }   /* lets a long title end in "…" instead of running over the status */
-.wr-h { font-weight: 700; font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.wr-status { display: flex; align-items: center; gap: 4px 12px; font-size: 13px; flex-wrap: wrap; min-width: 0; }
+.wr-title { display: flex; align-items: center; min-width: 0; }
+.wr-h { margin: 0; font-weight: 500; font-size: 18px; line-height: 24px; color: #1F1F1F; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; letter-spacing: -.005em; }
+.wr-cls { flex: none; max-width: 30%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; color: var(--ink-2); padding: 1px 8px; border: 1px solid var(--line); border-radius: 999px; background: #fff; }
+/* The save cloud: a fixed slot, so "Saving…" / "Saved" / "Offline" never moves the rest of the header */
+.wr-saved { flex: none; display: inline-flex; align-items: center; gap: 5px; min-width: 6.6em; font-size: 12.5px; color: var(--ink-2); }
+.wr-saved svg { width: 18px; height: 18px; flex: none; }
+.wr-saved.offline { color: var(--amber); font-weight: 600; }
+.wr-saved.saving svg, .wr-saved.unsaved svg { animation: wrPulse 1.2s ease-in-out infinite; }
+@keyframes wrPulse { 50% { opacity: .35; } }
+.wr-head-right { flex: none; display: flex; align-items: center; gap: 10px; padding-top: 4px; }
+.wr-status { display: flex; align-items: center; gap: 8px; font-size: 13px; }
 .wr-status > * { white-space: nowrap; }
-.wr-rec { display: inline-flex; align-items: center; gap: 7px; color: var(--red); font-weight: 700; }
-.wr-timer { font-weight: 700; font-size: 14px; }
+.wr-rec { display: inline-flex; align-items: center; gap: 7px; padding: 4px 11px; border-radius: 999px; background: #FDECEC; color: #B3261E; font-weight: 600; }
+.wr-rec .live-dot { width: 7px; height: 7px; }
+.wr-timer { font-weight: 700; font-size: 13px; font-variant-numeric: tabular-nums; }
+.wr-timer:empty { display: none; }
 .wr-timer.low { color: var(--red); }
-/* A fixed slot, so "Saving…" / "Saved" / "Offline" never moves the rest of the header */
-.wr-saved { color: var(--ink-2); font-size: 12.5px; display: inline-block; min-width: 5.4em; text-align: left; }
-.wr-saved.offline { color: var(--amber); font-weight: 700; }
-.wr-actions { display: flex; gap: 8px; }
+.wr-actions { display: flex; align-items: center; gap: 6px; }
+.wr-hbtn { display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 12px; border: 0; border-radius: 18px; background: transparent; color: #444746; font-weight: 600; font-size: 13.5px; transition: background-color .15s, color .15s; }
+.wr-hbtn:hover { background: #E8EEF2; color: var(--ink); }
+.wr-hbtn[aria-expanded="true"] { background: #DCEBF2; color: var(--brand); }
+.wr-hbtn svg { width: 17px; height: 17px; flex: none; }
+.wr-hbtn .wr-hchev { width: 15px; height: 15px; transition: transform .25s cubic-bezier(.2, .7, .2, 1); }
+.wr-hbtn[aria-expanded="true"] .wr-hchev { transform: rotate(180deg); }
+.wr-hcount { min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--brand); color: #fff; font-size: 11px; line-height: 18px; text-align: center; }
+.wr-hcount:empty { display: none; }
+/* Submit: the pill Docs gives Share */
+.wr-actions .wr-submit { height: 36px; padding: 0 18px; border-radius: 18px; font-size: 14px; }
+.wr-actions .wr-submit svg { width: 15px; height: 15px; }
+.wr-actions .wr-end { height: 36px; border-radius: 18px; padding: 0 14px; }
+.wr-avatar { border: 0; background: none; padding: 3px; border-radius: 50%; display: inline-flex; transition: background-color .15s; }
+.wr-avatar:hover { background: #E8EEF2; }
+.wr-avatar .avatar { width: 32px; height: 32px; font-size: 12px; }
 /* The toolbar row, under the header; DocsUI draws the bar itself */
-.dx-toolbar-slot { position: sticky; top: var(--wr-bar-h, 96px); z-index: 25; background: var(--dx-canvas); padding: 6px 16px; }
+.dx-toolbar-slot { position: sticky; top: var(--wr-bar-h, 96px); z-index: 25; background: var(--dx-canvas); padding: 4px 16px 8px; }
 .dx-toolbar-slot:empty { display: none; }
 .dx-fallback-bar { display: flex; align-items: center; justify-content: flex-end; gap: 6px; flex-wrap: wrap; max-width: 816px; margin: 0 auto; }
 .wr-wc { font-size: 12.5px; color: var(--ink-2); margin-right: 6px; font-variant-numeric: tabular-nums; }
 .wr-tb-btn { border: 1.5px solid var(--line); background: #fff; border-radius: 999px; padding: 4px 10px; font-size: 12.5px; font-weight: 600; color: var(--ink); }
 .wr-tb-btn:hover { border-color: var(--blue); }
-.wr-banner-slot { max-width: 816px; margin: 10px auto 0; padding: 0 16px; }
+.dx-above > * { box-sizing: border-box; width: calc(8.5in * var(--dx-zoom, 1)); max-width: 100%; margin-left: auto; margin-right: auto; }
+.wr-banner-slot { margin-top: 12px; }
 .wr-banner-slot:empty { display: none; }
 .wr-banner { display: flex; align-items: center; gap: 10px; border-radius: var(--r); padding: 10px 14px; margin-bottom: 4px; font-size: 14px; background: var(--blue-soft); color: var(--ink); }
 .wr-banner span { flex: 1; }
 .wr-banner.warn { background: var(--amber-soft); }
 .wr-banner.teacher { background: var(--violet-soft); font-weight: 600; }
 /* Start, ended and feedback cards: centred above the page */
-.dx-intro { max-width: 816px; margin: 12px auto 0; padding: 0 16px; }
+.dx-intro { margin-top: 12px; }
 .dx-intro:empty { display: none; }
 .wr-card { margin-bottom: 4px; }
 .wr-describe { font-size: 14px; color: var(--ink-2); }
 .wr-instr-open { line-height: 1.65; margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
-.wr-instr { background: #fff; border-radius: var(--r); padding: 10px 16px; margin-bottom: 4px; box-shadow: var(--shadow-sm); }
-.wr-instr summary { cursor: pointer; font-weight: 600; font-size: 14px; }
-.wr-instr div { margin-top: 8px; line-height: 1.6; font-size: 14.5px; }
+.wr-start-h { font-weight: 700; font-size: 16px; margin-bottom: 4px; }
+/* The Instructions dropdown: a bar at the top of the canvas that opens smoothly
+   (its height animates from 0fr to 1fr) */
+.wr-instr-drop { margin-top: 14px; }
+.wr-instr-drop > * { background: #fff; }
+.wr-instr-head { width: 100%; display: flex; align-items: center; gap: 10px; padding: 11px 16px; border: 1px solid var(--line); border-radius: 10px; background: #fff; color: var(--ink); text-align: left; font: inherit; cursor: pointer; transition: border-radius .28s cubic-bezier(.2, .7, .2, 1), background-color .15s, box-shadow .15s; }
+.wr-instr-head:hover { background: #FBFCFD; box-shadow: 0 1px 4px rgba(16, 48, 61, .06); }
+.wr-instr-drop.open .wr-instr-head { border-radius: 10px 10px 0 0; border-bottom-color: transparent; }
+.wr-instr-chev { display: inline-flex; color: var(--ink-2); }
+.wr-instr-chev svg { width: 16px; height: 16px; transition: transform .28s cubic-bezier(.2, .7, .2, 1); }
+.wr-instr-drop.open .wr-instr-chev svg { transform: rotate(180deg); }
+.wr-instr-t { font-weight: 700; font-size: 14.5px; }
+.wr-instr-sum { margin-left: auto; font-size: 12.5px; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.wr-instr-body { display: grid; grid-template-rows: 0fr; border: 1px solid transparent; border-top: 0; border-radius: 0 0 10px 10px; transition: grid-template-rows .3s cubic-bezier(.2, .7, .2, 1), border-color .3s; }
+.wr-instr-drop.open .wr-instr-body { grid-template-rows: 1fr; border-color: var(--line); }
+.wr-instr-inner { overflow: hidden; min-height: 0; }
+.wr-instr-pad { padding: 2px 18px 16px 42px; opacity: 0; transform: translateY(-4px); transition: opacity .2s ease, transform .3s cubic-bezier(.2, .7, .2, 1); }
+.wr-instr-drop.open .wr-instr-pad { opacity: 1; transform: none; transition-delay: .06s; }
+.wr-instr-text { font-size: 15px; line-height: 1.65; overflow-wrap: anywhere; }
+.wr-instr-rules { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); font-size: 13.5px; color: var(--ink-2); line-height: 1.55; }
+.wr-instr-k { display: block; font-size: 12px; font-weight: 700; color: var(--ink); margin-bottom: 2px; }
 .wr-ext { display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 14px; font-weight: 600; }
 .wr-ext svg { width: 16px; height: 16px; }
 .wr-ext.ok { color: var(--green-deep); }
@@ -167,6 +225,51 @@ html:has(body.writing), body.writing { scroll-padding-top: calc(var(--dx-sticky-
 .dx-canvas { position: relative; display: flex; align-items: flex-start; padding: 0 16px; }
 .dx-outline { display: none; flex: none; width: 220px; box-sizing: border-box; position: sticky; top: calc(var(--wr-bar-h, 96px) + var(--dx-tb-h, 44px) + 12px); max-height: calc(100vh - var(--wr-bar-h, 96px) - var(--dx-tb-h, 44px) - 24px); overflow-y: auto; margin: 20px 12px 0 0; }
 .dx-canvas.dx-outline-on .dx-outline { display: block; }
+/* The Sources panel slides in to the right of the page (its inside keeps its
+   width, so nothing reflows while it opens) */
+.dx-side { flex: none; width: 0; opacity: 0; overflow: hidden; position: sticky; top: calc(var(--wr-bar-h, 96px) + var(--dx-tb-h, 44px) + 12px); margin: 20px 0 0; transition: width .3s cubic-bezier(.2, .7, .2, 1), opacity .2s ease, margin .3s cubic-bezier(.2, .7, .2, 1); }
+.dx-canvas.dx-side-on .dx-side { width: 320px; opacity: 1; margin-left: 16px; }
+.dx-side-inner { width: 320px; max-height: calc(100vh - var(--wr-bar-h, 96px) - var(--dx-tb-h, 44px) - 36px); display: flex; flex-direction: column; background: #fff; border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 1px 3px rgba(60, 64, 67, .1); box-sizing: border-box; }
+.dx-side-head { display: flex; align-items: center; gap: 8px; padding: 10px 8px 10px 16px; border-bottom: 1px solid var(--line); }
+.dx-side-head b { font-size: 15px; }
+.dx-side-style { font-size: 11.5px; font-weight: 700; color: var(--ink-2); padding: 1px 7px; border-radius: 999px; background: #EEF3F6; }
+.dx-side-head .btn-icon { margin-left: auto; }
+.dx-side-body { overflow-y: auto; padding: 12px 14px 16px; }
+.dx-side-note { margin: 0 0 12px; font-size: 12.5px; color: var(--ink-2); line-height: 1.5; }
+.dx-side-list { list-style: none; padding: 0; margin: 0 0 12px; display: flex; flex-direction: column; gap: 10px; }
+.dx-src { padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: #FBFCFD; transition: border-color .15s, box-shadow .15s; }
+.dx-src:hover { border-color: #C9D5DC; box-shadow: 0 2px 6px rgba(16, 48, 61, .06); }
+.dx-src-text { font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; padding-left: 1.4em; text-indent: -1.4em; }
+.dx-src-row { display: flex; align-items: center; gap: 4px; margin-top: 8px; flex-wrap: wrap; }
+.dx-src-in { flex: 1; min-width: 0; font-size: 12px; color: var(--ink-2); font-family: var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dx-src .btn-sm { padding: 4px 10px; }
+.dx-side-empty { padding: 14px; border: 1px dashed var(--field-line); border-radius: 8px; font-size: 13px; color: var(--ink-2); margin-bottom: 12px; }
+.dx-side-adds { display: flex; gap: 6px; }
+.dx-side-adds .btn { flex: 1; justify-content: center; }
+.dx-side-hint { margin: 8px 0 0; font-size: 12px; color: var(--ink-3); line-height: 1.45; }
+.wr-works-add { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+/* The source dialog: from a link, the details, or written */
+.src-tabs { margin-bottom: 16px; }
+.src-pane { display: none; }
+.src-pane.on { display: block; animation: vxPaneIn .2s var(--ease, ease); }
+@keyframes vxPaneIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+.src-find { display: flex; gap: 8px; }
+.src-find .input { flex: 1; }
+.src-found { display: flex; align-items: flex-start; gap: 8px; padding: 10px 12px; margin-bottom: 14px; border-radius: 8px; background: var(--green-soft); color: var(--green-deep); font-size: 13.5px; font-weight: 600; animation: vxPaneIn .25s var(--ease, ease); }
+.src-found.warn { background: var(--amber-soft); color: #8A5A10; }
+.src-found svg { width: 16px; height: 16px; flex: none; margin-top: 2px; }
+.input.needs { border-color: #E3A23B; box-shadow: 0 0 0 3px rgba(227, 155, 46, .16); }
+.src-preview { margin-top: 6px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 8px; background: #FBFCFD; }
+.src-preview-k { font-size: 11.5px; font-weight: 700; color: var(--ink-3); letter-spacing: .04em; text-transform: uppercase; margin-bottom: 4px; }
+.src-preview-t { font-family: 'Times New Roman', Tinos, Times, serif; font-size: 15px; line-height: 1.5; padding-left: 1.5em; text-indent: -1.5em; overflow-wrap: anywhere; }
+.src-preview-in { margin-top: 6px; font-size: 12.5px; color: var(--ink-2); }
+.src-preview-in:empty { display: none; }
+@media (max-width: 1100px) {
+  /* Narrower windows: the panel floats over the page's right edge */
+  .dx-side { position: fixed; right: 12px; top: calc(var(--dx-sticky-h, 120px) + 10px); margin: 0; z-index: 20; }
+  .dx-canvas.dx-side-on .dx-side { margin: 0; }
+  .dx-side-inner { box-shadow: 0 8px 28px rgba(16, 48, 61, .18); }
+}
 /* Not a scroll box: a page wider than the window (a big zoom, the outline
    open) scrolls the window sideways, with its scrollbar at the bottom of the
    window, and the paused card can stick in view as the window scrolls */
@@ -206,20 +309,30 @@ html:has(body.writing), body.writing { scroll-padding-top: calc(var(--dx-sticky-
 /* Side panel: compact. No outline, no page breaks, a fluid page with no zoom */
 .wr-embed { padding-bottom: 40px; }
 .wr-embed .wr-bar { padding: 6px 10px 0; }
-.wr-embed .wr-bar-row { min-height: 0; }
 /* The panel's own header already shows the title, "Session active" and the timer */
-.wr-embed .wr-title, .wr-embed .wr-rec, .wr-embed .wr-timer { display: none; }
-.wr-embed .wr-actions { margin-left: auto; }
+.wr-embed .wr-title-row .wr-title, .wr-embed .wr-rec, .wr-embed .wr-timer { display: none; }
+.wr-embed .wr-head { align-items: center; }
+.wr-embed .wr-title-row { padding-left: 0; }
+.wr-embed .wr-head-right { padding-top: 0; }
+.wr-embed .wr-actions .wr-submit, .wr-embed .wr-actions .wr-end { height: 30px; padding: 0 12px; font-size: 13px; }
 .wr-embed #dxMenubar { display: none; }
 .wr-embed .dx-toolbar-slot { padding: 4px 8px; }
 .wr-embed .dx-canvas { padding: 0 8px; }
 .wr-embed .dx-outline, .wr-embed .dx-breaks { display: none !important; }
 .wr-embed .dx-pages { overflow-x: visible; }
+.wr-embed .dx-above > * { width: auto; }
 .wr-embed .dx-page { width: auto; min-height: 62vh; margin: 8px 0; padding: 18px 16px; box-shadow: var(--shadow-sm); border-radius: var(--r); zoom: 1; }
 .wr-embed .dx-page .ql-editor { min-height: 50vh; }
+@media (max-width: 900px) {
+  .wr-cls, .wr-hbtn span:not(.wr-hcount), .wr-rec-t { display: none; }
+  .wr-hbtn { padding: 0 9px; }
+}
 @media (max-width: 720px) {
   .wr-bar { padding: 6px 10px 0; }
-  .wr-bar-row { gap: 8px; }
+  .wr-head { flex-wrap: wrap; }
+  .wr-head-right { width: 100%; justify-content: flex-end; padding-top: 0; }
+  .wr-instr-sum { display: none; }
+  .wr-instr-pad { padding-left: 18px; }
 }
 
 /* ---------- extension connect, profile extras ---------- */

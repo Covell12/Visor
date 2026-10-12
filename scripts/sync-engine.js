@@ -6,10 +6,11 @@
 //   lib/engine/changelog.js     — required by the server (process reports)
 //   public/engine/changelog.js  — loaded by the browser (replay)
 //
-// It also copies two shared modules the other way round, inside this repo
+// It also copies three shared modules the other way round, inside this repo
 // (the browser's copy is the one to edit):
-//   public/cite-format.js -> lib/cite.js         the citation formatter
-//   public/doc-format.js  -> lib/doc-format.js   the document model (formats, runs, deltas)
+//   public/cite-format.js     -> lib/cite.js             the citation formatter
+//   public/doc-format.js      -> lib/doc-format.js       the document model (formats, runs, deltas)
+//   public/assignment-text.js -> lib/assignment-text.js  an assignment's settings in plain words
 //
 // Run with `npm run sync-engine` (also runs before every deploy). If the
 // extension isn't next to this folder, the committed engine copies are left alone.
@@ -23,7 +24,8 @@ const TARGETS = [path.join(ROOT, 'lib', 'engine', 'changelog.js'), path.join(ROO
 // One file each, served to the browser and required by the server
 const SHARED = [
   [path.join(ROOT, 'public', 'cite-format.js'), path.join(ROOT, 'lib', 'cite.js')],
-  [path.join(ROOT, 'public', 'doc-format.js'), path.join(ROOT, 'lib', 'doc-format.js')]
+  [path.join(ROOT, 'public', 'doc-format.js'), path.join(ROOT, 'lib', 'doc-format.js')],
+  [path.join(ROOT, 'public', 'assignment-text.js'), path.join(ROOT, 'lib', 'assignment-text.js')]
 ];
 for (const [from, to] of SHARED) {
   if (!fs.existsSync(from)) continue;

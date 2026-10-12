@@ -12,7 +12,11 @@
      text   the entry as plain text
      html   the same with <i> where the style italicizes
      inText "(Lopez)", "(Lopez & Brooks, 2023)", "(Lopez 2023)"…
-     check  what's missing that a student should look up ("no author found") */
+     check  what's missing that a student should look up ("no author found")
+
+   A written source (type 'written') is one the student wrote or pasted
+   whole: { written, inTextWritten }. Its entry is their text as it is, with
+   *asterisks* around words for italics. */
 
 (function (root) {
   'use strict';
@@ -251,9 +255,29 @@
   }
 
   const STYLES = { mla: { entry: mla, inText: mlaInText, heading: 'Works Cited' }, apa: { entry: apa, inText: apaInText, heading: 'References' }, chicago: { entry: chicago, inText: chicagoInText, heading: 'Bibliography' } };
+  const sortKeyOf = text => text.replace(/^[“"]/, '').replace(/^(the|a|an)\s+/i, '').toLowerCase();
+
+  /* ---------------- Written by the student ---------------- */
+  // *words* in asterisks are italic: <i>words</i> in the HTML, plain words in
+  // the text. A lone asterisk, or one with a space inside it ("5 * 3"), stays.
+  const ITALIC = /\*(?=[^*\s])([^*]*[^*\s])\*/g;
+  function written(m, style) {
+    const raw = squash(m.written);
+    const text = raw.replace(ITALIC, '$1');
+    const html = esc(raw).replace(ITALIC, '<i>$1</i>');
+    // A best guess at the in-text citation: the first word before the first
+    // comma or period ("Smith, John." -> Smith), and in APA the year in
+    // parentheses ("(2021)", "(2021, March 3)") or n.d.
+    const head = text.split(/[,.]/)[0].trim().split(' ')[0] || '';
+    const word = head.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '').replace(/[^\p{L}\p{N}'’-]/gu, '') || 'Untitled';
+    const year = /\((\d{4})[a-z]?(?=[,)\s])/.exec(text);
+    const guess = style === 'apa' ? `(${word}, ${year ? year[1] : 'n.d.'})` : `(${word})`;
+    return { text, html, inText: squash(m.inTextWritten) || guess, sortKey: sortKeyOf(text), check: [] };
+  }
 
   function format(meta, style = 'mla', opts = {}) {
     const S = STYLES[style] || STYLES.mla;
+    if (meta && meta.type === 'written') return written(meta, STYLES[style] ? style : 'mla');
     const p = prepare(meta);
     if (!p.title) p.title = p.site || noProtocol(p.url) || 'Untitled';
     const accessed = toDate(opts.accessed || meta.accessed) || toDate(new Date());
@@ -261,8 +285,7 @@
     const check = [];
     if (!p.names.length) check.push('no author found');
     if (!p.date) check.push('no date found');
-    const sortKey = text.replace(/^[“"]/, '').replace(/^(the|a|an)\s+/i, '').toLowerCase();
-    return { text, html, inText: S.inText(p), sortKey, check };
+    return { text, html, inText: S.inText(p), sortKey: sortKeyOf(text), check };
   }
 
   // A list of sources as Works Cited / References / Bibliography, sorted

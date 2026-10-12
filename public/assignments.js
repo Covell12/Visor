@@ -10,16 +10,20 @@ const fromLocalInput = v => (v ? new Date(v).toISOString() : null);
 const siteLines = list => (list || []).join('\n');
 const STYLE_NAME = { mla: 'MLA 9', apa: 'APA 7', chicago: 'Chicago' };
 
-/* ====================== create / edit form ====================== */
-let af = null; // { classId, type, a (existing or null), groups, students, folders, folderId }
+/* ====================== create / edit form ======================
+   Two columns: the form, and beside it a live preview of what students will
+   see (afPreview, below). Narrow screens put the preview under the form. */
+let af = null; // { classId, className, type, a (existing or null), groups, students, folders, folderId }
 
 // opts.folderId: the folder a new assignment goes in (New inside a folder)
 async function openAssignmentForm(classId, type, existing = null, opts = {}) {
   // The roster and folders of this assignment's class (not whichever class page was open last)
   let students = cp?.cls?.id === classId ? cp.cls.students : null, folders = cp?.cls?.id === classId ? cp.folders : null;
-  if (!students || !folders) { try { const r = await api(`/api/classes/${classId}`); students = r.class.students; folders = r.folders || []; } catch {} }
+  // The class's name, for the preview's header
+  let className = cp?.cls?.id === classId ? cp.cls.name : ap?.data?.class?.id === classId ? ap.data.class.name : '';
+  if (!students || !folders) { try { const r = await api(`/api/classes/${classId}`); students = r.class.students; folders = r.folders || []; className = className || r.class.name; } catch {} }
   const folderId = existing ? existing.folderId || '' : opts.folderId || '';
-  af = { classId, type, a: existing, students: students || [], folders: folders || [], folderId, groups: JSON.parse(JSON.stringify(existing?.group?.groups || [])) };
+  af = { classId, className: className || '', type, a: existing, students: students || [], folders: folders || [], folderId, groups: JSON.parse(JSON.stringify(existing?.group?.groups || [])) };
   const a = existing || { title: '', instructions: '', dueAt: null, writing: CFG.writingPresets?.homework?.writing, discussion: { date: null, shareOwnStats: false } };
   const titles = { writing: 'writing assignment', group: 'group project', discussion: 'discussion' };
   const common = `
@@ -35,8 +39,20 @@ async function openAssignmentForm(classId, type, existing = null, opts = {}) {
   if (type === 'discussion') extra = `
     <div class="field"><label for="afDiscDate">Discussion date</label><input id="afDiscDate" class="input" type="datetime-local" value="${toLocalInput(a.discussion?.date)}" /></div>
     <label class="check-row"><input id="afShare" type="checkbox" ${a.discussion?.shareOwnStats ? 'checked' : ''} /> <span>Let each student see their own talk time and turns (never anyone else’s)</span></label>`;
-  openModal({ title: `${existing ? 'Edit' : 'New'} ${titles[type]}`, wide: true, body: common + extra + `<div id="afErr" class="form-error hidden"></div>`,
+  const body = `<div class="af-layout">
+      <div class="af-form" id="afForm">
+        <button type="button" class="btn btn-ghost btn-sm af-jump" onclick="$('afPreview').scrollIntoView({ behavior: 'smooth', block: 'start' })">${I.eye}Preview</button>
+        ${common}${extra}<div id="afErr" class="form-error hidden"></div>
+      </div>
+      <aside class="af-preview" id="afPreview" aria-label="Preview: what students will see"></aside>
+    </div>`;
+  openModal({ title: `${existing ? 'Edit' : 'New'} ${titles[type]}`, wide: true, body,
     footer: `<button class="btn btn-ghost" onclick="closeModal()">Cancel</button>${existing ? '' : `<button class="btn btn-ghost" onclick="saveAssignment(false)">Save as draft</button>`}<button class="btn btn-primary" onclick="saveAssignment(${existing ? 'null' : 'true'})">${existing ? 'Save changes' : 'Save and publish'}</button>` });
+  $('modalBody').closest('.modal').classList.add('wider');
+  afPreviewMount();
+  // Every keystroke and change in the form updates the preview
+  $('afForm').addEventListener('input', afPreviewSoon);
+  $('afForm').addEventListener('change', afPreviewSoon);
   if (type === 'writing') syncWritingForm();
   if (type === 'group') renderGroupBuilder();
   setTimeout(() => $('afTitle')?.focus(), 50);
@@ -55,6 +71,7 @@ function folderOptions(folders, current) {
 function writingFields(w, showPresets) {
   const opt = (v, cur, label) => `<option value="${v}" ${v === cur ? 'selected' : ''}>${label}</option>`;
   const docStyle = w.docStyle === 'docs' ? 'docs' : 'mla'; // missing on older assignments: MLA
+  const worksCited = ['panel', 'off'].includes(w.worksCited) ? w.worksCited : 'page'; // missing on older assignments: a page
   return `
     ${showPresets ? `<div class="kicker" style="margin:16px 0 8px;">Start from a preset</div>
     <div class="preset-row">
@@ -71,6 +88,7 @@ function writingFields(w, showPresets) {
       <div class="field"><label for="afWinEnd">…until <span class="label-note">optional</span></label><input id="afWinEnd" class="input" type="datetime-local" value="${toLocalInput(w.windowEnd)}" /><div class="hint">Sessions still open at this time end automatically.</div></div>
       <div class="field"><label for="afPaste">Pasting</label><select id="afPaste" class="input">${opt('allow', w.allowPaste, 'Allowed (every paste is recorded)')}${opt('internal-only', w.allowPaste, 'Only text copied from this same essay')}${opt('block', w.allowPaste, 'Off')}</select></div>
       <div class="field"><label for="afStyle">Citation style</label><select id="afStyle" class="input">${opt('mla', w.citationStyle, 'MLA 9')}${opt('apa', w.citationStyle, 'APA 7')}${opt('chicago', w.citationStyle, 'Chicago')}</select></div>
+      <div class="field" style="grid-column:1/-1;"><label for="afWorksCited">Works Cited</label><select id="afWorksCited" class="input" style="max-width:420px;" onchange="syncWritingForm()">${opt('page', worksCited, 'A page after the essay (built from cited sources)')}${opt('panel', worksCited, 'A side panel next to the essay')}${opt('off', worksCited, 'Off: students write their own')}</select><div class="hint" id="afWcHint"></div></div>
       <div class="field" style="grid-column:1/-1;"><label for="afDocStyle">Document style</label><select id="afDocStyle" class="input" style="max-width:420px;">${opt('mla', docStyle, 'MLA essay (Times New Roman 12, double-spaced)')}${opt('docs', docStyle, 'Docs default (Arial 11, 1.15 spacing)')}</select><div class="hint">The font, size and line spacing every essay starts with. Students can still change them as they write.</div></div>
       <div class="field"><label for="afMin">Minimum words <span class="label-note">optional</span></label><input id="afMin" class="input" type="number" min="1" value="${w.minWords ?? ''}" /></div>
       <div class="field"><label for="afMax">Maximum words <span class="label-note">optional</span></label><input id="afMax" class="input" type="number" min="1" value="${w.maxWords ?? ''}" /></div>
@@ -79,7 +97,7 @@ function writingFields(w, showPresets) {
     <label class="check-row"><input id="afResearch" type="checkbox" ${w.researchTracking ? 'checked' : ''} /> <span>Record research during sessions (searches, pages visited and for how long, text copied). Only while a session is running.</span></label>
     <label class="check-row"><input id="afBlockAi" type="checkbox" ${w.blockAiSites ? 'checked' : ''} /> <span>Block AI sites during sessions (on by default; when it's off, visits are only recorded). Blocking works through the Visor extension.</span></label>
     <label class="check-row" id="afPanelRow"><input id="afPanel" type="checkbox" ${w.panelBrowsing !== false ? 'checked' : ''} /> <span>Let students switch to the side panel to research (leaves full screen; blocked and AI sites stay blocked, everything is recorded) <span class="muted small" id="afPanelNote"></span></span></label>
-    <label class="check-row"><input id="afCite" type="checkbox" ${w.oneClickCite !== false ? 'checked' : ''} /> <span>Let students cite a page in one click with the Visor extension (Cite this page, right-click, Alt+Shift+C). Sources added by hand always work.</span></label>
+    <label class="check-row" id="afCiteRow"><input id="afCite" type="checkbox" ${w.oneClickCite !== false || worksCited === 'off' ? 'checked' : ''} /> <span>Let students cite a page in one click with the Visor extension (Cite this page, right-click, Alt+Shift+C). Sources added by hand always work. <span class="muted small" id="afCiteNote"></span></span></label>
     <label class="check-row"><input id="afAuto" type="checkbox" ${w.autoSubmitOnTimeUp ? 'checked' : ''} /> <span>Submit automatically when time runs out</span></label>
     <details class="more"><summary>Sites, starter text and pauses</summary>
       <div class="field" id="afAllowedWrap"><label for="afAllowed">Allowed sites in locked sessions <span class="label-note">optional</span></label><textarea id="afAllowed" class="input mono small" style="min-height:70px;" placeholder="One per line, e.g. en.wikipedia.org&#10;Leave empty to allow any site that isn't blocked">${esc(siteLines(w.allowedSites))}</textarea></div>
@@ -110,6 +128,20 @@ function syncWritingForm() {
   $('afPanel').disabled = !locked;
   $('afPanelRow').classList.toggle('dim', !locked);
   $('afPanelNote').textContent = locked ? '' : '(locked sessions only)';
+  // With Works Cited off there are no citation tools, so no one-click citing
+  // either. Turning them back on puts the box back as it was.
+  const wc = $('afWorksCited').value, cite = $('afCite');
+  if (wc === 'off' && !cite.disabled) { af.citeWas = cite.checked; cite.checked = false; }
+  if (wc !== 'off' && cite.disabled) cite.checked = af.citeWas !== false;
+  cite.disabled = wc === 'off';
+  $('afCiteRow').classList.toggle('dim', wc === 'off');
+  $('afCiteNote').textContent = wc === 'off' ? '(citation tools are off)' : '';
+  $('afWcHint').textContent = {
+    page: 'Built from the sources students cite, in the citation style above, and printed with the essay.',
+    panel: 'Students keep their sources in a panel beside the essay. No Works Cited page is attached or printed.',
+    off: 'No citation tools: students type their own citations and Works Cited in the essay.'
+  }[wc];
+  afPreviewSoon();
 }
 
 function collectWriting() {
@@ -122,10 +154,151 @@ function collectWriting() {
     minWords: $('afMin').value || null, maxWords: $('afMax').value || null,
     requireExtension: $('afExt').checked, researchTracking: $('afResearch').checked,
     blockAiSites: $('afBlockAi').checked, autoSubmitOnTimeUp: $('afAuto').checked,
-    panelBrowsing: $('afPanel').checked, oneClickCite: $('afCite').checked,
+    panelBrowsing: $('afPanel').checked, oneClickCite: $('afCite').checked, worksCited: $('afWorksCited').value,
     allowedSites: lines('afAllowed'), blockedSites: lines('afBlocked'),
     templateText: $('afTemplate').value, pauseGraceSec: $('afGrace').value || 0
   };
+}
+
+/* ---- live preview: what students will see ----
+   Writing: a small, non-interactive copy of Visor's editor (header, menus,
+   toolbar, the instructions, the settings line, the letter page in its
+   document style, then the Works Cited page or the Sources panel). Group
+   projects and discussions: the assignment as a student opens it.
+   Built once when the form opens, then changed in place on every input, so
+   nothing flashes. What the teacher types goes in as text, never as HTML. */
+const AFP_PAGE_W = 816;   // a letter page (8.5 in) in CSS pixels
+const AFP_SIDE_W = 128;   // the Sources panel and the gap before it
+// A whole number above 0, or null (boxes can be empty or half-typed)
+const afpNum = v => { const n = Math.round(Number(v)); return v !== '' && v != null && Number.isFinite(n) && n > 0 ? n : null; };
+const afpDate = v => { try { return fromLocalInput(v); } catch { return null; } };
+let afpFrame = 0, afpObserver = null;
+function afPreviewSoon() { cancelAnimationFrame(afpFrame); afpFrame = requestAnimationFrame(afPreview); }
+
+function afPreviewMount() {
+  const el = $('afPreview'); if (!el) return;
+  const head = `<div class="afp-head"><span class="kicker">Preview</span><span class="afp-head-note">What students will see</span></div>`;
+  if (af.type === 'writing') {
+    el.innerHTML = `${head}
+      <div class="afp-frame" aria-hidden="true">
+        <div class="afp-top">
+          <div class="afp-bar">
+            <div class="afp-title"><div class="afp-h" data-afp="title"></div><div class="afp-cls">${esc(af.className || 'Your class')}</div></div>
+            <span class="afp-chip" data-afp="mode"></span><span class="afp-chip" data-afp="limit"></span><span class="afp-submit">Submit</span>
+          </div>
+          <div class="afp-menu">${['File', 'Edit', 'View', 'Insert', 'Format', 'Tools', 'Help'].map(m => `<span>${m}</span>`).join('')}</div>
+        </div>
+        <div class="afp-tools"><div class="afp-tb">
+          <span>↶</span><span>↷</span><i></i><span>100%</span><i></i><span>Normal text</span><i></i><span class="afp-font" data-afp="font"></span><i></i><span data-afp="size"></span><i></i><b>B</b><em>I</em><u>U</u><i></i><span class="afp-lines"><s></s><s></s><s></s></span>
+          <span class="afp-cite">Cite</span>
+        </div></div>
+        <div class="afp-canvas">
+          <div class="afp-instr"><div class="afp-instr-h">Instructions</div><div class="afp-instr-b" data-afp="instr"></div></div>
+          <div class="afp-describe" data-afp="describe"></div>
+          <div class="afp-pages" data-afp="pages">
+            <div class="afp-col">
+              <div class="afp-sheet afp-sheet-essay"><div class="afp-paper" data-afp="paper"><div class="ql-editor" data-afp="text"></div></div></div>
+              <div class="afp-sheet afp-sheet-wc"><div class="afp-paper" data-afp="wcpaper"><div class="ql-editor"><p class="afp-wc-h" data-afp="wchead"></p><p class="afp-wc-line"></p><p class="afp-wc-line afp-wc-hang"></p><p class="afp-wc-line afp-wc-short"></p></div></div></div>
+            </div>
+            <div class="afp-side"><div class="afp-side-in"><div class="afp-side-h">Sources</div>${'<div class="afp-src"><i></i><i></i></div>'.repeat(2)}<div class="afp-side-add">+ Add a source</div></div></div>
+          </div>
+        </div>
+      </div>
+      <div class="afp-notes">${['paste', 'ai', 'ext', 'words', 'window'].map(k => `<span class="afp-note" data-note="${k}" hidden></span>`).join('')}</div>`;
+  } else {
+    el.innerHTML = `${head}
+      <div class="afp-card" aria-hidden="true">
+        <div class="afp-card-top">${typeIcon(af.type)}<div class="afp-card-title"><div class="afp-card-h" data-afp="title"></div>
+          <div class="afp-card-meta"><span>${esc(TYPE_LABEL[af.type] || '')}</span><span data-afp="due"></span></div></div></div>
+        ${af.type === 'discussion' ? `<div class="afp-card-date">${PI.cal}<span data-afp="date"></span></div>` : ''}
+        <div class="afp-card-instr" data-afp="instr"></div>
+        <div class="afp-card-foot" data-afp="foot"></div>
+      </div>`;
+  }
+  af.preview = {};
+  // The page's size follows the column's width (it moves under the form on narrow screens)
+  afpObserver?.disconnect(); afpObserver = null;
+  if (af.type === 'writing' && window.ResizeObserver) { afpObserver = new ResizeObserver(afFitPage); afpObserver.observe(el.querySelector('[data-afp="pages"]')); }
+  afPreview();
+}
+
+// The letter page as large as fits (beside the Sources panel when there is one)
+function afFitPage() {
+  const pages = document.querySelector('#afPreview [data-afp="pages"]'); if (!pages) return;
+  const room = pages.clientWidth - (pages.closest('.afp-frame').dataset.wc === 'panel' ? AFP_SIDE_W : 0);
+  if (room <= 0) return;   // not on screen
+  pages.style.setProperty('--afp-s', Math.max(0.2, Math.min(0.56, room / AFP_PAGE_W)).toFixed(4));
+}
+
+function afPreview() {
+  const el = $('afPreview');
+  if (!el || !af?.preview || !$('afTitle')) return;
+  try { afPreviewNow(el); } catch (e) { console.warn('preview', e); } // the form matters more than its preview
+}
+function afPreviewNow(el) {
+  const st = af.preview, q = k => el.querySelector(`[data-afp="${k}"]`);
+  // Set a node's text only when it changed
+  const put = (k, text) => { if (st[k] === text) return false; st[k] = text; const n = q(k); if (n) n.textContent = text; return true; };
+  put('title', $('afTitle').value.trim() || 'Untitled assignment');
+  const instr = $('afInstr').value.replace(/^\s*\n|\s+$/g, '');
+  const prompt = af.type === 'discussion' ? 'prompt' : 'instructions';
+  if (put('instr', instr || `Your ${prompt} will show here.`)) q('instr').classList.toggle('is-empty', !instr);
+
+  if (af.type !== 'writing') {
+    put('due', vcDue(afpDate($('afDue').value)));
+    if (af.type === 'discussion') {
+      const d = afpDate($('afDiscDate').value);
+      put('date', d ? `Discussion ${vcDateTime(d)}` : 'No discussion date yet');
+      put('foot', $('afShare').checked ? 'After the discussion, each student can see their own talk time and turns.' : 'Only you see the discussion’s results.');
+    } else put('foot', 'Each student also sees their group and its project.');
+    return;
+  }
+
+  const w = collectWriting();
+  const locked = w.mode === 'locked', mla = w.docStyle !== 'docs';
+  if (put('mode', locked ? 'Locked · full screen' : 'Open')) q('mode').classList.toggle('is-locked', locked);
+  const limit = afpNum(w.timeLimitMin);
+  put('limit', limit ? `${limit} min` : 'No time limit');
+  put('describe', window.VisorAssignmentText ? VisorAssignmentText.describeWriting(w) : '');
+  // Long instructions fade out at the bottom of their box
+  const ib = q('instr');
+  ib.classList.toggle('is-long', ib.scrollHeight > ib.clientHeight + 1);
+
+  // The page, in the document style every essay starts with
+  put('font', mla ? 'Times New Roman' : 'Arial');
+  put('size', mla ? '12' : '11');
+  if (st.style !== mla) {
+    st.style = mla;
+    for (const k of ['paper', 'wcpaper']) { q(k).classList.toggle('doc-style-mla', mla); q(k).classList.toggle('doc-style-docs', !mla); }
+  }
+  const starter = w.templateText.trim() ? w.templateText : '';
+  if (put('text', starter || 'Start writing…')) q('text').classList.toggle('is-empty', !starter);
+
+  // Works Cited: a page after the essay, a panel beside it, or nothing
+  const wc = ['panel', 'off'].includes(w.worksCited) ? w.worksCited : 'page';
+  put('wchead', window.VisorCiteFormat ? VisorCiteFormat.headingFor(w.citationStyle) : 'Works Cited');
+  const frame = el.querySelector('.afp-frame');
+  if (frame.dataset.wc !== wc) { frame.dataset.wc = wc; afFitPage(); }
+
+  // Small notes under the editor
+  const most = afpNum(w.maxWords), least = afpNum(w.minWords);
+  const start = w.windowStart ? vcDateTime(w.windowStart) : '', end = w.windowEnd ? vcDateTime(w.windowEnd) : '';
+  const notes = {
+    paste: { allow: 'Pasting: allowed', 'internal-only': 'Pasting: only from this essay', block: 'Pasting: off' }[w.allowPaste] || '',
+    ai: w.blockAiSites ? 'AI sites blocked' : 'AI sites recorded only',
+    ext: w.requireExtension || locked ? 'Visor extension required' : '',
+    words: least && most ? `${least}–${most} words` : least ? `At least ${least} words` : most ? `At most ${most} words` : '',
+    window: start && end ? `Sessions ${start} to ${end}` : start ? `Sessions from ${start}` : end ? `Sessions until ${end}` : ''
+  };
+  for (const [k, text] of Object.entries(notes)) {
+    const was = st[`note-${k}`];
+    if (was === text) continue;
+    st[`note-${k}`] = text;
+    const n = el.querySelector(`[data-note="${k}"]`);
+    n.textContent = text; n.hidden = !text;
+    // A note that appears fades in
+    if (text && !was) { n.classList.remove('afp-in'); void n.offsetWidth; n.classList.add('afp-in'); }
+  }
 }
 
 // publish: true = save and publish, false = save as draft, null = edit (keep as is)
@@ -323,7 +496,9 @@ function renderAssignmentOverview(body) {
       ['AI sites', `${w.blockAiSites ? 'Blocked' : 'Recorded, not blocked'} (${w.blockedSites.length} sites)`],
       ['Allowed sites', w.mode === 'locked' ? (w.allowedSites.length ? w.allowedSites.join(', ') : 'Any site that isn’t blocked') : 'Not limited (open session)'],
       ...(w.mode === 'locked' ? [['Side panel', w.panelBrowsing !== false ? 'Students can switch to it to research (blocked and AI sites stay blocked)' : 'Off: locked sessions stay in full screen']] : []),
-      ['Citations', `${STYLE_NAME[w.citationStyle]}${w.oneClickCite === false ? ' · one-click citing off' : ''}`],
+      // (with Works Cited off there are no citation tools, one-click or not)
+      ['Citations', `${STYLE_NAME[w.citationStyle]}${w.oneClickCite === false && w.worksCited !== 'off' ? ' · one-click citing off' : ''}`],
+      ['Works Cited', { panel: 'A side panel next to the essay (no Works Cited page)', off: 'Off: students write their own (no citation tools)' }[w.worksCited] || 'A page after the essay, built from the sources students cite'],
       ['Document style', w.docStyle === 'docs' ? 'Docs default' : 'MLA essay'],
       ['Length', w.minWords || w.maxWords ? `${w.minWords || 0}–${w.maxWords || '∞'} words` : 'Any'],
       ['Starter text', w.templateText ? `${w.templateText.length.toLocaleString()} characters` : 'None'],

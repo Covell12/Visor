@@ -31,3 +31,10 @@ test('lib/doc-format.js is identical to public/doc-format.js', () => {
   const b = fs.readFileSync(path.join(ROOT, 'public', 'doc-format.js'));
   assert.ok(a.equals(b), 'run `npm run sync-engine`');
 });
+
+// An assignment's settings in plain words: edited in public/, copied to lib/
+test('lib/assignment-text.js is identical to public/assignment-text.js', () => {
+  const a = fs.readFileSync(path.join(ROOT, 'lib', 'assignment-text.js'));
+  const b = fs.readFileSync(path.join(ROOT, 'public', 'assignment-text.js'));
+  assert.ok(a.equals(b), 'run `npm run sync-engine`');
+});

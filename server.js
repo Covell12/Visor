@@ -38,6 +38,7 @@ const writing = require('./lib/writing');
 const sessionsLib = require('./lib/sessions');
 const research = require('./lib/research');
 const citeFormat = require('./lib/cite');
+const citeLookup = require('./lib/cite-lookup');
 const processLib = require('./lib/process');
 const discussionLib = require('./lib/discussion');
 // The document format shared with the editor (a copy of public/doc-format.js)
@@ -2572,8 +2573,10 @@ app.post('/api/write/:docId/submit', ah(async (req, res) => {
 // counted as the student's writing. The in-text citation the editor inserts
 // is an ordinary op with src:'cite'.
 
-const SOURCE_FIELDS = { url: 2000, canonicalUrl: 2000, title: 300, siteName: 150, publisher: 150, published: 20, modified: 20, doi: 200, journal: 150, volume: 40, issue: 40, pages: 40 };
-const SOURCE_TYPES = ['webpage', 'article', 'journal', 'video', 'book'];
+// A 'written' source is the whole citation as the student wrote or pasted it
+// (written), with the in-text citation they want (inTextWritten, optional).
+const SOURCE_FIELDS = { url: 2000, canonicalUrl: 2000, title: 300, siteName: 150, publisher: 150, published: 20, modified: 20, doi: 200, journal: 150, volume: 40, issue: 40, pages: 40, written: 1500, inTextWritten: 120 };
+const SOURCE_TYPES = ['webpage', 'article', 'journal', 'video', 'book', 'written'];
 function cleanSource(raw = {}, base = {}) {
   const src = { ...base };
   for (const [k, max] of Object.entries(SOURCE_FIELDS)) if (raw[k] !== undefined) src[k] = cleanText(String(raw[k] ?? ''), max);
@@ -2598,20 +2601,26 @@ const activeSessionOf = async docId => (await repo.listRecords('session', { docI
 
 // Add a source (the cite button, or the student by hand). The same page twice
 // is one source. Returns { source, existing }. The extension's one-click cite
-// sends via: 'extension', which the teacher can turn off.
+// sends via: 'extension', which the teacher can turn off. With Works Cited
+// off there are no citation tools at all, so nothing is added (sources a
+// document already has can still be edited or deleted).
 app.post('/api/write/:docId/sources', ah(async (req, res) => {
   const got = await sourceDocFor(req);
+  if (got.a.writing?.worksCited === 'off') throw new HttpError(403, 'Citations are turned off for this assignment.');
   if (req.body?.via === 'extension' && got.a.writing?.oneClickCite === false) throw new HttpError(403, 'One-click citing is turned off for this assignment.');
   const style = got.a.writing?.citationStyle || 'mla';
   const t = Date.now();
   const s = await activeSessionOf(got.doc.id);
   let src = cleanSource(req.body?.source || {});
-  if (!src.title && !src.url) throw new HttpError(400, 'A source needs at least a title or a link.');
+  const written = src.type === 'written';
+  if (written && !src.written) throw new HttpError(400, 'Write or paste the citation.');
+  if (!written && !src.title && !src.url) throw new HttpError(400, 'A source needs at least a title or a link.');
   src = withFormatting({ ...src, id: uid(), accessed: new Date(t).toISOString().slice(0, 10), addedAt: new Date(t).toISOString(), sessionId: s?.id || null }, style);
   let existing = false;
   const doc = await repo.updateRecord('doc', got.doc.id, d => {
     d.sources = d.sources || [];
-    const same = src.url && d.sources.find(x => (x.canonicalUrl || x.url) === (src.canonicalUrl || src.url));
+    // Written sources are the student's own words, so never "the same page"
+    const same = !written && src.url && d.sources.find(x => x.type !== 'written' && (x.canonicalUrl || x.url) === (src.canonicalUrl || src.url));
     if (same) { existing = true; src = same; return; }
     if (d.sources.length >= 200) throw new HttpError(400, 'At most 200 sources.');
     d.sources.push(src);
@@ -2621,13 +2630,32 @@ app.post('/api/write/:docId/sources', ah(async (req, res) => {
     await repo.withRecords(async tx => {
       const sess = await tx.get('session', s.id);
       const last = sess.researchLast != null ? await tx.get('research', research.chunkId(sess.id, sess.researchLast)) : null;
-      const chunks = research.appendEvents(sess, last, [{ t, type: 'cite', url: src.url, host: (() => { try { return new URL(src.url).hostname; } catch { return ''; } })(), title: src.title, sourceId: src.id }]);
+      const chunks = research.appendEvents(sess, last, [{ t, type: 'cite', url: src.url, host: (() => { try { return new URL(src.url).hostname; } catch { return ''; } })(), title: src.title || (src.written || '').slice(0, 300), sourceId: src.id }]);
       for (const c of chunks) tx.put('research', c);
       sess.researchLast = chunks[chunks.length - 1].no;
       tx.put('session', sess);
     });
   }
   res.json({ source: src, existing, sources: doc.sources });
+}));
+
+// Look a source up from a link, a DOI or an ISBN, for the editor to fill its
+// form from (lib/cite-lookup.js). Nothing is saved. { query } -> { source,
+// found, missing, via }. A page that can't be read is a 422, never a 500.
+// Private addresses are let through only for tests on a local stub server.
+app.post('/api/write/:docId/sources/lookup', ah(async (req, res) => {
+  const got = await sourceDocFor(req);
+  if (got.a.writing?.worksCited === 'off') throw new HttpError(403, 'Citations are turned off for this assignment.');
+  if (!citeLookup.rateLimit(got.me.id)) throw new HttpError(429, 'Too many lookups. Wait a minute, or fill in the details yourself.');
+  const allowPrivate = process.env.VISOR_CITE_ALLOW_PRIVATE === '1' && process.env.NODE_ENV !== 'production' && !IS_PROD;
+  let out;
+  try {
+    out = await citeLookup.lookup(req.body?.query, { allowPrivate });
+  } catch (e) {
+    if (e instanceof citeLookup.LookupError) throw new HttpError(e.status, e.message);
+    throw new HttpError(422, citeLookup.MESSAGES.page);
+  }
+  res.json({ source: cleanSource(out.source), found: out.found, missing: out.missing, via: out.via });
 }));
 
 // Edit a source by hand (recorded as a session event when one is running)
