@@ -277,7 +277,7 @@ function assignmentRightHtml() {
   const details = box('Details', `<div class="side-box-b">
       <div class="side-stat"><span>Type</span><b>${esc(TYPE_LABEL[a.type] || '')}</b></div>
       ${a.type === 'writing' ? `<div class="side-stat"><span>Session</span><b>${a.writing.mode === 'locked' ? 'Locked (in class)' : 'Open'}</b></div>
-        <div class="side-stat"><span>Time limit</span><b>${a.writing.timeLimitMin ? `${a.writing.timeLimitMin} min` : 'None'}</b></div>
+        ${isTeacher ? `<div class="side-stat"><span>Time limit</span><b>${a.writing.timeLimitMin ? `${a.writing.timeLimitMin} min` : 'None'}</b></div>` : ''}
         ${a.writing.minWords || a.writing.maxWords ? `<div class="side-stat"><span>Length</span><b>${a.writing.minWords || 0}–${a.writing.maxWords || '∞'} words</b></div>` : ''}` : ''}
       ${a.type === 'discussion' && a.discussion?.date ? `<div class="side-stat"><span>Discussion</span><b>${esc(vcDateTime(a.discussion.date))}</b></div>` : ''}
       ${a.dueAt || a.type !== 'discussion' ? `<div class="side-stat"><span>Due</span><b>${a.dueAt ? esc(vcDateTime(a.dueAt)) : 'No due date'}</b></div>` : ''}
@@ -394,7 +394,7 @@ async function openDuplicate(id) {
 }
 async function deleteAssignment() {
   const a = ap.data.assignment;
-  if (!await confirmModal('Delete this assignment?', `"${a.title}" and all student work, sessions, research${a.type === 'group' ? ', group projects' : ''}${a.type === 'discussion' ? ', recordings' : ''} in it will be deleted. This cannot be undone.`, { okLabel: 'Delete', danger: true })) return;
+  if (!await confirmModal('Delete this assignment?', `"${a.title}" and all student work, sessions and research${a.type === 'group' ? ', group projects' : ''}${a.type === 'discussion' ? ', recordings' : ''} in it will be deleted. This cannot be undone.`, { okLabel: 'Delete', danger: true })) return;
   try { await api(`/api/assignments/${a.id}`, { method: 'DELETE' }); toast('Assignment deleted'); VisorRouter.go(`/class/${ap.data.class.id}${a.folderId ? '?folder=' + a.folderId : ''}`); }
   catch (e) { toast(e.message, 'err'); }
 }

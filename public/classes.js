@@ -221,18 +221,18 @@ function coursesMenuHtml(list) {
   const teacher = me.role === 'teacher';
   return `<div class="cm-head"><b>My courses</b>${archived ? `<a class="tiny" href="/?archived=1" data-link onclick="ddClose()">Archived (${archived})</a>` : ''}</div>
     ${active.length ? `<div class="cm-grid">${active.map(c => `<a class="cm-item" href="/class/${c.id}" data-link onclick="ddClose()">${courseArt(c, 'cm-thumb')}<span class="cm-text"><span class="cm-name">${esc(c.name)}</span><span class="cm-sub">${c.isTeacher ? vcPlural(c.studentCount, 'student') : esc(c.teacher?.name || '')}</span></span></a>`).join('')}</div>`
-      : `<div class="cm-empty">${teacher ? 'You haven’t made a class yet.' : 'You’re not in a class yet. Ask your teacher for the access code.'}</div>`}
+      : `<div class="cm-empty">${archived ? 'All your classes are archived.' : teacher ? 'You haven’t made a class yet.' : 'You’re not in a class yet. Ask your teacher for the access code.'}</div>`}
     <div class="cm-foot">${teacher ? `<button class="btn btn-primary btn-sm" onclick="ddClose();openCreateClass()">${I.plusSm}Create class</button>` : `<button class="btn btn-primary btn-sm" onclick="ddClose();openJoinClass()">${I.plusSm}Join a class</button>`}
       <a class="btn btn-ghost btn-sm" href="/" data-link onclick="ddClose()">Course dashboard</a></div>`;
 }
 
 /* ====================== home ====================== */
 let home = { projectsOpen: null, data: null, view: 'dashboard', showArchived: false, upcoming: null };
-const HOME_VIEW_KEY = 'visor.homeView';
+const homeViewKey = () => `visor.homeView.${me?.id || ''}`;
 
 VisorRouter.add('/', async (el, params, query) => {
   let saved = null;
-  try { saved = localStorage.getItem(HOME_VIEW_KEY); } catch {}
+  try { saved = localStorage.getItem(homeViewKey()); } catch {}
   home.view = query.get('view') || saved || 'dashboard';
   if (!['dashboard', 'activity'].includes(home.view)) home.view = 'dashboard';
   home.showArchived = query.get('archived') === '1';
@@ -255,7 +255,7 @@ VisorRouter.add('/', async (el, params, query) => {
 
 function homeView(view) {
   home.view = view;
-  try { localStorage.setItem(HOME_VIEW_KEY, view); } catch {}
+  try { localStorage.setItem(homeViewKey(), view); } catch {}
   history.replaceState(null, '', view === 'dashboard' ? '/' : '/?view=activity');
   renderHome();
 }
@@ -286,7 +286,9 @@ function dashboardHtml() {
   const newTile = teacher
     ? `<button class="ct-new" onclick="openCreateClass()">${I.plusSm}Create a class</button>`
     : `<button class="ct-new" onclick="openJoinClass()">${I.plusSm}Join a class</button>`;
-  const empty = !active.length ? `<div class="feed-empty" style="margin-bottom:18px;"><b>${teacher ? 'Create your first class' : 'You’re not in a class yet'}</b>${teacher ? 'A class holds your roster, its materials (in-class essays, group projects and discussions, in folders if you like) and its updates.' : 'Ask your teacher for the class access code, then join with it.'}</div>` : '';
+  const empty = !active.length ? (archived.length
+    ? `<div class="feed-empty" style="margin-bottom:18px;"><b>All your classes are archived</b>${teacher ? 'Restore one in its Settings, or create a new class.' : 'Join a class with the access code your teacher gives you.'}</div>`
+    : `<div class="feed-empty" style="margin-bottom:18px;"><b>${teacher ? 'Create your first class' : 'You’re not in a class yet'}</b>${teacher ? 'A class holds your roster, its materials (in-class essays, group projects and discussions, in folders if you like) and its updates.' : 'Ask your teacher for the class access code, then join with it.'}</div>`) : '';
   return `${empty}<div class="course-tiles">${active.map(courseTile).join('')}${newTile}</div>
     ${archived.length ? `<div class="home-more"><button class="btn btn-ghost btn-sm" aria-expanded="${home.showArchived}" onclick="home.showArchived=!home.showArchived;$('homeBody').innerHTML=dashboardHtml()">${home.showArchived ? 'Hide' : 'Show'} archived classes (${archived.length})</button></div>
       ${home.showArchived ? `<div class="course-tiles" style="margin-top:14px;">${archived.map(courseTile).join('')}</div>` : ''}` : ''}
@@ -384,7 +386,7 @@ function eventsByDayHtml(events, { showClass = false } = {}) {
     const k = vcDayKey(ev.at);
     if (k !== day) { day = k; out += `<div class="ev-day">${esc(vcDayLabel(ev.at))}</div>`; }
     const overdue = ev.kind === 'due' && isOverdue(ev.at, ev.status);
-    const meta = [`${EVENT_KIND[ev.kind] || ''} ${vcTime(ev.at)}`, showClass ? ev.className : '', ev.published === false ? 'Draft' : '', isDone(ev.status) ? STATUS_LABEL[ev.status] : ''].filter(Boolean);
+    const meta = [`${EVENT_KIND[ev.kind] || ''} ${vcTime(ev.at)}`, showClass ? ev.className : '', ev.published === false ? 'Not published' : '', isDone(ev.status) ? STATUS_LABEL[ev.status] : ''].filter(Boolean);
     out += `<a class="ev-row cc-${esc(ev.color || 'slate')}" href="/a/${ev.assignmentId}" data-link><span class="ev-dot"></span><span class="ev-main"><span class="ev-title">${esc(ev.title)}</span><span class="ev-meta ${overdue ? 'red' : ''}">${esc(meta.join(' · '))}</span></span></a>`;
   }
   return out;
@@ -443,7 +445,7 @@ function courseSideHtml(c, active) {
     </nav>
     ${c.isTeacher && c.joinCode ? `<div class="course-box"><div class="course-box-h">Access code</div>
       <div class="access-code"><span class="mono">${esc(c.joinCode)}</span><button class="btn-icon" onclick="copyText('${esc(c.joinCode)}','Access code copied')" aria-label="Copy the access code" title="Copy">${I.copy}</button></div>
-      <div class="muted">${c.joinOpen === false ? 'Joining is closed' : 'Students join with this code'}</div></div>` : ''}
+      <div class="muted">${c.archived ? 'The class is archived, so the code doesn’t work' : c.joinOpen === false ? 'Joining is closed' : 'Students join with this code'}</div></div>` : ''}
     <div class="course-box"><div class="course-box-h">Information</div>
       <div class="info-row"><span>Teacher:</span><span>${c.isTeacher ? 'You' : esc(c.teacher?.name || '')}</span></div>
       ${c.isTeacher ? `<div class="info-row"><span>Students:</span><span>${c.studentCount ?? c.students?.length ?? 0}</span></div>` : ''}
@@ -566,7 +568,7 @@ function classRightHtml() {
     if (a.discussionDate) events.push({ ...base, kind: 'discussion', at: a.discussionDate });
   }
   const upcoming = events.filter(e => Date.parse(e.at) >= now && Date.parse(e.at) < soon && (c.isTeacher || !isDone(e.status))).sort((a, b) => (a.at < b.at ? -1 : 1));
-  const upBox = `<section class="side-box"><div class="side-box-h"><span>Upcoming</span><a href="/calendar?class=${c.id}" data-link>Calendar</a></div>
+  const upBox = `<section class="side-box"><div class="side-box-h"><span>Upcoming</span>${c.archived ? '' : `<a href="/calendar?class=${c.id}" data-link>Calendar</a>`}</div>
     ${upcoming.length ? `<div class="side-box-b">${eventsByDayHtml(upcoming.slice(0, 10))}</div>` : '<div class="side-empty">Nothing due in the next three weeks.</div>'}</section>`;
   if (!c.isTeacher) {
     const overdue = list.filter(a => a.type === 'writing' && isOverdue(a.dueAt, a.status || 'not-started'));
@@ -877,7 +879,7 @@ function membersHtml() {
     { label: 'New access code', icon: I.refresh, onclick: 'rotateCode()' },
     { label: c.joinOpen ? 'Close joining with the code' : 'Open joining with the code', icon: I.hash, onclick: `setJoinOpen(${!c.joinOpen})` }
   ] });
-  const roster = c.students.length ? `<div class="card"><table class="roster">
+  const roster = c.students.length ? `<div class="card" style="overflow-x:auto;position:relative;"><table class="roster">
       <thead><tr><th>Name</th><th>Extra time</th><th>Accommodation note</th><th><span class="sr-only">Actions</span></th></tr></thead>
       <tbody>${c.students.map(s => `<tr>
         <td><div class="roster-name">${avatarHtml(s, 'avatar-sm')}<span><b>${esc(s.name)}</b><div class="tiny muted">${esc(s.email)}</div></span></div></td>

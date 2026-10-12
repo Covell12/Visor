@@ -177,7 +177,7 @@ function rvProcess(body) {
       <table class="rv-table"><tbody>${SRC_ORDER.filter(k => k !== 'image').map(k => `<tr><td><span class="src-key src-${k}"><i></i>${esc(SRC_LABEL[k])}</span></td><td class="mono">${surv.pct[k] ?? 0}%</td><td class="mono muted">${(surv.chars[k] || 0).toLocaleString()} characters</td></tr>`).join('')}${imagesRow}</tbody></table>
       <div class="tiny muted">Characters still in the final essay, not counting spaces${surv.images ? ' or pictures' : ''}.</div></div>
     <h3 class="section-title rv-h">Sessions</h3>
-    <div class="card"><table class="roster"><thead><tr><th>#</th><th>Started</th><th>Length</th><th>Active</th><th>Away</th><th>Side panel research</th><th>Typing</th><th>Ended</th></tr></thead><tbody>
+    <div class="card" style="overflow-x:auto;position:relative;"><table class="roster"><thead><tr><th>#</th><th>Started</th><th>Length</th><th>Active</th><th>Away</th><th>Side panel research</th><th>Typing</th><th>Ended</th></tr></thead><tbody>
       ${report.sessions.map(s => `<tr><td>${s.n}</td><td class="small">${esc(vcDateTime(s.startedAt))}</td><td class="mono">${vcDur(s.durationMs)}</td><td class="mono">${vcDur(s.activeMs)}</td>
         <td class="small">${s.pauses.filter(p => p.reason !== 'teacher').length ? `${vcDur(s.awayMs)}<div class="tiny muted">${s.pauses.map(p => `${esc(REASON_TEXT[p.reason] || p.reason)} ${vcDur(p.ms)}`).join(', ')}</div>` : '—'}</td>
         <td class="mono">${s.researchMs ? vcDur(s.researchMs) : '—'}</td>

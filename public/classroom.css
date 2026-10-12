@@ -63,7 +63,6 @@ a.list-row:hover { background: var(--surface); }
 /* ---------- small screens ---------- */
 @media (max-width: 720px) {
   .page { padding: 18px 14px 60px; }
-  .roster th:nth-child(3), .roster td:nth-child(3) { display: none; }
 }
 
 /* ---------- assignment forms ---------- */
