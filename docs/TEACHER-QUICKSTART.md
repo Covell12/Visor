@@ -17,7 +17,7 @@ On the class page, **New assignment → Writing**, then pick a preset:
 - **In-class essay (locked):** 45 minutes, runs in full screen, needs the Visor Chrome extension, students can only paste text from their own essay, AI sites are blocked, and it submits itself when time runs out.
 - **Homework essay (open):** no time limit, pasting allowed, research recorded, AI sites recorded but not blocked.
 
-Change anything you like (time limit, the window when sessions can start, allowed sites, citation style, word limits, starter text), then **Save and publish**.
+Change anything you like (time limit, the window when sessions can start, allowed sites, citation style, document style, word limits, starter text), then **Save and publish**. **Document style** sets how a new essay looks: an MLA essay (Times New Roman 12, double-spaced) or Docs default (Arial 11, 1.15 spacing). Students write in a Google-Docs-style editor with menus, a toolbar, pictures, tables, find and replace and an outline, and everything they do is recorded as before.
 
 ## 3. On the day
 
