@@ -1,7 +1,7 @@
 /* Visor Classroom — Home (the course dashboard and its right-hand column),
-   the top bar's Courses menu, and the course pages: the sidebar frame,
-   Materials (folders and assignments in the teacher's order), Members and
-   Settings. The Updates tab and Recent Activity are updates.js; the
+   the top bar's Classes menu, and the class pages: the sidebar frame,
+   Assignments (folders and assignments in the teacher's order), People and
+   Settings. Announcements and Home's Activity are updates.js; the
    assignment page (inside the same frame) is assignments.js.
 
    Also the small helpers every Visor Classroom page shares (dates, page
@@ -176,6 +176,10 @@ function courseInitials(name) {
   const second = words[1] ? (/^\d/.test(words[1]) ? words[1].match(/^\d{1,3}/)[0] : [...words[1]].find(ch => /[\p{L}]/u.test(ch)) || '') : '';
   return (first + second).toUpperCase();
 }
+// A class's teachers, owner first ([{ id, name, avatarColor, owner }]); older
+// payloads only have `teacher`
+const teachersOf = c => (c?.teachers?.length ? c.teachers : c?.teacher ? [{ ...c.teacher, owner: true }] : []);
+const teacherNames = c => teachersOf(c).map(t => (t.id === me?.id ? 'You' : t.name)).join(', ');
 const courseArt = (c, extra = '', tag = 'div', attrs = '') => `<${tag} class="course-art cc-${courseColor(c)} pat-${coursePattern(c)} ${extra}" ${attrs}><span class="course-initials" aria-hidden="true">${esc(courseInitials(c?.name))}</span></${tag}>`;
 
 /* ---- signing out ----
@@ -191,7 +195,7 @@ function resetPortal() {
   if ($('coursesMenu')) $('coursesMenu').innerHTML = '';
 }
 
-/* ====================== the top bar's Courses menu ====================== */
+/* ====================== the top bar's Classes menu ====================== */
 let coursesCache = null; // { at, list }
 const forgetCourses = () => { coursesCache = null; };
 async function loadCourses(force = false) {
@@ -219,11 +223,11 @@ async function toggleCoursesMenu() {
 function coursesMenuHtml(list) {
   const active = list.filter(c => !c.archived), archived = list.length - active.length;
   const teacher = me.role === 'teacher';
-  return `<div class="cm-head"><b>My courses</b>${archived ? `<a class="tiny" href="/?archived=1" data-link onclick="ddClose()">Archived (${archived})</a>` : ''}</div>
-    ${active.length ? `<div class="cm-grid">${active.map(c => `<a class="cm-item" href="/class/${c.id}" data-link onclick="ddClose()">${courseArt(c, 'cm-thumb')}<span class="cm-text"><span class="cm-name">${esc(c.name)}</span><span class="cm-sub">${c.isTeacher ? vcPlural(c.studentCount, 'student') : esc(c.teacher?.name || '')}</span></span></a>`).join('')}</div>`
-      : `<div class="cm-empty">${archived ? 'All your classes are archived.' : teacher ? 'You haven’t made a class yet.' : 'You’re not in a class yet. Ask your teacher for the access code.'}</div>`}
+  return `<div class="cm-head"><b>My classes</b>${archived ? `<a class="tiny" href="/?archived=1" data-link onclick="ddClose()">Archived (${archived})</a>` : ''}</div>
+    ${active.length ? `<div class="cm-grid">${active.map(c => `<a class="cm-item" href="/class/${c.id}" data-link onclick="ddClose()">${courseArt(c, 'cm-thumb')}<span class="cm-text"><span class="cm-name">${esc(c.name)}</span><span class="cm-sub">${c.isTeacher ? vcPlural(c.studentCount, 'student') : esc(teacherNames(c))}</span></span></a>`).join('')}</div>`
+      : `<div class="cm-empty">${archived ? 'All your classes are archived.' : teacher ? 'You haven’t made a class yet.' : 'You’re not in a class yet. Ask your teacher for the class code.'}</div>`}
     <div class="cm-foot">${teacher ? `<button class="btn btn-primary btn-sm" onclick="ddClose();openCreateClass()">${I.plusSm}Create class</button>` : `<button class="btn btn-primary btn-sm" onclick="ddClose();openJoinClass()">${I.plusSm}Join a class</button>`}
-      <a class="btn btn-ghost btn-sm" href="/" data-link onclick="ddClose()">Course dashboard</a></div>`;
+      <a class="btn btn-ghost btn-sm" href="/" data-link onclick="ddClose()">All classes</a></div>`;
 }
 
 /* ====================== home ====================== */
@@ -265,8 +269,8 @@ function renderHome() {
   const teacher = me.role === 'teacher';
   const head = `<div class="home-head">
       <div class="tabs" role="tablist" aria-label="Home view">
-        <button class="tab ${home.view === 'dashboard' ? 'active' : ''}" role="tab" aria-selected="${home.view === 'dashboard'}" onclick="homeView('dashboard')">Course Dashboard</button>
-        <button class="tab ${home.view === 'activity' ? 'active' : ''}" role="tab" aria-selected="${home.view === 'activity'}" onclick="homeView('activity')">Recent Activity</button>
+        <button class="tab ${home.view === 'dashboard' ? 'active' : ''}" role="tab" aria-selected="${home.view === 'dashboard'}" onclick="homeView('dashboard')">Classes</button>
+        <button class="tab ${home.view === 'activity' ? 'active' : ''}" role="tab" aria-selected="${home.view === 'activity'}" onclick="homeView('activity')">Activity</button>
       </div>
       <div class="head-actions">${teacher ? `<button class="btn btn-primary btn-sm" onclick="openCreateClass()">${I.plusSm}Create class</button>` : `<button class="btn btn-ghost btn-sm" onclick="openJoinClass()">${I.plusSm}Join a class</button>`}</div>
     </div>`;
@@ -287,8 +291,8 @@ function dashboardHtml() {
     ? `<button class="ct-new" onclick="openCreateClass()">${I.plusSm}Create a class</button>`
     : `<button class="ct-new" onclick="openJoinClass()">${I.plusSm}Join a class</button>`;
   const empty = !active.length ? (archived.length
-    ? `<div class="feed-empty" style="margin-bottom:18px;"><b>All your classes are archived</b>${teacher ? 'Restore one in its Settings, or create a new class.' : 'Join a class with the access code your teacher gives you.'}</div>`
-    : `<div class="feed-empty" style="margin-bottom:18px;"><b>${teacher ? 'Create your first class' : 'You’re not in a class yet'}</b>${teacher ? 'A class holds your roster, its materials (in-class essays, group projects and discussions, in folders if you like) and its updates.' : 'Ask your teacher for the class access code, then join with it.'}</div>`) : '';
+    ? `<div class="feed-empty" style="margin-bottom:18px;"><b>All your classes are archived</b>${teacher ? 'Restore one in its Settings, or create a new class.' : 'Join a class with the class code your teacher gives you.'}</div>`
+    : `<div class="feed-empty" style="margin-bottom:18px;"><b>${teacher ? 'Create your first class' : 'You’re not in a class yet'}</b>${teacher ? 'A class holds your roster, its assignments (in-class essays, group projects and discussions, in folders if you like) and its announcements. You can share it with other teachers.' : 'Ask your teacher for the class code, then join with it.'}</div>`) : '';
   return `${empty}<div class="course-tiles">${active.map(courseTile).join('')}${newTile}</div>
     ${archived.length ? `<div class="home-more"><button class="btn btn-ghost btn-sm" aria-expanded="${home.showArchived}" onclick="home.showArchived=!home.showArchived;$('homeBody').innerHTML=dashboardHtml()">${home.showArchived ? 'Hide' : 'Show'} archived classes (${archived.length})</button></div>
       ${home.showArchived ? `<div class="course-tiles" style="margin-top:14px;">${archived.map(courseTile).join('')}</div>` : ''}` : ''}
@@ -302,7 +306,7 @@ function courseTile(c) {
   return `<a class="course-tile ${c.archived ? 'archived' : ''}" href="/class/${c.id}" data-link>
     ${courseArt(c)}
     ${c.archived ? '<span class="pill pill-gray ct-flag">Archived</span>' : ''}
-    <span class="ct-body"><span class="ct-name">${esc(c.name)}</span><span class="ct-sub">${c.isTeacher ? vcPlural(c.studentCount, 'student') : esc(c.teacher?.name || '')}</span>
+    <span class="ct-body"><span class="ct-name">${esc(c.name)}</span><span class="ct-sub">${c.isTeacher ? vcPlural(c.studentCount, 'student') + (teachersOf(c).length > 1 ? ` · ${vcPlural(teachersOf(c).length, 'teacher')}` : '') : esc(teacherNames(c))}</span>
       <span class="ct-stats">${stats.filter(Boolean).join('')}</span></span>
   </a>`;
 }
@@ -332,7 +336,7 @@ function teacherHomeRight() {
   const d = home.data.dash;
   const review = d.needsReview || [];
   return `${happeningBoxHtml(d.happeningNow)}
-    <section class="side-box"><div class="side-box-h"><span>Needs review</span>${review.length ? `<span>${review.length}</span>` : ''}</div>
+    <section class="side-box"><div class="side-box-h"><span>${I.check}To review</span>${review.length ? `<span>${review.length}</span>` : ''}</div>
       ${review.length ? `<div class="side-box-b">${review.slice(0, 6).map(r => `<a class="ev-row" href="/review/${r.docId}" data-link><span class="ev-main"><span class="ev-title">${esc(r.student)}</span><span class="ev-meta">${esc(r.title)} · ${esc(r.className)} · ${esc(timeAgo(r.submittedAt))}</span></span></a>`).join('')}
         ${review.length > 6 ? `<div class="side-empty">and ${review.length - 6} more: see each assignment’s Submissions.</div>` : ''}</div>`
         : `<div class="side-empty">Nothing waiting. Submitted work shows up here until you return it.</div>`}</section>
@@ -340,14 +344,14 @@ function teacherHomeRight() {
 }
 function happeningBoxHtml(list) {
   if (!list?.length) return '<div id="happeningBox"></div>';
-  return `<section class="side-box" id="happeningBox"><div class="side-box-h live"><span><i class="live-dot"></i> Happening now</span></div><div class="side-box-b">
+  return `<section class="side-box" id="happeningBox"><div class="side-box-h live"><span><i class="live-dot"></i> Live now</span></div><div class="side-box-b">
     ${list.map(h => `<a class="ev-row" href="/a/${h.assignmentId}?tab=live" data-link><span class="ev-main"><span class="ev-title">${esc(h.title)}</span><span class="ev-meta">${esc(h.className)} · ${h.live} of ${h.students} writing</span></span></a>`).join('')}</div></section>`;
 }
 function studentHomeRight() {
   const todo = home.data.dash.todo || [];
   const overdue = todo.filter(t => t.type === 'writing' && isOverdue(t.dueAt, t.status)).sort((a, b) => (a.dueAt < b.dueAt ? -1 : 1));
-  return `<section class="side-box"><div class="side-box-h"><span>Visor extension</span></div><div class="side-box-p" id="homeExt"><span class="muted small">Checking…</span></div></section>
-    ${overdue.length ? `<section class="side-box"><div class="side-box-h red"><span>Overdue</span><span>${overdue.length}</span></div><div class="side-box-b">
+  return `<section class="side-box"><div class="side-box-h"><span>${I.puzzle}Visor extension</span></div><div class="side-box-p" id="homeExt"><span class="muted small">Checking…</span></div></section>
+    ${overdue.length ? `<section class="side-box"><div class="side-box-h red"><span>${I.alert}Overdue</span><span>${overdue.length}</span></div><div class="side-box-b">
       ${overdue.map(t => `<a class="ev-row" href="/a/${t.assignmentId}" data-link><span class="ev-main"><span class="ev-title">${esc(t.title)}</span><span class="ev-meta red">${esc(vcDue(t.dueAt))}</span><span class="ev-meta">${esc(t.className)} · ${esc(STATUS_LABEL[t.status] || '')}</span></span></a>`).join('')}</div></section>` : ''}
     <section class="side-box" id="upcomingBox">${upcomingBoxInner()}</section>`;
 }
@@ -371,7 +375,7 @@ async function loadHomeUpcoming() {
   if (box) box.innerHTML = upcomingBoxInner();
 }
 function upcomingBoxInner() {
-  const head = `<div class="side-box-h"><span>Upcoming</span><a href="/calendar" data-link>Calendar</a></div>`;
+  const head = `<div class="side-box-h"><span>${PI.cal}Coming up</span><a href="/calendar" data-link>Calendar</a></div>`;
   if (home.upcoming === null) return `${head}<div class="side-empty"><span class="spinner"></span></div>`;
   const list = home.upcoming.filter(e => me.role === 'teacher' || !isDone(e.status));
   if (!list.length) return `${head}<div class="side-empty">Nothing due in the next two weeks.</div>`;
@@ -394,7 +398,7 @@ function eventsByDayHtml(events, { showClass = false } = {}) {
 
 /* ---- create and join ---- */
 function openCreateClass() {
-  openModal({ title: 'Create a class', sub: 'Students join with the class access code, or you add them by email.', body: `<div class="field"><label for="ncName">Class name</label><input id="ncName" class="input" placeholder="English 10 – Period 3" maxlength="120" /></div>`,
+  openModal({ title: 'Create a class', sub: 'Students join with its class code, or you add them by email. You can add other teachers later, under People.', body: `<div class="field"><label for="ncName">Class name</label><input id="ncName" class="input" placeholder="English 10 – Period 3" maxlength="120" /></div>`,
     footer: `<button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="createClass()">Create class</button>` });
   setTimeout(() => $('ncName')?.focus(), 50);
   $('ncName').addEventListener('keydown', e => { if (e.key === 'Enter') createClass(); });
@@ -409,7 +413,7 @@ async function createClass() {
 }
 
 function openJoinClass() {
-  openModal({ title: 'Join a class', sub: 'Type the 6-character access code your teacher gave you.', body: `<div class="field"><label for="jcCode">Access code</label><input id="jcCode" class="input mono" maxlength="6" autocomplete="off" style="text-transform:uppercase;font-size:20px;letter-spacing:.2em;" /></div><div id="jcErr" class="form-error hidden"></div>`,
+  openModal({ title: 'Join a class', sub: 'Type the 6-character class code your teacher gave you.', body: `<div class="field"><label for="jcCode">Class code</label><input id="jcCode" class="input mono" maxlength="6" autocomplete="off" style="text-transform:uppercase;font-size:20px;letter-spacing:.2em;" /></div><div id="jcErr" class="form-error hidden"></div>`,
     footer: `<button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="joinClass()">Join</button>` });
   setTimeout(() => $('jcCode')?.focus(), 50);
   $('jcCode').addEventListener('keydown', e => { if (e.key === 'Enter') joinClass(); });
@@ -422,7 +426,7 @@ async function joinClass() {
 }
 
 /* ====================== the course frame ======================
-   A sidebar (the course picture, its pages, the access code and who
+   A sidebar (the class banner and name, its pages, the class code and who
    teaches it), the page in the middle, and optionally a right-hand column.
    The class page and the assignment page both use it. */
 function courseFrame(c, { active = '', main = '', right = '' }) {
@@ -434,22 +438,23 @@ function courseFrame(c, { active = '', main = '', right = '' }) {
 }
 function courseSideHtml(c, active) {
   const link = (key, href, icon, label, count) => `<a href="${href}" data-link class="${active === key ? 'active' : ''}" ${active === key ? 'aria-current="page"' : ''}>${icon}<span>${label}</span>${count != null ? `<span class="count">${count}</span>` : ''}</a>`;
-  return `<div class="course-pic-wrap">${courseArt(c, 'course-pic', 'a', `href="/class/${c.id}" data-link aria-label="${esc(c.name)}: materials"`)}
-      ${c.isTeacher ? `<button class="course-pic-edit" onclick="openCourseColor('${c.id}')" aria-label="Change the course colour" title="Change the course colour">${I.edit}</button>` : ''}</div>
-    <nav class="course-nav" aria-label="Course pages">
-      ${link('materials', `/class/${c.id}`, PI.list, 'Materials')}
-      ${link('updates', `/class/${c.id}?tab=updates`, PI.megaphone, 'Updates')}
-      ${c.isTeacher ? link('members', `/class/${c.id}?tab=members`, I.users, 'Members', c.studentCount ?? c.students?.length) : ''}
+  const teachers = teachersOf(c);
+  return `<div class="course-pic-wrap">${courseArt(c, 'course-pic', 'a', `href="/class/${c.id}" data-link aria-label="${esc(c.name)}: assignments"`)}
+      ${c.isTeacher ? `<button class="course-pic-edit" onclick="openCourseColor('${c.id}')" aria-label="Change the class colour" title="Change the class colour">${I.edit}</button>` : ''}</div>
+    <div class="side-name">${esc(c.name)}${c.archived ? ' <span class="pill pill-gray">Archived</span>' : ''}</div>
+    <div class="side-sub">${c.isTeacher ? vcPlural(c.studentCount ?? c.students?.length ?? 0, 'student') : esc(teacherNames(c))}</div>
+    <nav class="course-nav" aria-label="Class pages">
+      ${link('materials', `/class/${c.id}`, PI.list, 'Assignments')}
+      ${link('updates', `/class/${c.id}?tab=announcements`, PI.megaphone, 'Announcements')}
+      ${c.isTeacher ? link('members', `/class/${c.id}?tab=people`, I.users, 'People', (c.studentCount ?? c.students?.length ?? 0) + teachers.length) : ''}
       ${c.archived ? '' : link('calendar', `/calendar?class=${c.id}`, PI.cal, 'Calendar')}
       ${c.isTeacher ? link('settings', `/class/${c.id}?tab=settings`, I.gear, 'Settings') : ''}
     </nav>
-    ${c.isTeacher && c.joinCode ? `<div class="course-box"><div class="course-box-h">Access code</div>
-      <div class="access-code"><span class="mono">${esc(c.joinCode)}</span><button class="btn-icon" onclick="copyText('${esc(c.joinCode)}','Access code copied')" aria-label="Copy the access code" title="Copy">${I.copy}</button></div>
+    ${c.isTeacher && c.joinCode ? `<div class="course-box"><div class="course-box-h">Class code</div>
+      <div class="access-code"><span class="mono">${esc(c.joinCode)}</span><button class="btn-icon" onclick="copyText('${esc(c.joinCode)}','Class code copied')" aria-label="Copy the class code" title="Copy">${I.copy}</button></div>
       <div class="muted">${c.archived ? 'The class is archived, so the code doesn’t work' : c.joinOpen === false ? 'Joining is closed' : 'Students join with this code'}</div></div>` : ''}
-    <div class="course-box"><div class="course-box-h">Information</div>
-      <div class="info-row"><span>Teacher:</span><span>${c.isTeacher ? 'You' : esc(c.teacher?.name || '')}</span></div>
-      ${c.isTeacher ? `<div class="info-row"><span>Students:</span><span>${c.studentCount ?? c.students?.length ?? 0}</span></div>` : ''}
-      ${c.archived ? '<div class="info-row"><span class="pill pill-gray">Archived</span></div>' : ''}
+    <div class="course-box"><div class="course-box-h">${teachers.length > 1 ? 'Teachers' : 'Teacher'}</div>
+      ${teachers.map(t => `<div class="side-teacher">${avatarHtml(t, 'avatar-sm')}<span>${t.id === me?.id ? 'You' : esc(t.name)}</span></div>`).join('')}
     </div>`;
 }
 
@@ -459,14 +464,14 @@ function openCourseColor(classId) {
   if (!c) return;
   let picked = courseColor(c);
   const preview = () => courseArt({ ...c, color: picked });
-  openModal({ title: 'Course colour', sub: 'Used for the course picture, its tile on Home and its events on the calendar. Students see it too.',
+  openModal({ title: 'Class colour', sub: 'Used for the class banner, its tile on Home and its events on the calendar. Everyone in the class sees it.',
     body: `${swatchesHtml('ccPick', picked, false)}<div class="color-preview" id="ccPreview">${preview()}<span class="muted small">${esc(c.name)}</span></div>`,
     footer: `<button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="ccSave">Save</button>` });
   wireSwatches('ccPick', v => { picked = v; $('ccPreview').firstElementChild.outerHTML = preview(); });
   $('ccSave').onclick = () => modalBusy(async () => {
     try {
       await api(`/api/classes/${classId}`, { method: 'PATCH', body: { color: picked } });
-      closeModal(); forgetCourses(); toast('Course colour saved');
+      closeModal(); forgetCourses(); toast('Class colour saved');
       VisorRouter.render();
     } catch (e) { toast(e.message, 'err'); }
   });
@@ -485,17 +490,17 @@ function wireSwatches(id, onPick) {
 }
 
 /* ====================== class page ======================
-   /class/:id                 Materials (the top level)
-   /class/:id?folder=<id>     a folder
-   /class/:id?tab=updates     Updates (updates.js)
-   /class/:id?tab=members     Members (teacher)
-   /class/:id?tab=settings    Settings (teacher) */
+   /class/:id                    Assignments (the top level)
+   /class/:id?folder=<id>        a folder
+   /class/:id?tab=announcements  Announcements (updates.js)
+   /class/:id?tab=people         People: teachers and students (teacher)
+   /class/:id?tab=settings       Settings (teacher)
+   (The older names ?tab=updates, members and students still work.) */
 let cp = null; // { cls, assignments, folders, tab, folder }
 
 VisorRouter.add('/class/:id', async (el, { id }, query) => {
-  let tab = query.get('tab') || 'materials';
-  if (tab === 'students') tab = 'members';
-  if (tab === 'assignments') tab = 'materials';
+  // Inside, the pages keep their first names: materials, updates, members
+  let tab = { assignments: 'materials', announcements: 'updates', people: 'members', students: 'members' }[query.get('tab')] || query.get('tab') || 'materials';
   const folder = tab === 'materials' ? query.get('folder') || null : null;
   // Same class as last time: draw it straight away, then refresh
   const cached = cp?.cls?.id === id;
@@ -541,7 +546,7 @@ function renderClassPage() {
   let main = '', right = '';
   if (tab === 'members' && c.isTeacher) main = membersHtml();
   else if (tab === 'settings' && c.isTeacher) main = classSettingsHtml();
-  else if (tab === 'updates') { main = `${courseHead(c, 'Updates')}<div id="classUpdates"></div>`; right = classRightHtml(); }
+  else if (tab === 'updates') { main = `${courseHead(c, 'Announcements')}<div id="classUpdates"></div>`; right = classRightHtml(); }
   else { main = materialsHtml(); right = classRightHtml(); }
   $('routeView').innerHTML = courseFrame(c, { active: tab === 'updates' || tab === 'members' || tab === 'settings' ? tab : 'materials', main, right });
   if (tab === 'updates' && window.renderClassUpdates) renderClassUpdates($('classUpdates'), c);
@@ -568,19 +573,19 @@ function classRightHtml() {
     if (a.discussionDate) events.push({ ...base, kind: 'discussion', at: a.discussionDate });
   }
   const upcoming = events.filter(e => Date.parse(e.at) >= now && Date.parse(e.at) < soon && (c.isTeacher || !isDone(e.status))).sort((a, b) => (a.at < b.at ? -1 : 1));
-  const upBox = `<section class="side-box"><div class="side-box-h"><span>Upcoming</span>${c.archived ? '' : `<a href="/calendar?class=${c.id}" data-link>Calendar</a>`}</div>
+  const upBox = `<section class="side-box"><div class="side-box-h"><span>${PI.cal}Coming up</span>${c.archived ? '' : `<a href="/calendar?class=${c.id}" data-link>Calendar</a>`}</div>
     ${upcoming.length ? `<div class="side-box-b">${eventsByDayHtml(upcoming.slice(0, 10))}</div>` : '<div class="side-empty">Nothing due in the next three weeks.</div>'}</section>`;
   if (!c.isTeacher) {
     const overdue = list.filter(a => a.type === 'writing' && isOverdue(a.dueAt, a.status || 'not-started'));
-    return `${overdue.length ? `<section class="side-box"><div class="side-box-h red"><span>Overdue</span><span>${overdue.length}</span></div><div class="side-box-b">
+    return `${overdue.length ? `<section class="side-box"><div class="side-box-h red"><span>${I.alert}Overdue</span><span>${overdue.length}</span></div><div class="side-box-b">
       ${overdue.map(a => `<a class="ev-row" href="/a/${a.id}" data-link><span class="ev-main"><span class="ev-title">${esc(a.title)}</span><span class="ev-meta red">${esc(vcDue(a.dueAt))}</span></span></a>`).join('')}</div></section>` : ''}${upBox}`;
   }
   const live = list.filter(a => a.stats?.live);
   const review = list.filter(a => a.stats?.submitted);
-  return `${live.length ? `<section class="side-box"><div class="side-box-h live"><span><i class="live-dot"></i> Happening now</span></div><div class="side-box-b">
+  return `${live.length ? `<section class="side-box"><div class="side-box-h live"><span><i class="live-dot"></i> Live now</span></div><div class="side-box-b">
       ${live.map(a => `<a class="ev-row" href="/a/${a.id}?tab=live" data-link><span class="ev-main"><span class="ev-title">${esc(a.title)}</span><span class="ev-meta">${a.stats.live} of ${c.studentCount} writing</span></span></a>`).join('')}</div></section>` : ''}
-    <section class="side-box"><div class="side-box-h"><span>Needs review</span></div>
-      ${review.length ? `<div class="side-box-b">${review.map(a => `<a class="side-stat" href="/a/${a.id}?tab=submissions" data-link><span>${esc(a.title)}</span><b>${a.stats.submitted}</b></a>`).join('')}</div>` : '<div class="side-empty">Nothing waiting.</div>'}</section>
+    <section class="side-box"><div class="side-box-h"><span>${I.check}To review</span></div>
+      ${review.length ? `<div class="side-box-b">${review.map(a => `<a class="side-stat" href="/a/${a.id}?tab=submissions" data-link><span>${esc(a.title)}</span><b>${a.stats.submitted}</b></a>`).join('')}</div>` : '<div class="side-empty">Nothing waiting for you.</div>'}</section>
     ${upBox}`;
 }
 
@@ -615,8 +620,8 @@ function materialsHtml() {
   const folder = fid ? folderById(fid) : null;
   const trail = folder ? folderTrail(fid) : [];
   const items = levelItems(fid);
-  const addMenu = c.isTeacher ? ddHtml({ id: 'addMat', btnClass: 'btn btn-primary btn-sm', btn: `${I.plusSm}Add Materials ${PI.down}`, right: true, items: [
-    { header: folder ? `Add to ${folder.name}` : 'Add to this class' },
+  const addMenu = c.isTeacher ? ddHtml({ id: 'addMat', btnClass: 'btn btn-primary btn-sm', btn: `${I.plusSm}New ${PI.down}`, right: true, items: [
+    { header: folder ? `New in ${folder.name}` : 'New in this class' },
     { label: 'Writing assignment', icon: I.edit, onclick: `openAssignmentForm('${c.id}','writing',null,{folderId:${fid ? `'${fid}'` : 'null'}})` },
     { label: 'Group project', icon: I.users, onclick: `openAssignmentForm('${c.id}','group',null,{folderId:${fid ? `'${fid}'` : 'null'}})` },
     { label: 'Discussion', icon: I.chat, onclick: `openAssignmentForm('${c.id}','discussion',null,{folderId:${fid ? `'${fid}'` : 'null'}})` },
@@ -630,11 +635,11 @@ function materialsHtml() {
     : `<header class="course-head"><div style="min-width:0;flex:1;"><h1>${esc(c.name)}</h1><div class="course-sub">${c.isTeacher ? `${vcPlural(c.studentCount || 0, 'student')} · ${vcPlural(cp.assignments.length, 'assignment')}${cp.assignments.some(a => !a.publishedAt) ? ` (${cp.assignments.filter(a => !a.publishedAt).length} unpublished)` : ''}` : `Teacher: ${esc(c.teacher?.name || '')}`}</div></div>
         ${addMenu ? `<div class="head-actions">${addMenu}</div>` : ''}</header>`;
   const desc = folder?.description ? `<div class="folder-desc">${esc(folder.description).replace(/\n/g, '<br>')}</div>` : '';
-  const archived = c.archived ? `<div class="callout amber" style="margin-bottom:12px;">This class is archived. ${c.isTeacher ? 'Restore it in Settings to post updates again.' : ''}</div>` : '';
+  const archived = c.archived ? `<div class="callout amber" style="margin-bottom:12px;">This class is archived. ${c.isTeacher ? 'Restore it in Settings to post announcements again.' : ''}</div>` : '';
   if (!items.length) {
-    const msg = folder ? (c.isTeacher ? 'This folder is empty. Use Add Materials, or drag things onto it in the folder above.' : 'Nothing here yet.')
-      : (c.isTeacher ? 'Add a writing assignment (an in-class essay or homework), a group project, a discussion, or a folder to keep units together.' : 'Your teacher hasn’t published anything here yet.');
-    return `${head}${archived}${desc}<div class="mat-list"><div class="mat-empty"><b>${folder ? 'Empty folder' : 'No materials yet'}</b>${msg}</div></div>`;
+    const msg = folder ? (c.isTeacher ? 'This folder is empty. Use New, or drag things onto it in the folder above.' : 'Nothing here yet.')
+      : (c.isTeacher ? 'Use New for a writing assignment (an in-class essay or homework), a group project, a discussion, or a folder to keep units together.' : 'Your teacher hasn’t published anything here yet.');
+    return `${head}${archived}${desc}<div class="mat-list"><div class="mat-empty"><b>${folder ? 'Empty folder' : 'No assignments yet'}</b>${msg}</div></div>`;
   }
   return `${head}${archived}${desc}<div class="mat-list" id="matList" role="list">${items.map(it => (it.kind === 'folder' ? folderRowHtml(it.x) : assignmentRowHtml(it.x))).join('')}</div>
     ${c.isTeacher && items.length > 1 ? '<div class="tiny muted mat-hint" style="margin-top:8px;">Drag the rows to reorder them, or drop one onto a folder (or onto a folder name above) to move it.</div>' : ''}`;
@@ -678,7 +683,7 @@ function assignmentRowHtml(a) {
     side = [!a.publishedAt ? '<span class="pill pill-gray">Not published</span>' : '',
       s?.live ? `<span class="mat-stat live-dot-text"><i class="live-dot"></i>${s.live} writing now</span>` : '',
       s?.submitted ? `<span class="mat-stat"><b>${s.submitted}</b> to review</span>` : '',
-      s?.returned ? `<span class="mat-stat">${s.returned} returned</span>` : ''].filter(Boolean).join('');
+      s && a.publishedAt && c.studentCount ? `<span class="mat-progress" title="${s.submitted + s.returned} of ${c.studentCount} handed in"><i><b style="width:${Math.round(100 * Math.min(1, (s.submitted + s.returned) / c.studentCount))}%"></b></i>${s.submitted + s.returned}/${c.studentCount}</span>` : ''].filter(Boolean).join('');
   } else if (status) side = `${overdue ? '<span class="pill pill-red">Overdue</span>' : ''}${statusPillDoc(status)}`;
   return `<div class="mat-row ${a.publishedAt ? '' : 'is-draft'}" role="listitem" data-kind="assignment" data-id="${a.id}" ${c.isTeacher ? 'draggable="true"' : ''}>
     ${c.isTeacher ? `<span class="mat-grip" aria-hidden="true">${PI.grip}</span>` : ''}
@@ -866,19 +871,33 @@ function wireMaterialsDnD() {
   });
 }
 
-/* ====================== members (teacher) ====================== */
+/* ====================== people (teacher) ======================
+   The class's teachers (the owner, who made it, and any co-teachers), then
+   its students with their accommodations, then pending invites. */
 function membersHtml() {
   const c = cp.cls;
   const acc = c.accommodations || {};
   const gcOk = !!CFG.classroomImport;
-  const actions = ddHtml({ id: 'addMem', btnClass: 'btn btn-primary btn-sm', btn: `${I.plusSm}Add members ${PI.down}`, right: true, items: [
-    { label: 'Add by email…', icon: I.users, onclick: 'openAddMembers()' },
-    { label: 'Import from Google Classroom', icon: I.school, onclick: 'importFromClassroom()', disabled: !gcOk, note: gcOk ? '' : 'not set up' },
+  const teachers = teachersOf(c);
+  const actions = ddHtml({ id: 'addMem', btnClass: 'btn btn-primary btn-sm', btn: `${I.plusSm}Add people ${PI.down}`, right: true, items: [
+    { label: 'Add students by email…', icon: I.users, onclick: 'openAddMembers()' },
+    { label: 'Add a teacher…', icon: I.school, onclick: 'openAddTeacher()' },
+    { label: 'Import students from Google Classroom', icon: I.school, onclick: 'importFromClassroom()', disabled: !gcOk, note: gcOk ? '' : 'not set up' },
     'sep',
-    { label: 'Copy the access code', icon: I.copy, onclick: `copyText('${esc(c.joinCode)}','Access code copied')` },
-    { label: 'New access code', icon: I.refresh, onclick: 'rotateCode()' },
+    { label: 'Copy the class code', icon: I.copy, onclick: `copyText('${esc(c.joinCode)}','Class code copied')` },
+    { label: 'New class code', icon: I.refresh, onclick: 'rotateCode()' },
     { label: c.joinOpen ? 'Close joining with the code' : 'Open joining with the code', icon: I.hash, onclick: `setJoinOpen(${!c.joinOpen})` }
   ] });
+  const teacherRows = `<div class="card" style="overflow-x:auto;position:relative;"><table class="roster">
+      <thead><tr><th>Name</th><th>Role</th><th><span class="sr-only">Actions</span></th></tr></thead>
+      <tbody>${teachers.map(t => {
+        const self = t.id === me.id;
+        const items = t.owner ? [] : self ? [{ label: 'Leave this class', icon: I.x, onclick: 'leaveClass()', danger: true }] : c.isOwner ? [{ label: 'Remove from class', icon: I.x, onclick: `removeTeacher('${t.id}')`, danger: true }] : [];
+        return `<tr>
+        <td><div class="roster-name">${avatarHtml(t, 'avatar-sm')}<span><b>${esc(t.name)}${self ? ' (you)' : ''}</b>${t.email ? `<div class="tiny muted">${esc(t.email)}</div>` : ''}</span></div></td>
+        <td>${t.owner ? '<span class="pill pill-blue">Owner</span>' : '<span class="pill pill-gray">Co-teacher</span>'}</td>
+        <td class="row-actions">${items.length ? ddHtml({ id: `tm-${t.id}`, btnClass: 'btn-icon', btn: I.gear, label: `Options: ${t.name}`, right: true, items }) : ''}</td>
+      </tr>`; }).join('')}</tbody></table></div>`;
   const roster = c.students.length ? `<div class="card" style="overflow-x:auto;position:relative;"><table class="roster">
       <thead><tr><th>Name</th><th>Extra time</th><th>Accommodation note</th><th><span class="sr-only">Actions</span></th></tr></thead>
       <tbody>${c.students.map(s => `<tr>
@@ -889,11 +908,15 @@ function membersHtml() {
           { label: 'Remove from class', icon: I.x, onclick: `removeClassStudent('${s.id}')` },
           { label: 'Delete their work in this class', icon: I.trash, onclick: `deleteStudentData('${s.id}')`, danger: true }] })}</td>
       </tr>`).join('')}</tbody></table></div>`
-    : `<div class="mat-list"><div class="mat-empty"><b>No students yet</b>Give students the access code <b class="mono" style="display:inline;">${esc(c.joinCode)}</b>, or use Add members to add them by email.</div></div>`;
-  const invites = (c.pendingInvites || []).length ? `<h2 class="section-title" style="margin:24px 0 10px;font-size:16px;">Invited, not signed up yet</h2>
+    : `<div class="mat-list"><div class="mat-empty"><b>No students yet</b>Give students the class code <b class="mono" style="display:inline;">${esc(c.joinCode)}</b>, or use Add people to add them by email.</div></div>`;
+  const invites = (c.pendingInvites || []).length ? `<h2 class="section-title people-h">Invited, not signed up yet</h2>
     <div class="card list-card">${c.pendingInvites.map(i => `<div class="list-row"><span class="grow mono small">${esc(i.email)}</span><span class="tiny muted">invited ${esc(timeAgo(i.invitedAt))}</span><button class="btn-icon" aria-label="Cancel invite for ${esc(i.email)}" data-email="${esc(i.email)}" onclick="removeInvite(this.dataset.email)">${I.x}</button></div>`).join('')}</div>
     <div class="tiny muted" style="margin-top:6px;">They join this class automatically when they create their Visor account with that email.</div>` : '';
-  return `${courseHead(c, 'Members', { actions, sub: `${vcPlural(c.students.length, 'student')} · access code <b class="mono">${esc(c.joinCode)}</b> · ${c.joinOpen ? 'joining with the code is open' : 'joining with the code is closed (students you add by email still join)'}` })}
+  return `${courseHead(c, 'People', { actions, sub: `Class code <b class="mono">${esc(c.joinCode)}</b> · ${c.joinOpen ? 'joining with the code is open' : 'joining with the code is closed (students you add by email still join)'}` })}
+    <h2 class="section-title people-h" style="margin-top:0;">Teachers <span class="muted">${teachers.length}</span></h2>
+    ${teacherRows}
+    <div class="tiny muted" style="margin-top:6px;">Co-teachers can do everything you can in this class, except delete it${c.isOwner ? '' : ' or remove other teachers'}.</div>
+    <h2 class="section-title people-h">Students <span class="muted">${c.students.length}</span></h2>
     ${roster}${invites}`;
 }
 function openAddMembers() {
@@ -902,6 +925,29 @@ function openAddMembers() {
     footer: `<button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="addClassStudents()">Add students</button>` });
   setTimeout(() => $('addEmails')?.focus(), 50);
 }
+function openAddTeacher() {
+  openModal({ title: 'Add a teacher', sub: `They can do everything you can in ${esc(cp.cls.name)}: assignments, announcements, people, live sessions and review. Only the owner can delete the class.`,
+    body: `<div class="field"><label for="atEmail">Their Visor teacher account’s email</label><input id="atEmail" class="input" type="email" autocomplete="off" placeholder="colleague@school.org" /></div><div id="atErr" class="form-error hidden"></div>`,
+    footer: `<button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="atGo">Add teacher</button>` });
+  const go = () => modalBusy(async () => {
+    try { const r = await api(`/api/classes/${cp.cls.id}/teachers`, { method: 'POST', body: { email: $('atEmail').value } }); cp.cls = { ...cp.cls, ...r.class }; closeModal(); forgetCourses(); renderClassPage(); toast('Teacher added'); }
+    catch (e) { formError('atErr', e.message); }
+  });
+  $('atGo').onclick = go;
+  $('atEmail').addEventListener('keydown', e => { if (e.key === 'Enter') go(); });
+  setTimeout(() => $('atEmail')?.focus(), 50);
+}
+async function removeTeacher(id) {
+  const t = teachersOf(cp.cls).find(x => x.id === id);
+  if (!await confirmModal('Remove this teacher?', `${t?.name || 'They'} will no longer see ${cp.cls.name} or anything in it. Their announcements stay.`, { okLabel: 'Remove', danger: true })) return;
+  try { const r = await api(`/api/classes/${cp.cls.id}/teachers/${id}`, { method: 'DELETE' }); cp.cls = { ...cp.cls, ...r.class }; forgetCourses(); renderClassPage(); toast('Teacher removed'); }
+  catch (e) { toast(e.message, 'err'); }
+}
+async function leaveClass() {
+  if (!await confirmModal(`Leave ${cp.cls.name}?`, 'You’ll no longer see the class or anything in it. The owner can add you again.', { okLabel: 'Leave class', danger: true })) return;
+  try { await api(`/api/classes/${cp.cls.id}/teachers/${me.id}`, { method: 'DELETE' }); forgetCourses(); cp = null; toast('You left the class'); VisorRouter.go('/'); }
+  catch (e) { toast(e.message, 'err'); }
+}
 
 async function classPatch(body, msg) {
   try { const r = await api(`/api/classes/${cp.cls.id}`, { method: 'PATCH', body }); cp.cls = { ...cp.cls, ...r.class }; forgetCourses(); renderClassPage(); if (msg) toast(msg); }
@@ -909,8 +955,8 @@ async function classPatch(body, msg) {
 }
 const setJoinOpen = open => classPatch({ joinOpen: open }, open ? 'Joining is open' : 'Joining is closed');
 async function rotateCode() {
-  if (!await confirmModal('Make a new access code?', 'The old code stops working. Students already in the class stay in it.', { okLabel: 'New code' })) return;
-  try { const r = await api(`/api/classes/${cp.cls.id}/rotate-code`, { method: 'POST' }); cp.cls = { ...cp.cls, ...r.class }; renderClassPage(); toast('New access code ready'); } catch (e) { toast(e.message, 'err'); }
+  if (!await confirmModal('Make a new class code?', 'The old code stops working. Students already in the class stay in it.', { okLabel: 'New code' })) return;
+  try { const r = await api(`/api/classes/${cp.cls.id}/rotate-code`, { method: 'POST' }); cp.cls = { ...cp.cls, ...r.class }; renderClassPage(); toast('New class code ready'); } catch (e) { toast(e.message, 'err'); }
 }
 // emails: a list (Google Classroom import), or the Add by email box
 async function addClassStudents(list) {
@@ -956,10 +1002,10 @@ function classSettingsHtml() {
   return `${courseHead(c, 'Settings')}
   <div class="stack" style="max-width:680px;">
     <section class="card card-pad">
-      <h2 class="section-title" style="font-size:16px;margin-bottom:14px;">Course details</h2>
+      <h2 class="section-title" style="font-size:16px;margin-bottom:14px;">Class details</h2>
       <div class="field"><label for="csName">Class name</label><input id="csName" class="input" value="${esc(c.name)}" maxlength="120" /></div>
       <div class="field"><label>Colour</label>${swatchesHtml('csColor', csColor, false)}
-        <div class="color-preview">${courseArt(c, '', 'div', 'id="csPreview"')}<span class="hint">The course picture, its tile on Home and its calendar events.</span></div></div>
+        <div class="color-preview">${courseArt(c, '', 'div', 'id="csPreview"')}<span class="hint">The class banner, its tile on Home and its calendar events.</span></div></div>
       <div class="field"><label for="csRetention">Keep research records for</label>
         <div style="display:flex;gap:8px;align-items:center;"><input id="csRetention" class="input" type="number" min="1" max="3650" value="${c.researchRetentionDays || 180}" style="max-width:120px;" /><span class="muted small">days</span></div>
         <div class="hint">Searches, pages and copies the extension recorded during writing sessions are deleted after this. Essays and their writing history are kept.</div></div>
@@ -967,15 +1013,19 @@ function classSettingsHtml() {
     </section>
     <section class="card card-pad">
       <h2 class="section-title" style="font-size:16px;margin-bottom:6px;">${c.archived ? 'Archived' : 'Archive'}</h2>
-      <p class="small muted" style="margin:0 0 12px;">${c.archived ? 'This class is archived: it’s hidden from Home and the Courses menu, but nothing is deleted.' : 'Archiving hides the class from Home and the Courses menu. Nothing is deleted, and you can bring it back.'}</p>
+      <p class="small muted" style="margin:0 0 12px;">${c.archived ? 'This class is archived: it’s hidden from Home and the Classes menu, but nothing is deleted.' : 'Archiving hides the class from Home and the Classes menu (for every teacher of it). Nothing is deleted, and you can bring it back.'}</p>
       <button class="btn btn-ghost" onclick="classPatch({ archived: ${!c.archived} }, '${c.archived ? 'Class restored' : 'Class archived'}')">${c.archived ? 'Restore class' : 'Archive class'}</button>
     </section>
-    <section class="card card-pad danger-zone">
+    ${c.isOwner === false ? `<section class="card card-pad danger-zone">
+      <h2 class="section-title" style="font-size:16px;margin-bottom:6px;color:var(--red);">Leave class</h2>
+      <p class="small muted" style="margin:0 0 12px;">You’re a co-teacher here. Leaving takes the class off your Home; nothing in it is deleted. Only the owner can delete the class.</p>
+      <button class="btn btn-danger" onclick="leaveClass()">${I.x}Leave class</button>
+    </section>` : `<section class="card card-pad danger-zone">
       <h2 class="section-title" style="font-size:16px;margin-bottom:6px;color:var(--red);">Delete class</h2>
-      <p class="small muted" style="margin:0 0 12px;">Deletes every assignment, folder, update, essay, writing session, research record, discussion recording, piece of feedback and group project in this class.</p>
+      <p class="small muted" style="margin:0 0 12px;">Deletes every assignment, folder, announcement, essay, writing session, research record, discussion recording, piece of feedback and group project in this class, for every teacher and student in it.</p>
       <div class="field"><label for="csConfirm">Type <b>${esc(c.name)}</b> to confirm</label><input id="csConfirm" class="input" autocomplete="off" /></div>
       <button class="btn btn-danger" onclick="deleteClass()">${I.trash}Delete class</button>
-    </section>
+    </section>`}
   </div>`;
 }
 function saveClassSettings() { classPatch({ name: $('csName').value, color: csColor, researchRetentionDays: Number($('csRetention').value) }, 'Saved'); }

@@ -13,7 +13,7 @@ const STYLE_NAME = { mla: 'MLA 9', apa: 'APA 7', chicago: 'Chicago' };
 /* ====================== create / edit form ====================== */
 let af = null; // { classId, type, a (existing or null), groups, students, folders, folderId }
 
-// opts.folderId: the folder a new assignment goes in (Add Materials inside a folder)
+// opts.folderId: the folder a new assignment goes in (New inside a folder)
 async function openAssignmentForm(classId, type, existing = null, opts = {}) {
   // The roster and folders of this assignment's class (not whichever class page was open last)
   let students = cp?.cls?.id === classId ? cp.cls.students : null, folders = cp?.cls?.id === classId ? cp.folders : null;
@@ -372,7 +372,7 @@ async function moveFromAssignment() {
   const classId = ap.data.class.id;
   try { if (cp?.cls?.id !== classId) await loadClass(classId, 'materials', null); else await loadClass(classId); }
   catch (e) { return toast(e.message, 'err'); }
-  if (!cp.folders.length) return toast('This class has no folders yet. Make one with Add Materials → Folder on the class page.', 'err');
+  if (!cp.folders.length) return toast('This class has no folders yet. Make one with New → Folder on the class’s Assignments page.', 'err');
   openMoveModal('assignment', ap.data.assignment.id);
 }
 // Copy into one of the teacher's classes (from the assignment page or the class's list)

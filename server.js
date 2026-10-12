@@ -187,13 +187,21 @@ const requireTeacher = ah(async (req, res, next) => {
   if (!u || u.role !== 'teacher') return res.status(403).json({ error: 'teachers only' });
   next();
 });
-// Load the project and check the caller can see it (teacher-owner or student member)
+// A project's teacher: the one who made it, and for a class's group project
+// (project.classId) every teacher of that class, co-teachers included
+function isProjectTeacher(core, project, userId) {
+  if (project.teacherId === userId) return true;
+  const cls = project.classId ? own(core.classes, project.classId) : null;
+  return !!cls && classes.isClassTeacher(cls, userId);
+}
+// Load the project and check the caller can see it (its teacher or a student member)
 function projectFor(req, core, id = req.params.id) {
   const project = own(core.projects, id);
   if (!project) throw new HttpError(404, 'project not found');
   const me = currentUser(req, core);
-  if (!me || (project.teacherId !== me.id && !project.studentIds.includes(me.id))) throw new HttpError(403, 'not a member of this project');
-  return { project, isDemo: false, me, isTeacher: project.teacherId === me.id };
+  const isTeacher = !!me && isProjectTeacher(core, project, me.id);
+  if (!me || (!isTeacher && !project.studentIds.includes(me.id))) throw new HttpError(403, 'not a member of this project');
+  return { project, isDemo: false, me, isTeacher };
 }
 // Load a resource and check it belongs to the project
 async function resourceFor(got, rid, type) {
@@ -702,7 +710,7 @@ async function projectResources(project) {
 }
 
 function publicProject(core, project, me, { resources, resourceCount } = {}) {
-  const isTeacher = project.teacherId === me.id;
+  const isTeacher = isProjectTeacher(core, project, me.id);
   const out = {
     id: project.id, name: project.name, code: isTeacher ? project.code : undefined,
     teacher: publicUser(core.users[project.teacherId]), students: project.studentIds.map(id => publicUser(core.users[id])).filter(Boolean),
@@ -730,7 +738,7 @@ app.get('/api/projects', requireAuth, ah(async (req, res) => {
   const me = currentUser(req, core);
   if (!me) return res.status(401).json({ error: 'not signed in' });
   const mineRaw = Object.values(core.projects)
-    .filter(p => p.teacherId === me.id || p.studentIds.includes(me.id))
+    .filter(p => isProjectTeacher(core, p, me.id) || p.studentIds.includes(me.id))
     .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
   const counts = await repo.countResources(mineRaw.map(p => p.id));
   const mine = mineRaw.map(p => publicProject(core, p, me, { resourceCount: counts[p.id] || 0 }));
@@ -1273,9 +1281,24 @@ async function classSummary(cls, isTeacher, meId, loaded = {}) {
   return out;
 }
 
+// A class's teachers, owner first: [{ id, name, avatarColor, owner }], with
+// each one's email when withEmail (the class's own teachers only)
+function publicTeachers(core, cls, withEmail = false) {
+  return classes.teacherIdsOf(cls).map(id => own(core.users, id)).filter(Boolean).map(u => {
+    const t = { id: u.id, name: fullName(u), avatarColor: u.avatarColor || null, owner: u.id === cls.teacherId };
+    if (withEmail) t.email = u.email;
+    return t;
+  });
+}
+
+// teacher: the owner. isTeacher: the owner or a co-teacher.
 function publicClass(core, cls, me) {
-  const isTeacher = cls.teacherId === me.id;
-  const base = { id: cls.id, name: cls.name, color: classes.colorFor(cls), archived: !!cls.archived, createdAt: cls.createdAt, isTeacher, teacher: publicUser(core.users[cls.teacherId]), studentCount: cls.studentIds.length };
+  const isTeacher = classes.isClassTeacher(cls, me.id);
+  const base = {
+    id: cls.id, name: cls.name, color: classes.colorFor(cls), archived: !!cls.archived, createdAt: cls.createdAt,
+    isTeacher, isOwner: cls.teacherId === me.id, teacher: publicUser(core.users[cls.teacherId]), teachers: publicTeachers(core, cls, isTeacher),
+    studentCount: cls.studentIds.length
+  };
   if (!isTeacher) return base;
   return {
     ...base,
@@ -1291,9 +1314,9 @@ function publicClass(core, cls, me) {
 app.get('/api/classes', requireAuth, ah(async (req, res) => {
   const core = await repo.readCore();
   const me = meOrThrow(req, core);
-  const mine = Object.values(core.classes).filter(c => c.teacherId === me.id || c.studentIds.includes(me.id))
+  const mine = Object.values(core.classes).filter(c => classes.isClassTeacher(c, me.id) || c.studentIds.includes(me.id))
     .sort((a, b) => Number(!!a.archived) - Number(!!b.archived) || (a.createdAt < b.createdAt ? 1 : -1));
-  const list = await Promise.all(mine.map(async c => ({ ...publicClass(core, c, me), ...(await classSummary(c, c.teacherId === me.id, me.id)) })));
+  const list = await Promise.all(mine.map(async c => ({ ...publicClass(core, c, me), ...(await classSummary(c, classes.isClassTeacher(c, me.id), me.id)) })));
   res.json({ classes: list });
 }));
 
@@ -1349,6 +1372,28 @@ app.delete('/api/classes/:id/students/:userId', requireAuth, ah(async (req, res)
 app.delete('/api/classes/:id/invites', requireAuth, ah(async (req, res) => {
   const out = await repo.withCore(core => { const got = teacherClass(req, core); classes.removeInvite(got.cls, req.body?.email); return publicClass(core, got.cls, got.me); });
   res.json({ class: out });
+}));
+
+// ---- Co-teachers ----
+// Any teacher of a class can add another teacher account by email. Only the
+// owner removes other teachers; a co-teacher can remove themselves (leave).
+
+// { email }
+app.post('/api/classes/:id/teachers', requireAuth, ah(async (req, res) => {
+  const out = await repo.withCore(core => { const got = teacherClass(req, core); classes.addTeacher(core, got.cls, req.body?.email); return publicClass(core, got.cls, got.me); });
+  res.json({ class: out });
+}));
+
+app.delete('/api/classes/:id/teachers/:userId', requireAuth, ah(async (req, res) => {
+  const out = await repo.withCore(core => {
+    const got = teacherClass(req, core);
+    const userId = String(req.params.userId);
+    // Removing the owner is refused below (400), whoever asks
+    if (!got.isOwner && userId !== got.me.id && userId !== got.cls.teacherId) throw new HttpError(403, 'Only the class owner can remove another teacher.');
+    classes.removeTeacher(got.cls, userId);
+    return got.isOwner ? { class: publicClass(core, got.cls, got.me) } : { ok: true, left: true };
+  });
+  res.json(out);
 }));
 
 // A class's folders and assignments as the class page places them
@@ -1407,7 +1452,7 @@ app.get('/api/dashboard', requireAuth, ah(async (req, res) => {
   const core = await repo.readCore();
   const me = meOrThrow(req, core);
   if (me.role === 'teacher') {
-    const mine = Object.values(core.classes).filter(c => c.teacherId === me.id && !c.archived);
+    const mine = Object.values(core.classes).filter(c => classes.isClassTeacher(c, me.id) && !c.archived);
     const happeningNow = [], needsReview = [];
     for (const cls of mine) {
       const [assignments, sessions, docs] = await Promise.all([
@@ -1479,11 +1524,12 @@ app.delete('/api/classes/:id/students/:userId/data', requireAuth, ah(async (req,
   res.json({ ok: true });
 }));
 
-// Deleting a class removes everything in it. The page asks the teacher to type
-// the class name first; the server checks it too.
+// Deleting a class removes everything in it, so only its owner can. The page
+// asks the teacher to type the class name first; the server checks it too.
 app.delete('/api/classes/:id', requireAuth, ah(async (req, res) => {
   const core = await repo.readCore();
   const got = teacherClass(req, core);
+  if (!got.isOwner) throw new HttpError(403, 'Only the class owner can delete it.');
   if (String(req.body?.confirmName || '').trim() !== got.cls.name) throw new HttpError(400, 'Type the class name exactly to delete it.');
   await deleteClassRecords(core, got.cls);
   await repo.withCore(c => { delete c.classes[got.cls.id]; });
@@ -1529,7 +1575,7 @@ async function submissionRows(core, cls, a) {
 app.post('/api/classes/:id/assignments', requireAuth, ah(async (req, res) => {
   const core = await repo.readCore();
   const got = teacherClass(req, core);
-  const a = assignments.createAssignment(got.cls, req.body || {});
+  const a = assignments.createAssignment(got.cls, req.body || {}, got.me.id);
   const { folders, assignments: list } = await classMaterials(got.cls.id);
   a.folderId = materials.folderInClass(folders, req.body?.folderId);
   a.position = materials.topPosition(materials.levelItems(folders, list, a.folderId));
@@ -1542,7 +1588,12 @@ app.get('/api/assignments/:id', requireAuth, ah(async (req, res) => {
   const core = await repo.readCore();
   const got = await assignmentFor(req, core);
   const { a, cls } = got;
-  const classInfo = { id: cls.id, name: cls.name, color: classes.colorFor(cls), archived: !!cls.archived, teacher: { id: cls.teacherId, name: fullName(core.users[cls.teacherId]) }, studentCount: cls.studentIds.length };
+  // teacher: the owner; teachers: every teacher, owner first (no emails here)
+  const classInfo = {
+    id: cls.id, name: cls.name, color: classes.colorFor(cls), archived: !!cls.archived,
+    teacher: { id: cls.teacherId, name: fullName(core.users[cls.teacherId]) }, teachers: publicTeachers(core, cls), isOwner: got.isOwner,
+    studentCount: cls.studentIds.length
+  };
   if (got.isTeacher) Object.assign(classInfo, { joinCode: cls.joinCode, joinOpen: cls.joinOpen !== false });
   // The folders above it, top first, for the breadcrumb
   const folderPath = materials.folderPath(materials.tidy(await repo.listRecords('folder', { classId: cls.id }), []).folders, a.folderId);
@@ -1586,22 +1637,27 @@ app.patch('/api/assignments/:id', requireAuth, ah(async (req, res) => {
   res.json({ assignment: await repo.getRecord('assignment', a.id) });
 }));
 
+// publishedBy: the teacher who published it (Recent activity shows them)
 app.post('/api/assignments/:id/publish', requireAuth, ah(async (req, res) => {
   const core = await repo.readCore();
   const got = await teacherAssignment(req, core);
   const published = req.body?.published !== false;
-  const a = await repo.updateRecord('assignment', got.a.id, x => { x.publishedAt = published ? (x.publishedAt || now()) : null; x.updatedAt = now(); });
+  const a = await repo.updateRecord('assignment', got.a.id, x => {
+    if (published && !x.publishedAt) { x.publishedAt = now(); x.publishedBy = got.me.id; }
+    else if (!published) { x.publishedAt = null; delete x.publishedBy; }
+    x.updatedAt = now();
+  });
   res.json({ assignment: a });
 }));
 
-// Copy to another of the teacher's classes (or the same one). The copy goes at
+// Copy to another class the caller teaches (or the same one). The copy goes at
 // the top of the original's folder in the same class, or of the other class.
 app.post('/api/assignments/:id/duplicate', requireAuth, ah(async (req, res) => {
   const core = await repo.readCore();
   const got = await teacherAssignment(req, core);
   const target = classes.classFor(core, got.me, req.body?.classId || got.cls.id);
   if (!target.isTeacher) throw new HttpError(403, 'you can only copy into your own classes');
-  const copy = assignments.duplicateAssignment(got.a, target.cls);
+  const copy = assignments.duplicateAssignment(got.a, target.cls, got.me.id);
   const { folders, assignments: list } = await classMaterials(target.cls.id);
   copy.folderId = target.cls.id === got.cls.id ? (list.find(x => x.id === got.a.id)?.folderId ?? null) : null;
   copy.position = materials.topPosition(materials.levelItems(folders, list, copy.folderId));
@@ -1840,9 +1896,10 @@ app.delete('/api/updates/:uid', requireAuth, ah(async (req, res) => {
 
 // ---- Recent activity and the calendar ----
 
-// The caller's classes that are still running (teaching or enrolled), newest first
+// The caller's classes that are still running (teaching, co-teaching or
+// enrolled), newest first
 function activeClassesOf(core, me) {
-  return Object.values(core.classes).filter(c => !c.archived && (c.teacherId === me.id || c.studentIds.includes(me.id)))
+  return Object.values(core.classes).filter(c => !c.archived && (classes.isClassTeacher(c, me.id) || c.studentIds.includes(me.id)))
     .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
 }
 
@@ -1855,10 +1912,13 @@ app.get('/api/activity', requireAuth, ah(async (req, res) => {
   const perClass = await Promise.all(activeClassesOf(core, me).map(async cls => {
     const [updates, list] = await Promise.all([repo.listRecords('announcement', { classId: cls.id }), repo.listRecords('assignment', { classId: cls.id })]);
     const where = { classId: cls.id, className: cls.name, color: classes.colorFor(cls) };
-    const teacher = { id: cls.teacherId, name: fullName(own(core.users, cls.teacherId)) };
+    // Who published it; the class owner for older assignments (or when that
+    // account is gone)
+    const owner = { id: cls.teacherId, name: fullName(own(core.users, cls.teacherId)) };
+    const publisherOf = a => { const u = a.publishedBy ? own(core.users, a.publishedBy) : null; return u ? { id: u.id, name: fullName(u) } : owner; };
     return [
       ...updates.map(u => ({ kind: 'update', at: u.createdAt, update: publicUpdate(core, u), ...where })),
-      ...list.filter(a => a.publishedAt).map(a => ({ kind: 'assignment', at: a.publishedAt, assignmentId: a.id, title: a.title, type: a.type, dueAt: a.dueAt || null, ...where, teacher }))
+      ...list.filter(a => a.publishedAt).map(a => ({ kind: 'assignment', at: a.publishedAt, assignmentId: a.id, title: a.title, type: a.type, dueAt: a.dueAt || null, ...where, teacher: publisherOf(a) }))
     ];
   }));
   const key = x => `${x.kind}:${x.update?.id || x.assignmentId}`;
@@ -1881,7 +1941,7 @@ app.get('/api/calendar', requireAuth, ah(async (req, res) => {
   if (to - from > CALENDAR_MAX_DAYS * 864e5) throw new HttpError(400, `Show at most ${CALENDAR_MAX_DAYS} days at a time`);
   const mine = activeClassesOf(core, me);
   const perClass = await Promise.all(mine.map(async cls => {
-    const isTeacher = cls.teacherId === me.id;
+    const isTeacher = classes.isClassTeacher(cls, me.id);
     const [list, docs] = await Promise.all([repo.listRecords('assignment', { classId: cls.id }), isTeacher ? [] : repo.listRecords('doc', { classId: cls.id, studentId: me.id })]);
     const events = [];
     for (const a of list.filter(a => isTeacher || a.publishedAt)) {
@@ -1896,7 +1956,7 @@ app.get('/api/calendar', requireAuth, ah(async (req, res) => {
     return events;
   }));
   const events = perClass.flat().sort((x, y) => Date.parse(x.at) - Date.parse(y.at) || (x.id < y.id ? -1 : 1));
-  res.json({ events, classes: mine.map(c => ({ id: c.id, name: c.name, color: classes.colorFor(c), isTeacher: c.teacherId === me.id })) });
+  res.json({ events, classes: mine.map(c => ({ id: c.id, name: c.name, color: classes.colorFor(c), isTeacher: classes.isClassTeacher(c, me.id) })) });
 }));
 
 // ---- Live session board (Section 7.9) ----
@@ -2064,14 +2124,15 @@ async function sessionAuth(req) {
   return t;
 }
 
-// A student document and who may see it: its student, or the class teacher.
+// A student document and who may see it: its student (isOwner here), or a
+// teacher of the class (owner or co-teacher).
 async function docFor(req, core, docId = req.params.docId) {
   const me = await writerUser(req, core);
   const doc = await repo.getRecord('doc', docId);
   if (!doc) throw new HttpError(404, 'document not found');
   const cls = own(core.classes, doc.classId);
   const isOwner = doc.studentId === me.id;
-  const isTeacher = !!cls && cls.teacherId === me.id;
+  const isTeacher = !!cls && classes.isClassTeacher(cls, me.id);
   if (!isOwner && !isTeacher) throw new HttpError(403, 'not your document');
   const a = await repo.getRecord('assignment', doc.assignmentId);
   return { doc, a, cls, me, isOwner, isTeacher };
@@ -2365,8 +2426,8 @@ app.post('/api/write/:docId/images', ah(async (req, res, next) => { req.writeSes
   res.json({ id, url: `/api/images/${id}` });
 }));
 
-// A picture, for its student or their class teacher. Anyone else gets the same
-// 404 as for a picture that doesn't exist.
+// A picture, for its student or a teacher of their class. Anyone else gets the
+// same 404 as for a picture that doesn't exist.
 app.get('/api/images/:id', ah(async (req, res) => {
   const notFound = () => res.status(404).json({ error: 'image not found' });
   const id = String(req.params.id);
@@ -2380,7 +2441,7 @@ app.get('/api/images/:id', ah(async (req, res) => {
   if (!ok && req.session?.userId) {
     const core = await repo.readCore();
     const me = currentUser(req, core);
-    ok = !!me && (me.id === rec.studentId || own(core.classes, rec.classId)?.teacherId === me.id);
+    ok = !!me && (me.id === rec.studentId || classes.isClassTeacher(own(core.classes, rec.classId), me.id));
   }
   if (!ok) return notFound();
   await imageStorage.streamImage(rec.stored, rec.mime, res);
@@ -2825,8 +2886,9 @@ app.post('/api/ext/cite/format', (req, res) => {
 });
 
 // ---- Group documents (Section 8.7) ----
-// Projects this person belongs to (as student or teacher)
-const projectsOf = (core, u) => Object.values(core.projects).filter(p => p.teacherId === u.id || p.studentIds.includes(u.id));
+// Projects this person belongs to (as student or teacher, co-teachers of a
+// class's group project included)
+const projectsOf = (core, u) => Object.values(core.projects).filter(p => isProjectTeacher(core, p, u.id) || p.studentIds.includes(u.id));
 
 // Google Docs linked to the person's group projects: [{ fileId, projectId, title }]
 app.get('/api/ext/linked-docs', extAuth, (req, res) => {
@@ -2945,7 +3007,9 @@ async function teacherDiscussion(req, core) {
   return got;
 }
 const rosterOf = (core, cls) => cls.studentIds.map(id => core.users[id]).filter(Boolean).map(u => ({ id: u.id, name: fullName(u) }));
-const teacherOf = (core, cls) => { const t = core.users[cls.teacherId]; return t ? { id: t.id, name: fullName(t) } : null; };
+// The class's teachers as voices: [{ id, name }], the owner first, then the
+// co-teachers (any of them may be heard leading a discussion)
+const teachersOf = (core, cls) => classes.teacherIdsOf(cls).map(id => own(core.users, id)).filter(Boolean).map(t => ({ id: t.id, name: fullName(t) }));
 
 // Segments that have been "transcribing" longer than a job may run were cut off
 async function reconcileDiscussion(d) {
@@ -3005,7 +3069,7 @@ async function transcribeDiscussionSegment(did, k) {
   if (!seg) return;
   const core = await repo.readCore();
   const cls = own(core.classes, d.classId);
-  const people = cls ? [...rosterOf(core, cls).map(r => r.name), teacherOf(core, cls)?.name].filter(Boolean) : [];
+  const people = cls ? [...rosterOf(core, cls), ...teachersOf(core, cls)].map(p => p.name).filter(Boolean) : [];
   const prev = d.segments.find(s => s.k === k - 1 && s.status === 'ready');
   const prompt = transcriptionPrompt({ setting: 'This is a recording of a class discussion at school, led by a teacher.', people, hints: discussionLib.hintsFrom(prev) });
   const { lines, speakers } = await transcribeAudio(seg.audio, prompt);
@@ -3027,7 +3091,7 @@ function discussionView(core, d, cls) {
     segments: (d.segments || []).sort((a, b) => a.k - b.k).map(s => ({ k: s.k, status: s.status, error: s.error || null, durationSec: s.durationSec || null, lines: (s.lines || []).length, audioUrl: `/api/discussions/${d.id}/segments/${s.k}/audio` })),
     speakers: d.speakers || [],
     transcript: lines.map(l => ({ i: l.i, t: l.t, label: l.speaker, speaker: nameFor(l.speaker), text: l.text })),
-    people: [...rosterOf(core, cls).map(r => ({ ...r, role: 'student' })), ...(teacherOf(core, cls) ? [{ ...teacherOf(core, cls), role: 'teacher' }] : [])],
+    people: [...rosterOf(core, cls).map(r => ({ ...r, role: 'student' })), ...teachersOf(core, cls).map(t => ({ ...t, role: 'teacher' }))],
     analysis: d.analysis || null
   };
 }
@@ -3150,7 +3214,7 @@ app.post('/api/discussions/:did/segments/:k/retranscribe', requireAuth, ah(async
 app.post('/api/discussions/:did/speakers', requireAuth, ah(async (req, res) => {
   const core = await repo.readCore();
   const got = await teacherDiscussion(req, core);
-  const allowed = new Set([...got.cls.studentIds, got.cls.teacherId]);
+  const allowed = new Set([...got.cls.studentIds, ...classes.teacherIdsOf(got.cls)]);
   const assignments = req.body?.assignments || {};
   const d = await repo.updateRecord('discussion', got.d.id, x => {
     for (const sp of x.speakers || []) {
@@ -3173,14 +3237,14 @@ app.post('/api/discussions/:did/analyze', requireAuth, ah(async (req, res) => {
   const ready = (d.segments || []).filter(s => s.status === 'ready');
   if (!ready.length) throw new HttpError(400, 'Nothing has been transcribed yet.');
   const lines = discussionLib.mergedLines(ready);
-  const roster = rosterOf(core, cls), teacher = teacherOf(core, cls);
-  const measured = discussionLib.measure(lines, d.speakers || [], roster, teacher);
+  const roster = rosterOf(core, cls), teachers = teachersOf(core, cls);
+  const measured = discussionLib.measure(lines, d.speakers || [], roster, teachers);
   let ai = null, aiError = null;
   if (!geminiReady()) aiError = 'The AI-written summary is unavailable: this server has no Gemini access set up. The measured figures are complete.';
   else {
     try {
-      const raw = await geminiJSON([{ text: discussionLib.aiPrompt({ title: d.title, promptText: a?.instructions, lines, speakers: d.speakers || [], roster, teacher }) }], { temperature: 0.2, maxOutputTokens: 6000 });
-      ai = discussionLib.sanitizeAI(raw, { lines, speakers: d.speakers || [], roster, teacher });
+      const raw = await geminiJSON([{ text: discussionLib.aiPrompt({ title: d.title, promptText: a?.instructions, lines, speakers: d.speakers || [], roster, teacher: teachers }) }], { temperature: 0.2, maxOutputTokens: 6000 });
+      ai = discussionLib.sanitizeAI(raw, { lines, speakers: d.speakers || [], roster, teacher: teachers });
     } catch (err) { aiError = `Gemini could not write the summary: ${err.message}`; }
   }
   const analysis = { at: now(), measured, ai, aiError };
@@ -3219,13 +3283,14 @@ async function runRetentionSweep() {
 app.get('/api/me/export', requireAuth, ah(async (req, res) => {
   const core = await repo.readCore();
   const me = meOrThrow(req, core);
-  const myClasses = Object.values(core.classes).filter(c => c.studentIds.includes(me.id) || c.teacherId === me.id);
+  const myClasses = Object.values(core.classes).filter(c => c.studentIds.includes(me.id) || classes.isClassTeacher(c, me.id));
   const docs = await repo.listRecords('doc', { studentId: me.id });
   const out = {
     exportedAt: now(), about: 'Everything Visor Classroom keeps about you: your account, your classes, your essays with their full writing history and the pictures you added, your writing sessions, the research the Visor extension recorded during them, and teacher feedback.',
     imagesNote: 'Pictures you added to an essay are listed under that essay (images). To download one, open its url while you’re signed in to Visor.',
     account: publicUser(me, core),
-    classes: myClasses.map(c => ({ id: c.id, name: c.name, teacher: fullName(core.users[c.teacherId]) })),
+    // teacher: the owner; teachers: everyone teaching it, owner first
+    classes: myClasses.map(c => ({ id: c.id, name: c.name, teacher: fullName(core.users[c.teacherId]), teachers: classes.teacherIdsOf(c).map(id => fullName(own(core.users, id))).filter(Boolean) })),
     projects: Object.values(core.projects).filter(p => p.studentIds.includes(me.id)).map(p => ({ id: p.id, name: p.name })),
     documents: []
   };

@@ -1,6 +1,6 @@
-/* Visor Classroom — class updates (announcements) and Home's Recent
-   Activity. Teachers post updates on a class (or several at once from
-   Home); students read them on the class's Updates page and in Recent
+/* Visor Classroom — class announcements ("updates" in the code and API)
+   and Home's Activity. Teachers post announcements on a class (or several at once from
+   Home); students read them on the class's Announcements page and in Home's
    Activity, next to newly published assignments. Uses classes.js helpers. */
 
 'use strict';
@@ -26,8 +26,8 @@ const updSeen = new Map(); // id -> { u, ctx: { canManage, showClass, cls } }
 function updateCardHtml(u, ctx) {
   updSeen.set(u.id, { u, ctx });
   const when = `<span class="upd-time" title="${esc(vcDateTime(u.createdAt))}">${esc(timeAgo(u.createdAt))}${u.editedAt ? ' · edited' : ''}</span>`;
-  const where = ctx.showClass && ctx.cls ? `<span class="upd-where">posted in <a href="/class/${ctx.cls.id}?tab=updates" data-link>${esc(ctx.cls.name)}</a></span>` : '';
-  const menu = ctx.canManage ? ddHtml({ id: `um-${u.id}`, btnClass: 'btn-icon', btn: PI.dots, label: 'Update options', right: true, items: [
+  const where = ctx.showClass && ctx.cls ? `<span class="upd-where">posted in <a href="/class/${ctx.cls.id}?tab=announcements" data-link>${esc(ctx.cls.name)}</a></span>` : '';
+  const menu = ctx.canManage ? ddHtml({ id: `um-${u.id}`, btnClass: 'btn-icon', btn: PI.dots, label: 'Announcement options', right: true, items: [
     { label: 'Edit', icon: I.edit, onclick: `editUpdate('${u.id}')` },
     { label: u.pinned ? 'Unpin' : 'Pin to the top', icon: PI.pin, onclick: `pinUpdate('${u.id}', ${!u.pinned})` },
     'sep',
@@ -46,7 +46,7 @@ function updateCardHtml(u, ctx) {
 function editUpdate(id) {
   const seen = updSeen.get(id), body = $(`updBody-${id}`);
   if (!seen || !body) return;
-  body.outerHTML = `<div class="upd-edit" id="updBody-${id}"><textarea class="input" id="updEdit-${id}" maxlength="5000" aria-label="Edit the update">${esc(seen.u.body)}</textarea>
+  body.outerHTML = `<div class="upd-edit" id="updBody-${id}"><textarea class="input" id="updEdit-${id}" maxlength="5000" aria-label="Edit the announcement">${esc(seen.u.body)}</textarea>
     <div class="btn-row"><button class="btn btn-ghost btn-sm" onclick="redrawUpdate('${id}')">Cancel</button><button class="btn btn-primary btn-sm" onclick="saveUpdateEdit('${id}')">Save</button></div></div>`;
   const t = $(`updEdit-${id}`); t.focus(); t.setSelectionRange(t.value.length, t.value.length);
 }
@@ -61,28 +61,28 @@ async function saveUpdateEdit(id) {
   try {
     const r = await api(`/api/updates/${id}`, { method: 'PATCH', body: { body: $(`updEdit-${id}`).value } });
     seen.u = { ...seen.u, ...r.update };
-    redrawUpdate(id); toast('Update saved');
+    redrawUpdate(id); toast('Announcement saved');
   } catch (e) { toast(e.message, 'err'); if (btn) btn.disabled = false; }
 }
 async function pinUpdate(id, pinned) {
   try {
     await api(`/api/updates/${id}`, { method: 'PATCH', body: { pinned } });
-    toast(pinned ? 'Pinned to the top of the class’s updates' : 'Unpinned');
+    toast(pinned ? 'Pinned to the top of the class’s announcements' : 'Unpinned');
     if (upd?.el?.isConnected) loadClassUpdates(); else if (act?.el?.isConnected) loadActivity();
   } catch (e) { toast(e.message, 'err'); }
 }
 async function deleteUpdate(id) {
-  if (!await confirmModal('Delete this update?', 'Students won’t see it any more. This cannot be undone.', { okLabel: 'Delete', danger: true })) return;
+  if (!await confirmModal('Delete this announcement?', 'Students won’t see it any more. This cannot be undone.', { okLabel: 'Delete', danger: true })) return;
   try {
     await api(`/api/updates/${id}`, { method: 'DELETE' });
     $(`upd-${id}`)?.remove(); updSeen.delete(id);
     if (upd?.el?.isConnected) { upd.pinned = upd.pinned.filter(u => u.id !== id); upd.list = upd.list.filter(u => u.id !== id); if (!upd.pinned.length && !upd.list.length) drawClassUpdates(); }
     if (act?.el?.isConnected) act.items = act.items.filter(x => x.update?.id !== id);
-    toast('Update deleted');
+    toast('Announcement deleted');
   } catch (e) { toast(e.message, 'err'); }
 }
 
-/* ====================== a class's Updates page ====================== */
+/* ====================== a class's Announcements page ====================== */
 let upd = null; // { el, cls, pinned, list, more, busy }
 
 function renderClassUpdates(el, cls) {
@@ -110,14 +110,14 @@ function drawClassUpdates() {
   if (!el.isConnected) return;
   const ctx = { canManage: cls.isTeacher, showClass: false, cls };
   const composer = cls.isTeacher && !cls.archived ? `<div class="upd-composer">
-      <textarea id="updText" maxlength="5000" placeholder="Write an update for ${esc(cls.name)}: a reminder, a change of plan, a link…" aria-label="New update"></textarea>
+      <textarea id="updText" maxlength="5000" placeholder="Write an announcement for ${esc(cls.name)}: a reminder, a change of plan, a link…" aria-label="New announcement"></textarea>
       <div class="upd-composer-foot"><label class="check-row"><input type="checkbox" id="updPin" /> <span>Pin to the top</span></label><span class="grow"></span>
         <button class="btn btn-primary btn-sm" id="updPost" onclick="postClassUpdate()">${PI.send}Post</button></div></div>` : '';
   let feed;
   if (upd.pinned === null) feed = '<div class="loading-row"><span class="spinner"></span></div>';
-  else if (!upd.pinned.length && !upd.list.length) feed = `<div class="feed-empty"><b>No updates yet</b>${cls.isTeacher ? 'Updates you post here show up for every student in the class, on this page and in their Recent Activity.' : 'Your teacher’s announcements for this class show up here.'}</div>`;
+  else if (!upd.pinned.length && !upd.list.length) feed = `<div class="feed-empty"><b>No announcements yet</b>${cls.isTeacher ? 'Announcements you post here show up for every student in the class, on this page and in their Activity on Home.' : 'Your teacher’s announcements for this class show up here.'}</div>`;
   else feed = [...upd.pinned, ...upd.list].map(u => updateCardHtml(u, ctx)).join('')
-    + (upd.more ? `<div class="upd-more"><button class="btn btn-ghost btn-sm" onclick="loadClassUpdates(true)">Show older updates</button></div>` : '');
+    + (upd.more ? `<div class="upd-more"><button class="btn btn-ghost btn-sm" onclick="loadClassUpdates(true)">Show older announcements</button></div>` : '');
   // Keep anything half-typed in the box
   const draft = $('updText')?.value || '', pin = $('updPin')?.checked || false;
   el.innerHTML = composer + feed;
@@ -137,7 +137,7 @@ async function postClassUpdate() {
   finally { if ($('updPost')) $('updPost').disabled = false; }
 }
 
-/* ====================== Home: Recent Activity ====================== */
+/* ====================== Home: Activity ====================== */
 let act = null; // { el, classes, items, more, busy, picked: Set }
 
 function renderActivity(el, classes) {
@@ -165,12 +165,12 @@ function drawActivity() {
   const { el } = act;
   if (!el.isConnected) return;
   const composer = act.teaching.length ? `<div class="upd-composer">
-      <textarea id="actText" maxlength="5000" placeholder="Post an update to your classes…" aria-label="New update"></textarea>
+      <textarea id="actText" maxlength="5000" placeholder="Post an announcement to one or more of your classes…" aria-label="New announcement"></textarea>
       <div class="upd-composer-foot"><span class="small muted">Post to:</span><span class="upd-classes" role="group" aria-label="Classes to post to">${act.teaching.map(c => `<button type="button" class="upd-class cc-${courseColor(c)}" aria-pressed="${act.picked.has(c.id)}" onclick="pickActClass('${c.id}', this)"><i></i>${esc(c.name)}</button>`).join('')}</span>
         <span class="grow"></span><button class="btn btn-primary btn-sm" id="actPost" onclick="postActivityUpdate()">${PI.send}Post</button></div></div>` : '';
   let feed;
   if (act.items === null) feed = '<div class="loading-row"><span class="spinner"></span></div>';
-  else if (!act.items.length) feed = `<div class="feed-empty"><b>Nothing yet</b>${me.role === 'teacher' ? 'Updates you post and assignments you publish show up here.' : 'Your teachers’ updates and new assignments show up here.'}</div>`;
+  else if (!act.items.length) feed = `<div class="feed-empty"><b>Nothing yet</b>${me.role === 'teacher' ? 'Announcements and assignments published in your classes (by you or your co-teachers) show up here.' : 'Your teachers’ announcements and new assignments show up here.'}</div>`;
   else feed = act.items.map(activityItemHtml).join('') + (act.more ? `<div class="upd-more"><button class="btn btn-ghost btn-sm" onclick="loadActivity(true)">Show older activity</button></div>` : '');
   const draft = $('actText')?.value || '';
   el.innerHTML = composer + feed;

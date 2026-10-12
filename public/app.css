@@ -80,7 +80,7 @@ textarea.input { min-height: 120px; resize: vertical; line-height: 1.5; }
 .form-ok { background: var(--green-soft); color: var(--green-deep); border-radius: var(--r); padding: 10px 14px; font-size: 13px; margin-bottom: 14px; }
 
 /* ---------- pills / tags / avatars ---------- */
-.pill { display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; letter-spacing: .03em; text-transform: uppercase; white-space: nowrap; }
+.pill { display: inline-flex; align-items: center; gap: 6px; padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; }
 .pill-blue { background: var(--blue-soft); color: var(--blue-deep); }
 .pill-green { background: var(--green-soft); color: var(--green-deep); }
 .pill-amber { background: var(--amber-soft); color: var(--amber); }

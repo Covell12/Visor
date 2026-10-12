@@ -439,13 +439,14 @@ test('class page: the teacher gets counts per writing assignment, each student t
   assert.ok(r.data.assignments.every(a => a.stats === undefined), 'no class counts for students');
   assert.strictEqual(r.data.class.submitted, 0);
 
-  // the assignment page's class: colour, teacher, size; the join code only for the teacher
+  // the assignment page's class: colour, teacher(s), size; the join code only for the teacher
   const teacherInfo = { id: me.id, name: 'Tara Teacher' };
+  const teachers = [{ id: me.id, name: 'Tara Teacher', avatarColor: null, owner: true }];
   r = await teacher.get(`/api/assignments/${essay.id}`);
-  assert.deepStrictEqual(r.data.class, { id: cls.id, name: 'Writing lab', color: cls.color, archived: false, teacher: teacherInfo, studentCount: 4, joinCode: cls.joinCode, joinOpen: true });
+  assert.deepStrictEqual(r.data.class, { id: cls.id, name: 'Writing lab', color: cls.color, archived: false, teacher: teacherInfo, teachers, isOwner: true, studentCount: 4, joinCode: cls.joinCode, joinOpen: true });
   assert.deepStrictEqual(r.data.folderPath, []);
   r = await s1.get(`/api/assignments/${essay.id}`);
-  assert.deepStrictEqual(r.data.class, { id: cls.id, name: 'Writing lab', color: cls.color, archived: false, teacher: teacherInfo, studentCount: 4 });
+  assert.deepStrictEqual(r.data.class, { id: cls.id, name: 'Writing lab', color: cls.color, archived: false, teacher: teacherInfo, teachers, isOwner: false, studentCount: 4 });
   assert.deepStrictEqual(r.data.folderPath, []);
 });
 

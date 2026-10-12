@@ -43,7 +43,7 @@ const VisorRouter = (() => {
     document.querySelector('#appView > .shell')?.classList.remove('hidden');
   }
 
-  // The top bar: Home, Courses (any class or assignment page) or Calendar
+  // The top bar: Home, Classes (any class or assignment page) or Calendar
   function setNav(path) {
     const section = path === '/' ? 'home' : /^\/(class|a|review|write)\//.test(path) ? 'courses' : /^\/calendar\/?$/.test(path) ? 'calendar' : '';
     document.querySelectorAll('.topnav [data-nav]').forEach(a => {
