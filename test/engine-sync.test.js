@@ -24,3 +24,10 @@ test('the engine loads under CommonJS', () => {
   assert.strictEqual(typeof VisorChangelog.buildTimeline, 'function');
   assert.strictEqual(typeof VisorChangelog.analyze, 'function');
 });
+
+// The document model (formats, runs, deltas): edited in public/, copied to lib/
+test('lib/doc-format.js is identical to public/doc-format.js', () => {
+  const a = fs.readFileSync(path.join(ROOT, 'lib', 'doc-format.js'));
+  const b = fs.readFileSync(path.join(ROOT, 'public', 'doc-format.js'));
+  assert.ok(a.equals(b), 'run `npm run sync-engine`');
+});

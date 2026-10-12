@@ -23,6 +23,7 @@ const crypto = require('crypto');
 
 const repo = require('./lib/repo');
 const audioStorage = require('./lib/audioStorage');
+const imageStorage = require('./lib/imageStorage');
 const { normalizeReport, buildDriveReport } = require('./lib/reports');
 const { analyzeDriveFile } = require('./lib/drive');
 const legal = require('./lib/legalPages');
@@ -38,6 +39,8 @@ const research = require('./lib/research');
 const citeFormat = require('./lib/cite');
 const processLib = require('./lib/process');
 const discussionLib = require('./lib/discussion');
+// The document format shared with the editor (a copy of public/doc-format.js)
+const docFormat = require('./lib/doc-format.js');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -125,6 +128,7 @@ function checkConfig() {
   if (!process.env.SESSION_SECRET) console.warn('  ! SESSION_SECRET not set; using a dev default. Set one before sharing this server.');
   console.log(`  ✓ Database: ${process.env.DATABASE_URL ? 'Postgres (DATABASE_URL)' : `local, in ${process.env.PGLITE_DIR || 'data/pglite'}`}`);
   console.log(`  ✓ Recordings: local, in ${process.env.VISOR_AUDIO_DIR || 'data/audio'}`);
+  console.log(`  ✓ Essay pictures: local, in ${process.env.VISOR_IMAGE_DIR || 'data/images'}`);
   console.log(`  ${googleReady() ? '✓' : '·'} Google Drive import ${googleReady() ? 'enabled' : 'off (set GOOGLE_CLIENT_ID, GOOGLE_API_KEY, GOOGLE_APP_ID to turn it on)'}`);
   console.log(`  ${googleSignInReady() ? '✓' : '·'} Sign in with Google ${googleSignInReady() ? 'enabled' : 'off (set GOOGLE_CLIENT_ID to turn it on)'}`);
 }
@@ -1382,16 +1386,17 @@ app.get('/api/dashboard', requireAuth, ah(async (req, res) => {
   res.json({ role: 'student', todo });
 }));
 
-// Everything a class owns: assignments, student documents and their op logs,
-// sessions, research, discussions (and their recordings), feedback, and the
-// group projects its assignments created. `studentId` narrows it to one
-// student's data (the teacher's "delete this student's data").
+// Everything a class owns: assignments, student documents with their op logs
+// and pictures, sessions, research, discussions (and their recordings),
+// feedback, and the group projects its assignments created. `studentId`
+// narrows it to one student's data (the teacher's "delete this student's data").
 async function deleteClassRecords(core, cls, { studentId } = {}) {
   const who = studentId ? { studentId } : {};
   const docs = await repo.listRecords('doc', { classId: cls.id, ...who });
   for (const d of docs) {
     await repo.deleteRecords('opchunk', { docId: d.id });
     await repo.deleteRecords('feedback', { docId: d.id });
+    await deleteDocImages(d.id);
   }
   await repo.deleteRecords('doc', { classId: cls.id, ...who });
   await repo.deleteRecords('session', { classId: cls.id, ...who });
@@ -1412,7 +1417,7 @@ async function deleteProjectEverything(projectId) {
 }
 
 // A teacher deletes one student's work in a class (documents, op logs,
-// sessions, research, feedback). The student stays on the roster.
+// pictures, sessions, research, feedback). The student stays on the roster.
 app.delete('/api/classes/:id/students/:userId/data', requireAuth, ah(async (req, res) => {
   const core = await repo.readCore();
   const got = teacherClass(req, core);
@@ -1646,7 +1651,10 @@ app.post('/api/assignments/:id/live/action', requireAuth, ah(async (req, res) =>
 }));
 
 async function deleteAssignmentRecords(core, a) {
-  for (const d of await repo.listRecords('doc', { assignmentId: a.id })) await repo.deleteRecords('opchunk', { docId: d.id });
+  for (const d of await repo.listRecords('doc', { assignmentId: a.id })) {
+    await repo.deleteRecords('opchunk', { docId: d.id });
+    await deleteDocImages(d.id);
+  }
   for (const k of ['doc', 'session', 'research', 'feedback']) await repo.deleteRecords(k, { assignmentId: a.id });
   for (const disc of await repo.listRecords('discussion', { assignmentId: a.id })) {
     for (const seg of disc.segments || []) if (seg.audio) await audioStorage.deleteAudio(seg.audio);
@@ -1794,6 +1802,8 @@ app.get('/api/write/:assignmentId', ah(async (req, res) => {
     doc: docView(fresh, { withFeedback: true }),
     session: active ? sessionsLib.clientView(active, Date.now()) : null,
     token: active ? await sessionToken(active, surf) : null,
+    // For the essay's pictures: /api/images/<id>?t=<imageToken>
+    imageToken: await imageToken(fresh.id, me.id),
     // Writing is possible in an active session not paused by the teacher; the
     // editor also needs focus and the lease, which only the page can know.
     canWrite: !!active && !active.teacherPaused && fresh.status !== 'submitted',
@@ -1868,6 +1878,7 @@ app.post('/api/write/:docId/ops', ah(async (req, res) => {
   const body = req.body || {};
   if (!Array.isArray(body.ops)) throw new HttpError(400, 'ops must be a list');
   if (body.ops.length > writing.LIMITS.BATCH_OPS) throw new HttpError(413, 'Too many ops in one batch (500 at most).');
+  await checkOpImages(req.params.docId, body.ops);
   const a = await repo.getRecord('assignment', s0.assignmentId);
   // Pastes: look for the research copy each one came from (outside the transaction)
   const copies = body.ops.some(o => o && (o.src === 'paste' || o.src === 'drop')) ? await researchCopiesFor(s0.studentId, s0.assignmentId) : [];
@@ -1900,6 +1911,117 @@ app.post('/api/write/:docId/ops', ah(async (req, res) => {
   });
   if (out.ended) { if (endedNow) await afterSessionEnded(out.ended, a); return res.status(409).json({ error: 'Your writing session has ended.', ...endedReply(out.ended) }); }
   res.json(out);
+}));
+
+// ---- Pictures in essays ----
+//
+// A picture is uploaded once, as raw bytes the editor has already shrunk
+// (POST /api/write/:docId/images), kept by lib/imageStorage.js, and listed as
+// an "image" record. The essay's text holds one placeholder character for it
+// (docFormat.EMBED) with the picture's id in its attributes. Pictures stay
+// until the essay is deleted, so the replay can still show ones taken out.
+// GET /api/images/:id serves them to the student and their teacher: by the
+// sign-in cookie on Visor's own pages, or by an image token in the address
+// (?t=), because the side panel has no cookie and an <img> can't send headers.
+
+const IMAGE_TOKEN_MS = 12 * 3600 * 1000;
+const IMAGES_PER_DOC = 100;
+const IMAGE_ID_RE = /^[a-f0-9]{32}$/;
+const IMAGE_TOO_LARGE = 'That image is too large (5 MB at most).';
+
+// Lets whoever holds it see one document's pictures for 12 hours
+async function imageToken(docId, uid) {
+  return sign(await getSessionSecret(), { docId, uid, exp: Date.now() + IMAGE_TOKEN_MS }, 'img');
+}
+
+// Every picture an op batch inserts must have been uploaded to this document
+async function checkOpImages(docId, ops) {
+  const ids = ops.filter(o => o && o.k === 'i' && o.attrs && typeof o.attrs === 'object').map(o => docFormat.cleanAttrs(o.attrs)?.image).filter(Boolean);
+  if (!ids.length) return;
+  const mine = new Set((await repo.listRecords('image', { docId })).filter(r => r.docId === docId).map(r => r.id));
+  if (!ids.every(id => mine.has(id))) throw new HttpError(400, 'That image belongs to another document.');
+}
+
+// A document's pictures: the files, then their records
+async function deleteDocImages(docId) {
+  for (const img of await repo.listRecords('image', { docId })) await imageStorage.deleteImage(img.stored);
+  await repo.deleteRecords('image', { docId });
+}
+
+// The raw body, read only after the session token checks out. The 6 MB cap
+// only stops runaway uploads; the real limit is MAX_IMAGE_BYTES below.
+const rawImageBody = express.raw({ type: () => true, limit: '6mb' });
+const imageBody = (req, res, next) => rawImageBody(req, res, err => (err && err.type === 'entity.too.large' ? res.status(413).json({ error: IMAGE_TOO_LARGE }) : next(err)));
+const imageSide = v => { const n = Math.round(Number(v)); return Number.isFinite(n) && n >= 1 && n <= 20000 ? n : null; };
+
+// Upload a picture: the bytes as the body, ?w=&h= its size in pixels, and the
+// surface's id in X-Visor-Surface (or ?surfaceId=). The same checks as the ops
+// route: a live session the teacher hasn't paused, a document that isn't
+// submitted, and this surface holding the lease. Works from the tab (cookie or
+// not, the session token decides) and from the side panel. Only when the
+// assignment allows pasting from outside.
+app.post('/api/write/:docId/images', ah(async (req, res, next) => { req.writeSession = await liveSession(req); next(); }), imageBody, ah(async (req, res) => {
+  const { tok, s: s0 } = req.writeSession;
+  const a = await repo.getRecord('assignment', s0.assignmentId);
+  // Every upload comes from outside the essay (pictures already in it are
+  // copied by id), so the paste setting covers pictures too
+  if ((a?.writing?.allowPaste || 'allow') !== 'allow') throw new HttpError(403, 'Images from outside the essay are turned off for this assignment.');
+  const buf = Buffer.isBuffer(req.body) ? req.body : (Buffer.isBuffer(req.rawBody) ? req.rawBody : null);
+  if (buf && buf.length > imageStorage.MAX_IMAGE_BYTES) return res.status(413).json({ error: IMAGE_TOO_LARGE });
+  const mime = imageStorage.sniffImage(buf);
+  if (!mime) throw new HttpError(400, 'Only PNG, JPEG, GIF or WebP images.');
+  const surfaceId = String(req.get('X-Visor-Surface') || req.query.surfaceId || '').slice(0, 60);
+  let endedNow = null;
+  // The checks, and a place among the document's 100 pictures, in one step
+  const out = await repo.withRecords(async t => {
+    const s = await t.get('session', s0.id);
+    const doc = await t.get('doc', req.params.docId);
+    endedNow = sessionsLib.sweep(s, Date.now(), { windowEnd: a?.writing?.windowEnd });
+    if (s.state === 'ended') { t.put('session', s); return { ended: s }; }
+    if (!doc) throw new HttpError(404, 'document not found');
+    if (s.teacherPaused) throw new HttpError(423, 'Your teacher paused the session.');
+    if (doc.status === 'submitted') throw new HttpError(409, 'This document has been submitted.');
+    if (!sessionsLib.holdsLease(doc.lease, s.id, surfaceId, tok.surf)) throw new HttpError(409, 'Another window is writing in this document.', { notLeaseHolder: true, lease: doc.lease });
+    if ((doc.imageCount || 0) >= IMAGES_PER_DOC) throw new HttpError(409, `This essay has the most images it can hold (${IMAGES_PER_DOC}).`);
+    doc.imageCount = (doc.imageCount || 0) + 1;
+    t.put('doc', doc);
+    return { doc };
+  });
+  if (out.ended) { if (endedNow) await afterSessionEnded(out.ended, a); return res.status(409).json({ error: 'Your writing session has ended.', ...endedReply(out.ended) }); }
+  const { doc } = out;
+  const id = crypto.randomBytes(16).toString('hex');
+  let stored = null;
+  try {
+    stored = await imageStorage.putImage({ docId: doc.id, id, mime, buf });
+    await repo.putRecord('image', { id, docId: doc.id, classId: doc.classId, assignmentId: doc.assignmentId, studentId: doc.studentId, sessionId: s0.id, mime, sizeBytes: buf.length, width: imageSide(req.query.w), height: imageSide(req.query.h), stored, createdAt: now() });
+  } catch (err) {
+    // Give the place back, and don't leave a file nothing points to
+    if (stored) await imageStorage.deleteImage(stored);
+    await repo.updateRecord('doc', doc.id, d => { d.imageCount = Math.max(0, (d.imageCount || 0) - 1); }).catch(() => {});
+    throw err;
+  }
+  res.json({ id, url: `/api/images/${id}` });
+}));
+
+// A picture, for its student or their class teacher. Anyone else gets the same
+// 404 as for a picture that doesn't exist.
+app.get('/api/images/:id', ah(async (req, res) => {
+  const notFound = () => res.status(404).json({ error: 'image not found' });
+  const id = String(req.params.id);
+  const rec = IMAGE_ID_RE.test(id) ? await repo.getRecord('image', id) : null;
+  if (!rec) return notFound();
+  let ok = false;
+  if (typeof req.query.t === 'string' && req.query.t) {
+    const t = verify(await getSessionSecret(), req.query.t, 'img');
+    ok = !!t && t.docId === rec.docId && t.exp > Date.now();
+  }
+  if (!ok && req.session?.userId) {
+    const core = await repo.readCore();
+    const me = currentUser(req, core);
+    ok = !!me && (me.id === rec.studentId || own(core.classes, rec.classId)?.teacherId === me.id);
+  }
+  if (!ok) return notFound();
+  await imageStorage.streamImage(rec.stored, rec.mime, res);
 }));
 
 // Beat: { surfaceId, surf, focused, visible, fullscreen, extPresent, extLock, online, events, offlinePause, seq, wantText, browser? }
@@ -2133,7 +2255,7 @@ async function processReportFor(core, doc, a) {
   });
   return report;
 }
-const PROCESS_VERSION = 4;
+const PROCESS_VERSION = 5;
 
 app.get('/api/review/:docId', ah(async (req, res) => {
   const got = await teacherDocFor(req);
@@ -2153,7 +2275,8 @@ app.get('/api/review/:docId', ah(async (req, res) => {
     class: { id: cls.id, name: cls.name },
     nav: { prev: navOf(order[i - 1]), next: navOf(order[i + 1]), position: i + 1, of: order.length },
     sessions: sessions.map(s => ({ ...sessionsLib.clientView(s, Date.now()), pauses: s.pauses, events: s.events, extension: s.extension, opsFrom: s.opsFrom, opsTo: s.opsTo })),
-    report
+    report,
+    imageToken: await imageToken(doc.id, got.me.id)
   });
 }));
 
@@ -2737,7 +2860,8 @@ app.get('/api/me/export', requireAuth, ah(async (req, res) => {
   const myClasses = Object.values(core.classes).filter(c => c.studentIds.includes(me.id) || c.teacherId === me.id);
   const docs = await repo.listRecords('doc', { studentId: me.id });
   const out = {
-    exportedAt: now(), about: 'Everything Visor Classroom keeps about you: your account, your classes, your essays with their full writing history, your writing sessions, the research the Visor extension recorded during them, and teacher feedback.',
+    exportedAt: now(), about: 'Everything Visor Classroom keeps about you: your account, your classes, your essays with their full writing history and the pictures you added, your writing sessions, the research the Visor extension recorded during them, and teacher feedback.',
+    imagesNote: 'Pictures you added to an essay are listed under that essay (images). To download one, open its url while you’re signed in to Visor.',
     account: publicUser(me, core),
     classes: myClasses.map(c => ({ id: c.id, name: c.name, teacher: fullName(core.users[c.teacherId]) })),
     projects: Object.values(core.projects).filter(p => p.studentIds.includes(me.id)).map(p => ({ id: p.id, name: p.name })),
@@ -2745,12 +2869,13 @@ app.get('/api/me/export', requireAuth, ah(async (req, res) => {
   };
   for (const d of docs) {
     const a = await repo.getRecord('assignment', d.assignmentId);
-    const [ops, sessions, research] = await Promise.all([allOps(d.id), repo.listRecords('session', { docId: d.id }), repo.listRecords('research', { docId: d.id })]);
+    const [ops, sessions, research, images] = await Promise.all([allOps(d.id), repo.listRecords('session', { docId: d.id }), repo.listRecords('research', { docId: d.id }), repo.listRecords('image', { docId: d.id })]);
     out.documents.push({
       assignment: a ? { id: a.id, title: a.title } : { id: d.assignmentId }, class: core.classes[d.classId]?.name || null,
       text: d.text, formats: d.formats, sources: d.sources, status: d.status, submittedAt: d.submittedAt, returnedAt: d.returnedAt,
       feedback: d.status === 'returned' || d.reopened ? d.feedback || null : null, stats: d.stats,
       editLog: ops,
+      images: images.sort((x, y) => (x.createdAt < y.createdAt ? -1 : 1)).map(i => ({ id: i.id, mime: i.mime, sizeBytes: i.sizeBytes, width: i.width, height: i.height, createdAt: i.createdAt, url: `/api/images/${i.id}` })),
       sessions: sessions.map(({ surfaces, away, awayReason, ...s }) => s),
       research: research.sort((x, y) => x.no - y.no).flatMap(c => c.events)
     });

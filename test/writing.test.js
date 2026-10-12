@@ -33,21 +33,101 @@ test('applyOp keeps formatting runs in step with the text', () => {
   W.applyOp(st, W.cleanOp(fmt(4, 3, { bold: true })));     // "two"
   W.applyOp(st, W.cleanOp(ins(0, '>> ')));                 // before: run shifts
   assert.deepStrictEqual(st.formats, [{ at: 7, len: 3, attrs: { bold: true } }]);
-  W.applyOp(st, W.cleanOp(ins(8, 'w')));                   // inside: run grows ("twwo")
-  assert.deepStrictEqual(st.formats[0], { at: 7, len: 4, attrs: { bold: true } });
+  // Inside a run: the run splits around the new text, which has only its own
+  // attrs (as in a Quill delta). Typing in bold text sends bold.
+  W.applyOp(st, W.cleanOp(ins(8, 'w', { attrs: { bold: true } })));   // "twwo"
+  assert.deepStrictEqual(st.formats, [{ at: 7, len: 1, attrs: { bold: true } }, { at: 9, len: 2, attrs: { bold: true } }, { at: 8, len: 1, attrs: { bold: true } }]);
+  assert.deepStrictEqual(W.compactFormats(st.formats, st.text.length), [{ at: 7, len: 4, attrs: { bold: true } }]);
   W.applyOp(st, W.cleanOp(del(6, 3)));                     // cut across the run's start
   assert.strictEqual(st.text, '>> onewo three');
-  assert.deepStrictEqual(st.formats[0], { at: 6, len: 2, attrs: { bold: true } });
+  assert.deepStrictEqual(st.formats, [{ at: 6, len: 2, attrs: { bold: true } }]);
+  W.applyOp(st, W.cleanOp(ins(7, 'X')));                   // inside, with no attrs: plain
+  assert.deepStrictEqual(W.compactFormats(st.formats, st.text.length), [{ at: 6, len: 1, attrs: { bold: true } }, { at: 8, len: 1, attrs: { bold: true } }]);
   W.applyOp(st, W.cleanOp(ins(st.text.length, '\nHeading\n', { attrs: { header: 2 } })));
-  assert.deepStrictEqual(st.formats[1].attrs, { header: 2 });
-  // Unknown or unsafe attributes are dropped; a format op needs at least one real one
-  assert.deepStrictEqual(W.cleanAttrs({ bold: true, color: 'red', header: 7, list: 'ordered' }), { bold: true, list: 'ordered' });
-  assert.throws(() => W.cleanOp(fmt(0, 1, { color: 'red' })), e => e.status === 400);
+  assert.deepStrictEqual(st.formats.at(-1).attrs, { header: 2 });
+  // Unknown or unsafe attributes are dropped; colour and the other new formats are kept
+  assert.deepStrictEqual(W.cleanAttrs({ bold: true, color: '#F00', header: 7, list: 'ordered', foo: 1 }), { bold: true, color: '#ff0000', list: 'ordered' });
+  // A format op with nothing valid left is skipped, never a 400
+  assert.strictEqual(W.cleanOp(fmt(0, 1, { color: 'red', foo: 'bar' })), null);
+  assert.deepStrictEqual(W.cleanOp(fmt(0, 1, { color: 'rgb(255, 0, 0)' })).attrs, { color: '#ff0000' });
 });
 
 test('compactFormats merges runs without changing what is formatted', () => {
   const runs = [{ at: 0, len: 2, attrs: { bold: true } }, { at: 2, len: 2, attrs: { bold: true } }, { at: 1, len: 1, attrs: { bold: null } }];
   assert.deepStrictEqual(W.compactFormats(runs, 6), [{ at: 0, len: 1, attrs: { bold: true } }, { at: 2, len: 2, attrs: { bold: true } }]);
+  // Every key survives, and the final line break (index textLength) is covered
+  const rich = [{ at: 0, len: 3, attrs: { color: '#ff0000', link: 'https://a.example' } }, { at: 3, len: 1, attrs: { table: 'row-ab12', lineheight: '2' } }];
+  assert.deepStrictEqual(W.compactFormats(rich, 3), rich);
+});
+
+test('format ops with nothing valid are skipped; the rest of the batch goes through', () => {
+  const doc = freshDoc();
+  const stamped = W.applyBatch(doc, [ins(0, 'Hello'), fmt(0, 5, { foo: true }), fmt(0, 5, { bold: 'yes' }), fmt(0, 5, { strike: true, image: 'a'.repeat(32) }), ins(5, '!')], { baseSeq: 0, textHash: W.sha256('Hello!') });
+  assert.deepStrictEqual(stamped.map(o => [o.n, o.k]), [[1, 'i'], [2, 'f'], [3, 'i']]);
+  assert.deepStrictEqual(stamped[1].attrs, { strike: true }, 'an image id is never changed by a format op');
+  assert.strictEqual(doc.seq, 3);
+  assert.deepStrictEqual(doc.formats, [{ at: 0, len: 5, attrs: { strike: true } }]);
+  // A batch of only skipped ops changes nothing and still succeeds
+  assert.deepStrictEqual(W.applyBatch(doc, [fmt(0, 1, { nope: 1 })], { baseSeq: 3 }), []);
+  assert.strictEqual(doc.seq, 3);
+});
+
+test('images: one EMBED character naming its upload', () => {
+  const id = 'ab'.repeat(16);
+  const E = W.EMBED;
+  assert.strictEqual(E, '\uFFFC');
+  const op = W.cleanOp(ins(0, E, { src: 'image', attrs: { image: id, width: 320, alt: 'A chart', bold: true, header: 1 } }));
+  assert.deepStrictEqual(op.attrs, { bold: true, header: 1, image: id, width: '320', alt: 'A chart' });
+  assert.strictEqual(op.src, 'image');
+  const missing = e => e.status === 400 && e.message === 'An image is missing its upload.';
+  assert.throws(() => W.cleanOp(ins(0, E)), missing);
+  assert.throws(() => W.cleanOp(ins(0, E, { attrs: { image: 'not-an-id' } })), missing);
+  assert.throws(() => W.cleanOp(ins(0, E, { attrs: { image: null } })), missing);
+  assert.throws(() => W.cleanOp(ins(0, 'a' + E, { attrs: { image: id } })), missing);
+  assert.throws(() => W.cleanOp(ins(0, E + E, { attrs: { image: id } })), missing);
+  // Text never carries an image id; nulls mean nothing on new text
+  assert.strictEqual(W.cleanOp(ins(0, 'abc', { attrs: { image: id, bold: null } })).attrs, undefined);
+  // Resizing and alt text are format ops on the embed
+  assert.deepStrictEqual(W.cleanOp(fmt(3, 1, { width: '200', alt: 'Bar chart' })).attrs, { width: '200', alt: 'Bar chart' });
+  // Structure and image ops keep their src
+  assert.ok(W.SRC.includes('image') && W.SRC.includes('structure'));
+  assert.strictEqual(W.cleanOp(ins(0, '\n\n\n', { src: 'structure', attrs: { table: 'row-x1' } })).src, 'structure');
+
+  const doc = freshDoc();
+  const st = W.applyBatch(doc, [ins(0, 'See:  done'), ins(5, E, { src: 'image', attrs: { image: id, width: '300' } }), ins(11, '\n\n', { src: 'structure', attrs: { table: 'row-ab' } }), ins(13, 'xyz', { src: 'other' })], { baseSeq: 0 });
+  W.updateStats(doc, st);
+  assert.strictEqual(doc.text, 'See: ' + E + ' done\n\nxyz');
+  assert.strictEqual(doc.stats.words, 3, 'an image is not a word');
+  assert.strictEqual(doc.stats.images, 1);
+  assert.strictEqual(doc.stats.typedChars, 10, 'images and structure are not typing');
+  assert.strictEqual(doc.stats.otherChars, 3);
+  assert.deepStrictEqual(doc.formats, [{ at: 5, len: 1, attrs: { image: id, width: '300' } }, { at: 11, len: 2, attrs: { table: 'row-ab' } }]);
+});
+
+test('compaction is amortised: only past twice the size of the last tidy', () => {
+  const doc = freshDoc();
+  W.applyBatch(doc, [ins(0, 'x'.repeat(5000))], { baseSeq: 0 });
+  // 450 separate one-character runs, each a different colour so they can't merge
+  const colour = i => '#' + (0x100000 + i).toString(16);
+  let ops = Array.from({ length: 450 }, (_, i) => fmt(i * 2, 1, { color: colour(i) }));
+  W.applyBatch(doc, ops, { baseSeq: doc.seq });
+  assert.strictEqual(doc.formatsCompacted, 401, 'compacted once past 400 runs');
+  assert.strictEqual(doc.formats.length, 450);
+  // The next tidy waits until there are more than 2 × 401 runs
+  ops = Array.from({ length: 352 }, (_, i) => fmt(2000 + i * 2, 1, { color: colour(1000 + i) }));
+  W.applyBatch(doc, ops, { baseSeq: doc.seq });
+  assert.strictEqual(doc.formats.length, 802);
+  assert.strictEqual(doc.formatsCompacted, 401);
+  W.applyBatch(doc, [fmt(4000, 1, { bold: true })], { baseSeq: doc.seq });
+  assert.strictEqual(doc.formatsCompacted, 803);
+  assert.strictEqual(doc.formats.length, 803);
+});
+
+test('starter text is plain: image placeholders are dropped from it', () => {
+  const { doc, firstOps } = W.newDoc({ id: 'd3', assignmentId: 'a', classId: 'c', studentId: 's', templateText: 'Name:\uFFFC\n' });
+  assert.strictEqual(doc.text, 'Name:\n');
+  assert.strictEqual(firstOps[0].s, 'Name:\n');
+  assert.strictEqual(W.newDoc({ id: 'd4', assignmentId: 'a', classId: 'c', studentId: 's', templateText: '\uFFFC' }).firstOps.length, 0);
 });
 
 function freshDoc() { return W.newDoc({ id: 'd1', assignmentId: 'a', classId: 'c', studentId: 's' }).doc; }
@@ -132,7 +212,7 @@ test('replaying every op reproduces the document exactly', () => {
   }
   const replayed = W.replayOps(log);
   assert.strictEqual(replayed.text, doc.text);
-  assert.deepStrictEqual(W.compactFormats(replayed.formats, replayed.text.length + 1), W.compactFormats(doc.formats, doc.text.length + 1));
+  assert.deepStrictEqual(W.compactFormats(replayed.formats, replayed.text.length), W.compactFormats(doc.formats, doc.text.length));
   assert.ok(log.some(o => o.paste && o.paste.hash.length === 64), 'paste hashes are made server-side when the client sends a bad one');
 });
 

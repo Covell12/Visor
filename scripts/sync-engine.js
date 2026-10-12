@@ -6,8 +6,10 @@
 //   lib/engine/changelog.js     — required by the server (process reports)
 //   public/engine/changelog.js  — loaded by the browser (replay)
 //
-// It also copies the citation formatter the other way round, inside this repo:
-// public/cite-format.js (the browser's) -> lib/cite.js (the server's).
+// It also copies two shared modules the other way round, inside this repo
+// (the browser's copy is the one to edit):
+//   public/cite-format.js -> lib/cite.js         the citation formatter
+//   public/doc-format.js  -> lib/doc-format.js   the document model (formats, runs, deltas)
 //
 // Run with `npm run sync-engine` (also runs before every deploy). If the
 // extension isn't next to this folder, the committed engine copies are left alone.
@@ -18,13 +20,17 @@ const ROOT = path.join(__dirname, '..');
 const SOURCE = path.join(ROOT, '..', 'extension', 'changelog.js');
 const TARGETS = [path.join(ROOT, 'lib', 'engine', 'changelog.js'), path.join(ROOT, 'public', 'engine', 'changelog.js')];
 
-// The citation formatter: one file, served to the browser and required by the server
-const CITE_FROM = path.join(ROOT, 'public', 'cite-format.js'), CITE_TO = path.join(ROOT, 'lib', 'cite.js');
-if (fs.existsSync(CITE_FROM)) {
-  const c = fs.readFileSync(CITE_FROM);
-  const same = fs.existsSync(CITE_TO) && fs.readFileSync(CITE_TO).equals(c);
-  if (!same) fs.writeFileSync(CITE_TO, c);
-  console.log(`sync-engine: lib/cite.js ${same ? 'already up to date' : 'updated'}`);
+// One file each, served to the browser and required by the server
+const SHARED = [
+  [path.join(ROOT, 'public', 'cite-format.js'), path.join(ROOT, 'lib', 'cite.js')],
+  [path.join(ROOT, 'public', 'doc-format.js'), path.join(ROOT, 'lib', 'doc-format.js')]
+];
+for (const [from, to] of SHARED) {
+  if (!fs.existsSync(from)) continue;
+  const c = fs.readFileSync(from);
+  const same = fs.existsSync(to) && fs.readFileSync(to).equals(c);
+  if (!same) fs.writeFileSync(to, c);
+  console.log(`sync-engine: ${path.relative(ROOT, to)} ${same ? 'already up to date' : 'updated'}`);
 }
 
 if (!fs.existsSync(SOURCE)) {

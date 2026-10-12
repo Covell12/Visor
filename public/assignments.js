@@ -39,6 +39,7 @@ async function openAssignmentForm(classId, type, existing = null) {
 
 function writingFields(w, showPresets) {
   const opt = (v, cur, label) => `<option value="${v}" ${v === cur ? 'selected' : ''}>${label}</option>`;
+  const docStyle = w.docStyle === 'docs' ? 'docs' : 'mla'; // missing on older assignments: MLA
   return `
     ${showPresets ? `<div class="kicker" style="margin:16px 0 8px;">Start from a preset</div>
     <div class="preset-row">
@@ -55,6 +56,7 @@ function writingFields(w, showPresets) {
       <div class="field"><label for="afWinEnd">…until <span class="label-note">optional</span></label><input id="afWinEnd" class="input" type="datetime-local" value="${toLocalInput(w.windowEnd)}" /><div class="hint">Sessions still open at this time end automatically.</div></div>
       <div class="field"><label for="afPaste">Pasting</label><select id="afPaste" class="input">${opt('allow', w.allowPaste, 'Allowed (every paste is recorded)')}${opt('internal-only', w.allowPaste, 'Only text copied from this same essay')}${opt('block', w.allowPaste, 'Off')}</select></div>
       <div class="field"><label for="afStyle">Citation style</label><select id="afStyle" class="input">${opt('mla', w.citationStyle, 'MLA 9')}${opt('apa', w.citationStyle, 'APA 7')}${opt('chicago', w.citationStyle, 'Chicago')}</select></div>
+      <div class="field" style="grid-column:1/-1;"><label for="afDocStyle">Document style</label><select id="afDocStyle" class="input" style="max-width:420px;">${opt('mla', docStyle, 'MLA essay (Times New Roman 12, double-spaced)')}${opt('docs', docStyle, 'Docs default (Arial 11, 1.15 spacing)')}</select><div class="hint">The font, size and line spacing every essay starts with. Students can still change them as they write.</div></div>
       <div class="field"><label for="afMin">Minimum words <span class="label-note">optional</span></label><input id="afMin" class="input" type="number" min="1" value="${w.minWords ?? ''}" /></div>
       <div class="field"><label for="afMax">Maximum words <span class="label-note">optional</span></label><input id="afMax" class="input" type="number" min="1" value="${w.maxWords ?? ''}" /></div>
     </div>
@@ -101,7 +103,7 @@ function collectWriting() {
     mode: document.querySelector('input[name=afMode]:checked').value,
     timeLimitMin: $('afLimit').value || null,
     windowStart: fromLocalInput($('afWinStart').value), windowEnd: fromLocalInput($('afWinEnd').value),
-    allowPaste: $('afPaste').value, citationStyle: $('afStyle').value,
+    allowPaste: $('afPaste').value, citationStyle: $('afStyle').value, docStyle: $('afDocStyle').value,
     minWords: $('afMin').value || null, maxWords: $('afMax').value || null,
     requireExtension: $('afExt').checked, researchTracking: $('afResearch').checked,
     blockAiSites: $('afBlockAi').checked, autoSubmitOnTimeUp: $('afAuto').checked,
@@ -233,6 +235,7 @@ function renderAssignmentOverview(body) {
       ['Allowed sites', w.mode === 'locked' ? (w.allowedSites.length ? w.allowedSites.join(', ') : 'Any site that isn’t blocked') : 'Not limited (open session)'],
       ...(w.mode === 'locked' ? [['Side panel', w.panelBrowsing !== false ? 'Students can switch to it to research (blocked and AI sites stay blocked)' : 'Off: locked sessions stay in full screen']] : []),
       ['Citations', `${STYLE_NAME[w.citationStyle]}${w.oneClickCite === false ? ' · one-click citing off' : ''}`],
+      ['Document style', w.docStyle === 'docs' ? 'Docs default' : 'MLA essay'],
       ['Length', w.minWords || w.maxWords ? `${w.minWords || 0}–${w.maxWords || '∞'} words` : 'Any'],
       ['Starter text', w.templateText ? `${w.templateText.length.toLocaleString()} characters` : 'None'],
       ['Time up', w.autoSubmitOnTimeUp ? 'Submits automatically' : 'Session ends; student submits'],

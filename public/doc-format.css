@@ -1,0 +1,79 @@
+/* Visor — shared document typography: the student's page, the teacher's
+   Document view, colour by source, the replay and print all use it, so every
+   view shows the same document.
+
+   The element around a Quill editor gets VisorDocFormat.styleClass(docStyle):
+   .doc-style-mla or .doc-style-docs (the class may also sit on the .ql-editor
+   itself). Loaded after quill.snow.css and before classroom.css. Fonts are
+   the system's; Tinos and Arimo are metric-compatible stand-ins on Chromebooks.
+   Inline fonts, sizes and colours come from Quill as inline styles. Print
+   page rules (@page) belong to each view's print CSS. */
+
+/* ---------- base style, chosen per assignment ---------- */
+.doc-style-mla .ql-editor, .ql-editor.doc-style-mla { font-family: 'Times New Roman', Tinos, Times, serif; font-size: 12pt; line-height: 2; }
+.doc-style-docs .ql-editor, .ql-editor.doc-style-docs { font-family: Arial, Arimo, Helvetica, sans-serif; font-size: 11pt; line-height: 1.15; }
+.ql-editor { tab-size: 0.5in; -moz-tab-size: 0.5in; }
+.ql-editor p, .ql-editor ol, .ql-editor li { margin: 0; }
+
+/* ---------- paragraph styles: Title, Subtitle, Heading 1–6 ---------- */
+:is(.doc-style-mla, .doc-style-docs) .ql-editor :is(h1, h2, h3, h4, h5, h6, .ql-title, .ql-subtitle),
+.ql-editor:is(.doc-style-mla, .doc-style-docs) :is(h1, h2, h3, h4, h5, h6, .ql-title, .ql-subtitle) { font-family: inherit; line-height: 1.15; padding: 0; }
+:is(.doc-style-mla, .doc-style-docs) .ql-editor .ql-title, .ql-editor:is(.doc-style-mla, .doc-style-docs) .ql-title { font-size: 26pt; font-weight: normal; margin: 0 0 3pt; }
+:is(.doc-style-mla, .doc-style-docs) .ql-editor .ql-subtitle, .ql-editor:is(.doc-style-mla, .doc-style-docs) .ql-subtitle { font-size: 15pt; font-weight: normal; color: #666; margin: 0; }
+:is(.doc-style-mla, .doc-style-docs) .ql-editor h1, .ql-editor:is(.doc-style-mla, .doc-style-docs) h1 { font-size: 20pt; font-weight: normal; margin: 20pt 0 6pt; }
+:is(.doc-style-mla, .doc-style-docs) .ql-editor h2, .ql-editor:is(.doc-style-mla, .doc-style-docs) h2 { font-size: 16pt; font-weight: normal; margin: 18pt 0 6pt; }
+:is(.doc-style-mla, .doc-style-docs) .ql-editor h3, .ql-editor:is(.doc-style-mla, .doc-style-docs) h3 { font-size: 14pt; font-weight: normal; color: #434343; margin: 16pt 0 4pt; }
+:is(.doc-style-mla, .doc-style-docs) .ql-editor :is(h4, h5, h6), .ql-editor:is(.doc-style-mla, .doc-style-docs) :is(h4, h5, h6) { font-size: 12pt; font-weight: bold; margin: 14pt 0 4pt; }
+
+/* ---------- lists (snow keeps the counters and bullets) ---------- */
+.ql-editor li[data-list=checked] { text-decoration: line-through; color: #5f6368; }
+
+/* ---------- tables: one line per cell ---------- */
+.ql-editor table { border-collapse: collapse; width: 100%; table-layout: fixed; margin: 0; }
+.ql-editor td { border: 1px solid #c4c7c5; padding: 4px 6px; vertical-align: top; overflow-wrap: anywhere; }
+.ql-editor tr { break-inside: avoid; }
+/* The document's line height, at most 1.5 */
+.doc-style-mla .ql-editor td, .ql-editor.doc-style-mla td { line-height: 1.5; }
+.doc-style-docs .ql-editor td, .ql-editor.doc-style-docs td { line-height: 1.15; }
+
+/* ---------- images ---------- */
+.ql-editor img { max-width: 100%; height: auto; vertical-align: bottom; margin: 4px 0; }
+
+/* ---------- links ---------- */
+.ql-editor a { color: #1155cc; text-decoration: underline; }
+
+/* ---------- indent: 0.5in a step (list items keep room for the bullet) ---------- */
+.ql-editor .ql-indent-1:not(.ql-direction-rtl) { padding-left: 0.5in; }
+.ql-editor .ql-indent-2:not(.ql-direction-rtl) { padding-left: 1in; }
+.ql-editor .ql-indent-3:not(.ql-direction-rtl) { padding-left: 1.5in; }
+.ql-editor .ql-indent-4:not(.ql-direction-rtl) { padding-left: 2in; }
+.ql-editor .ql-indent-5:not(.ql-direction-rtl) { padding-left: 2.5in; }
+.ql-editor .ql-indent-6:not(.ql-direction-rtl) { padding-left: 3in; }
+.ql-editor .ql-indent-7:not(.ql-direction-rtl) { padding-left: 3.5in; }
+.ql-editor .ql-indent-8:not(.ql-direction-rtl) { padding-left: 4in; }
+.ql-editor li.ql-indent-1:not(.ql-direction-rtl) { padding-left: calc(0.5in + 1.5em); }
+.ql-editor li.ql-indent-2:not(.ql-direction-rtl) { padding-left: calc(1in + 1.5em); }
+.ql-editor li.ql-indent-3:not(.ql-direction-rtl) { padding-left: calc(1.5in + 1.5em); }
+.ql-editor li.ql-indent-4:not(.ql-direction-rtl) { padding-left: calc(2in + 1.5em); }
+.ql-editor li.ql-indent-5:not(.ql-direction-rtl) { padding-left: calc(2.5in + 1.5em); }
+.ql-editor li.ql-indent-6:not(.ql-direction-rtl) { padding-left: calc(3in + 1.5em); }
+.ql-editor li.ql-indent-7:not(.ql-direction-rtl) { padding-left: calc(3.5in + 1.5em); }
+.ql-editor li.ql-indent-8:not(.ql-direction-rtl) { padding-left: calc(4in + 1.5em); }
+
+/* ---------- colour by source: a colour AND a pattern for each source ----------
+   Quill's "srccat" format puts class src-<category> on the text (and adds a
+   plain "src-cat" marker to the pasted-* ones). The legend keys use the same
+   classes. */
+:root { --rp-typed: #1E9BC4; --rp-research: #2F6FC4; --rp-outside: #E39B2E; --rp-internal: #8AA0AB; --rp-cited: #4CA35C; --rp-template: #7C5CD6; --rp-other: #D9534F; --rp-image: #0E8A7B; }
+.src-pasted-research { background: rgba(47,111,196,.12); text-decoration: underline dotted rgba(47,111,196,.8); text-underline-offset: 4px; }
+.src-pasted-outside { background: repeating-linear-gradient(135deg, rgba(227,155,46,.22) 0 6px, rgba(227,155,46,.10) 6px 12px); text-decoration: underline wavy rgba(227,155,46,.9); text-underline-offset: 4px; }
+.src-pasted-internal { background: rgba(138,160,171,.16); }
+.src-cited { background: rgba(76,163,92,.15); text-decoration: underline double rgba(76,163,92,.8); }
+.src-template { color: #6c5aa8; font-style: italic; }
+.src-other { outline: 1.5px dashed rgba(217,83,79,.85); outline-offset: 1px; background: rgba(217,83,79,.08); }
+.src-image { outline: 2px solid rgba(14,138,123,.85); outline-offset: 1px; }
+.ql-editor .src-image { outline: 0; }
+.ql-editor .src-image img { outline: 2px solid rgba(14,138,123,.85); outline-offset: 2px; }
+.src-key.src-image i { background: var(--rp-image); }
+.src-bar-image { background: var(--rp-image); }
+@media print { .src-pasted-outside, .src-pasted-research, .src-pasted-internal, .src-cited, .src-other { print-color-adjust: exact; -webkit-print-color-adjust: exact; } }

@@ -61,7 +61,7 @@ test('attribution: typed, pasted (research, outside, internal), cited and templa
   write(st, [{ k: 'd', at: 26, len: 5, src: 'type' }]);                                            // 5 of the outside paste deleted
   const tags = P.provenance(st.log);
   const s = P.survival(tags, st.doc.text);
-  assert.deepStrictEqual(s.chars, { typed: 10, 'pasted-internal': 5, 'pasted-research': 10, 'pasted-outside': 10, cited: 7, template: 5, other: 6 });
+  assert.deepStrictEqual(s.chars, { typed: 10, 'pasted-internal': 5, 'pasted-research': 10, 'pasted-outside': 10, cited: 7, template: 5, other: 6, image: 0 });
   assert.strictEqual(s.total, 53);
   assert.strictEqual(s.pct.typed, 19);
   assert.strictEqual(s.pct['pasted-outside'], 19);
@@ -143,5 +143,48 @@ test('a quiet, typed essay gets no warnings', () => {
   typeText(st, 0, 'A short typed answer.');
   const r = P.build({ doc: st.doc, ops: st.log, sessions: [session('sess1', T0, T0 + 120e3)], studentName: 'Sam' });
   assert.deepStrictEqual(r.notes, []);
+  assert.strictEqual(r.survival.pct.typed, 100);
+});
+
+test('images: their own category, never counted as text, and a note', () => {
+  const E = W.EMBED;
+  const id = n => String(n).repeat(32).slice(0, 32);
+  assert.strictEqual(P.categoryOf({ src: 'image' }), 'image');
+  assert.strictEqual(P.categoryOf({ src: 'structure' }), 'typed');
+  assert.strictEqual(P.CATEGORY.image, 'Image');
+  const st = makeDoc('');
+  typeText(st, 0, 'My chart: ');
+  write(st, [{ k: 'i', at: 10, s: E, src: 'image', attrs: { image: id(1) } }]);
+  write(st, [{ k: 'i', at: 11, s: E, src: 'image', attrs: { image: id(2), width: '300' } }]);
+  write(st, [{ k: 'i', at: 12, s: E, src: 'image', attrs: { image: id(3) } }]);
+  write(st, [{ k: 'd', at: 12, len: 1, src: 'type' }]);                 // the third is deleted again
+  typeText(st, 12, ' done');
+  assert.strictEqual(st.doc.text, 'My chart: ' + E + E + ' done');
+  const s = P.survival(P.provenance(st.log), st.doc.text);
+  assert.strictEqual(s.chars.image, 0, 'an image is not text');
+  assert.strictEqual(s.images, 2);
+  assert.strictEqual(s.total, 12);
+  assert.strictEqual(s.pct.typed, 100);
+  assert.deepStrictEqual(s.runs, [{ at: 0, len: 10, c: 'typed' }, { at: 10, len: 2, c: 'image' }, { at: 12, len: 5, c: 'typed' }]);
+  const r = P.build({ doc: st.doc, ops: st.log, sessions: [session('sess1', T0, T0 + 600e3)], studentName: 'Sam' });
+  assert.strictEqual(r.totals.words, 3, 'images aren’t words');
+  assert.strictEqual(r.survival.images, 2);
+  assert.strictEqual(r.engine.matchesDoc, true);
+  assert.deepStrictEqual(r.notes.map(n => n.text), ['Inserted 2 images.']);
+  // One image: singular
+  const one = makeDoc('');
+  write(one, [{ k: 'i', at: 0, s: E, src: 'image', attrs: { image: id(4) } }]);
+  assert.deepStrictEqual(P.build({ doc: one.doc, ops: one.log, sessions: [session('sess1', T0, T0 + 600e3)], studentName: 'Sam' }).notes.map(n => n.text), ['Inserted 1 image.']);
+});
+
+test('structure from the toolbar counts as typed, never as an injected block', () => {
+  const st = makeDoc('');
+  typeText(st, 0, 'Results');
+  // A 12 × 10 table: 120 cell line breaks in one insert, with no keyboard event
+  write(st, [{ k: 'i', at: 7, s: '\n'.repeat(120), src: 'structure', attrs: { table: 'row-a1' } }]);
+  write(st, [{ k: 'i', at: 127, s: 'A heading made from the menu, then a long line the menu restyled as a whole block of text.', src: 'structure' }]);
+  const r = P.build({ doc: st.doc, ops: st.log, sessions: [session('sess1', T0, T0 + 600e3)], studentName: 'Sam' });
+  assert.ok(!r.notes.some(n => n.rule === 'injected'), 'no injected note');
+  assert.strictEqual(r.survival.chars.other, 0);
   assert.strictEqual(r.survival.pct.typed, 100);
 });
