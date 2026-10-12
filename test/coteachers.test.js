@@ -90,10 +90,10 @@ test('lib: teacherIdsOf, isClassTeacher, addTeacher, removeTeacher, classFor', (
 
   assert.strictEqual(C.addTeacher(core, old, '  co@x.TEST ').id, 't');
   assert.deepStrictEqual(old.coTeacherIds, ['t']);
-  assert.throws(() => C.addTeacher(core, old, ''), { status: 400, message: "Type a teacher's email address" });
-  assert.throws(() => C.addTeacher(core, old, { email: 'co@x.test' }), { status: 400, message: "Type a teacher's email address" });
+  assert.throws(() => C.addTeacher(core, old, ''), { status: 400, message: "Type a teacher’s email address" });
+  assert.throws(() => C.addTeacher(core, old, { email: 'co@x.test' }), { status: 400, message: "Type a teacher’s email address" });
   assert.throws(() => C.addTeacher(core, old, 'who@x.test'), { status: 404, message: 'No teacher account uses that email. They need to create a Visor teacher account first.' });
-  assert.throws(() => C.addTeacher(core, old, 'stu@x.test'), { status: 400, message: "That's a student account. Only teacher accounts can teach a class." });
+  assert.throws(() => C.addTeacher(core, old, 'stu@x.test'), { status: 400, message: "That’s a student account. Only teacher accounts can teach a class." });
   assert.throws(() => C.addTeacher(core, old, 'co@x.test'), { status: 400, message: 'They already teach this class.' });
   assert.throws(() => C.addTeacher(core, old, 'owner@x.test'), { status: 400, message: 'They already teach this class.' });
   // 20 teachers at most, owner included
@@ -109,8 +109,8 @@ test('lib: teacherIdsOf, isClassTeacher, addTeacher, removeTeacher, classFor', (
   assert.deepStrictEqual([C.classFor(core, users.s, 'c1').isTeacher, C.classFor(core, users.s, 'c1').isOwner], [false, false]);
   assert.throws(() => C.classFor(core, users.n, 'c1'), { status: 403 });
 
-  assert.throws(() => C.removeTeacher(old, 'o'), { status: 400, message: "The class's owner can't be removed." });
-  assert.throws(() => C.removeTeacher(old, 's'), { status: 404, message: "That teacher isn't in this class" });
+  assert.throws(() => C.removeTeacher(old, 'o'), { status: 400, message: "The class’s owner can’t be removed." });
+  assert.throws(() => C.removeTeacher(old, 's'), { status: 404, message: "That teacher isn’t in this class" });
   C.removeTeacher(old, 't');
   assert.deepStrictEqual(C.teacherIdsOf(old), ['o']);
   assert.throws(() => C.classFor(core, users.t, 'c1'), { status: 403 });
@@ -147,11 +147,11 @@ test('adding a co-teacher: by email in any case, every refusal, and who may add'
 
   // every refusal
   const refusals = [
-    [{}, 400, "Type a teacher's email address"],
-    [{ email: '   ' }, 400, "Type a teacher's email address"],
+    [{}, 400, "Type a teacher’s email address"],
+    [{ email: '   ' }, 400, "Type a teacher’s email address"],
     [{ email: 'nobody@coteach.test' }, 404, 'No teacher account uses that email. They need to create a Visor teacher account first.'],
-    [{ email: S.email }, 400, "That's a student account. Only teacher accounts can teach a class."],
-    [{ email: L.email }, 400, "That's a student account. Only teacher accounts can teach a class."],
+    [{ email: S.email }, 400, "That’s a student account. Only teacher accounts can teach a class."],
+    [{ email: L.email }, 400, "That’s a student account. Only teacher accounts can teach a class."],
     [{ email: T.email }, 400, 'They already teach this class.'],
     [{ email: O.email.toUpperCase() }, 400, 'They already teach this class.']
   ];
@@ -463,11 +463,11 @@ test('deleting the class and removing teachers: owner only; a co-teacher may lea
   r = await co.del(`/api/classes/${cls.id}/teachers/${T2.id}`);
   assert.deepStrictEqual([r.status, r.data.error], [403, 'Only the class owner can remove another teacher.']);
   r = await co.del(`/api/classes/${cls.id}/teachers/${O.id}`);
-  assert.deepStrictEqual([r.status, r.data.error], [400, "The class's owner can't be removed."]);
+  assert.deepStrictEqual([r.status, r.data.error], [400, "The class’s owner can’t be removed."]);
   r = await owner.del(`/api/classes/${cls.id}/teachers/${O.id}`);
-  assert.deepStrictEqual([r.status, r.data.error], [400, "The class's owner can't be removed."]);
+  assert.deepStrictEqual([r.status, r.data.error], [400, "The class’s owner can’t be removed."]);
   r = await owner.del(`/api/classes/${cls.id}/teachers/${S.id}`);
-  assert.deepStrictEqual([r.status, r.data.error], [404, "That teacher isn't in this class"]);
+  assert.deepStrictEqual([r.status, r.data.error], [404, "That teacher isn’t in this class"]);
   r = await stu.del(`/api/classes/${cls.id}/teachers/${T.id}`);
   assert.deepStrictEqual([r.status, r.data.error], [403, 'only the class teacher can do that']);
 

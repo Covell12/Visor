@@ -64,7 +64,7 @@ function writingFields(w, showPresets) {
     <div class="form-grid">
       <fieldset class="field"><legend>Session type</legend>
         <label class="radio-row"><input type="radio" name="afMode" value="locked" ${w.mode === 'locked' ? 'checked' : ''} onchange="syncWritingForm()" /> <span><b>Locked</b> (in class): needs the Visor extension, keeps students on allowed sites, strict</span></label>
-        <label class="radio-row"><input type="radio" name="afMode" value="open" ${w.mode !== 'locked' ? 'checked' : ''} onchange="syncWritingForm()" /> <span><b>Open</b> (homework): records everything, blocks nothing it doesn’t have to</span></label>
+        <label class="radio-row"><input type="radio" name="afMode" value="open" ${w.mode !== 'locked' ? 'checked' : ''} onchange="syncWritingForm()" /> <span><b>Open</b> (homework): records everything; only the AI sites below are blocked (when ticked)</span></label>
       </fieldset>
       <div class="field"><label for="afLimit">Time limit (minutes)</label><input id="afLimit" class="input" type="number" min="1" max="600" value="${w.timeLimitMin ?? ''}" placeholder="No limit" /><div class="hint">Per student, across all their sessions. Extra time from the class roster is added.</div></div>
       <div class="field"><label for="afWinStart">Sessions can start from <span class="label-note">optional</span></label><input id="afWinStart" class="input" type="datetime-local" value="${toLocalInput(w.windowStart)}" /></div>

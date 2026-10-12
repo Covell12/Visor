@@ -224,7 +224,7 @@ function coursesMenuHtml(list) {
   const active = list.filter(c => !c.archived), archived = list.length - active.length;
   const teacher = me.role === 'teacher';
   return `<div class="cm-head"><b>My classes</b>${archived ? `<a class="tiny" href="/?archived=1" data-link onclick="ddClose()">Archived (${archived})</a>` : ''}</div>
-    ${active.length ? `<div class="cm-grid">${active.map(c => `<a class="cm-item" href="/class/${c.id}" data-link onclick="ddClose()">${courseArt(c, 'cm-thumb')}<span class="cm-text"><span class="cm-name">${esc(c.name)}</span><span class="cm-sub">${c.isTeacher ? vcPlural(c.studentCount, 'student') : esc(teacherNames(c))}</span></span></a>`).join('')}</div>`
+    ${active.length ? `<div class="cm-grid">${active.map(c => `<a class="cm-item" href="/class/${c.id}" data-link onclick="ddClose()">${courseArt(c, 'cm-thumb')}<span class="cm-text"><span class="cm-name">${esc(c.name)}</span><span class="cm-sub">${c.isTeacher ? vcPlural(c.studentCount, 'student') + (teachersOf(c).length > 1 ? ` · ${vcPlural(teachersOf(c).length, 'teacher')}` : '') : esc(teacherNames(c))}</span></span></a>`).join('')}</div>`
       : `<div class="cm-empty">${archived ? 'All your classes are archived.' : teacher ? 'You haven’t made a class yet.' : 'You’re not in a class yet. Ask your teacher for the class code.'}</div>`}
     <div class="cm-foot">${teacher ? `<button class="btn btn-primary btn-sm" onclick="ddClose();openCreateClass()">${I.plusSm}Create class</button>` : `<button class="btn btn-primary btn-sm" onclick="ddClose();openJoinClass()">${I.plusSm}Join a class</button>`}
       <a class="btn btn-ghost btn-sm" href="/" data-link onclick="ddClose()">All classes</a></div>`;
@@ -407,7 +407,7 @@ async function createClass() {
   const name = $('ncName').value.trim();
   if (!name) return $('ncName').classList.add('error');
   await modalBusy(async () => {
-    try { const r = await api('/api/classes', { method: 'POST', body: { name } }); forgetCourses(); closeModal(); VisorRouter.go(`/class/${r.class.id}?tab=members`); toast('Class created. Add your students.'); }
+    try { const r = await api('/api/classes', { method: 'POST', body: { name } }); forgetCourses(); closeModal(); VisorRouter.go(`/class/${r.class.id}?tab=people`); toast('Class created. Add your students.'); }
     catch (e) { toast(e.message, 'err'); }
   });
 }
@@ -632,7 +632,7 @@ function materialsHtml() {
     ? `<header class="course-head"><div style="min-width:0;flex:1;">${crumbsDrop([[c.name, `/class/${c.id}`, ''], ...trail.slice(0, -1).map(f => [f.name, `/class/${c.id}?folder=${f.id}`, f.id]), [folder.name]])}
         <h1><span class="mat-ic t-folder ${folder.color ? 'fc-' + folder.color : ''}" style="width:auto;height:auto;vertical-align:-5px;margin-right:6px;" aria-hidden="true">${PI.folder}</span>${esc(folder.name)}</h1></div>
         <div class="head-actions">${c.isTeacher ? folderMenuHtml(folder, 'Head') : ''}${addMenu}</div></header>`
-    : `<header class="course-head"><div style="min-width:0;flex:1;"><h1>${esc(c.name)}</h1><div class="course-sub">${c.isTeacher ? `${vcPlural(c.studentCount || 0, 'student')} · ${vcPlural(cp.assignments.length, 'assignment')}${cp.assignments.some(a => !a.publishedAt) ? ` (${cp.assignments.filter(a => !a.publishedAt).length} unpublished)` : ''}` : `Teacher: ${esc(c.teacher?.name || '')}`}</div></div>
+    : `<header class="course-head"><div style="min-width:0;flex:1;"><h1>${esc(c.name)}</h1><div class="course-sub">${c.isTeacher ? `${vcPlural(c.studentCount || 0, 'student')} · ${vcPlural(cp.assignments.length, 'assignment')}${cp.assignments.some(a => !a.publishedAt) ? ` (${cp.assignments.filter(a => !a.publishedAt).length} unpublished)` : ''}` : `${teachersOf(c).length > 1 ? 'Teachers' : 'Teacher'}: ${esc(teacherNames(c))}`}</div></div>
         ${addMenu ? `<div class="head-actions">${addMenu}</div>` : ''}</header>`;
   const desc = folder?.description ? `<div class="folder-desc">${esc(folder.description).replace(/\n/g, '<br>')}</div>` : '';
   const archived = c.archived ? `<div class="callout amber" style="margin-bottom:12px;">This class is archived. ${c.isTeacher ? 'Restore it in Settings to post announcements again.' : ''}</div>` : '';
