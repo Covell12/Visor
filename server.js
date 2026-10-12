@@ -2666,7 +2666,10 @@ app.patch('/api/write/:docId/sources/:sourceId', ah(async (req, res) => {
   const doc = await repo.updateRecord('doc', got.doc.id, d => {
     const i = (d.sources || []).findIndex(x => x.id === req.params.sourceId);
     if (i < 0) throw new HttpError(404, 'source not found');
-    d.sources[i] = out = withFormatting(cleanSource(req.body?.source || {}, d.sources[i]), style);
+    const next = cleanSource(req.body?.source || {}, d.sources[i]);
+    // An edit can't leave a source with nothing to cite
+    if (next.type === 'written' ? !next.written : !next.title && !next.url) throw new HttpError(400, next.type === 'written' ? 'Write or paste the citation.' : 'A source needs at least a title or a link.');
+    d.sources[i] = out = withFormatting(next, style);
     d.sources[i].editedAt = now();
   });
   const s = await activeSessionOf(got.doc.id);

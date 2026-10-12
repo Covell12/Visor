@@ -1621,7 +1621,7 @@
   function renderFloat() {
     if (!M || !M.float) return;
     const wl = wordsText();
-    const on = wcFloatOn() && !!wl;
+    const on = !M.opts.wcChip && wcFloatOn() && !!wl;
     M.float.hidden = !on;
     if (on) setText(M.float, wl);
   }

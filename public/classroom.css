@@ -147,7 +147,7 @@ html:has(body.writing), body.writing { scroll-padding-top: calc(var(--dx-sticky-
 .wr-saved.offline { color: var(--amber); font-weight: 600; }
 .wr-saved.saving svg, .wr-saved.unsaved svg { animation: wrPulse 1.2s ease-in-out infinite; }
 @keyframes wrPulse { 50% { opacity: .35; } }
-.wr-head-right { flex: none; display: flex; align-items: center; gap: 10px; padding-top: 4px; }
+.wr-head-right { flex: 0 1 auto; min-width: 0; display: flex; align-items: center; gap: 10px; padding-top: 4px; }
 .wr-status { display: flex; align-items: center; gap: 8px; font-size: 13px; }
 .wr-status > * { white-space: nowrap; }
 .wr-rec { display: inline-flex; align-items: center; gap: 7px; padding: 4px 11px; border-radius: 999px; background: #FDECEC; color: #B3261E; font-weight: 600; }
@@ -229,6 +229,8 @@ html:has(body.writing), body.writing { scroll-padding-top: calc(var(--dx-sticky-
    width, so nothing reflows while it opens) */
 .dx-side { flex: none; width: 0; opacity: 0; overflow: hidden; position: sticky; top: calc(var(--wr-bar-h, 96px) + var(--dx-tb-h, 44px) + 12px); margin: 20px 0 0; transition: width .3s cubic-bezier(.2, .7, .2, 1), opacity .2s ease, margin .3s cubic-bezier(.2, .7, .2, 1); }
 .dx-canvas.dx-side-on .dx-side { width: 320px; opacity: 1; margin-left: 16px; }
+.dx-side { z-index: 6; }
+.dx-canvas.dx-side-on .dx-pages { min-width: calc(8.5in * var(--dx-zoom, 1) + 4px); }
 .dx-side-inner { width: 320px; max-height: calc(100vh - var(--wr-bar-h, 96px) - var(--dx-tb-h, 44px) - 36px); display: flex; flex-direction: column; background: #fff; border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 1px 3px rgba(60, 64, 67, .1); box-sizing: border-box; }
 .dx-side-head { display: flex; align-items: center; gap: 8px; padding: 10px 8px 10px 16px; border-bottom: 1px solid var(--line); }
 .dx-side-head b { font-size: 15px; }
@@ -250,6 +252,7 @@ html:has(body.writing), body.writing { scroll-padding-top: calc(var(--dx-sticky-
 .wr-works-add { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
 /* The source dialog: from a link, the details, or written */
 .src-tabs { margin-bottom: 16px; }
+.src-tabs button[aria-selected="true"] { background: var(--brand-soft); color: var(--brand); }
 .src-pane { display: none; }
 .src-pane.on { display: block; animation: vxPaneIn .2s var(--ease, ease); }
 @keyframes vxPaneIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
@@ -266,7 +269,7 @@ html:has(body.writing), body.writing { scroll-padding-top: calc(var(--dx-sticky-
 .src-preview-in:empty { display: none; }
 @media (max-width: 1100px) {
   /* Narrower windows: the panel floats over the page's right edge */
-  .dx-side { position: fixed; right: 12px; top: calc(var(--dx-sticky-h, 120px) + 10px); margin: 0; z-index: 20; }
+  .dx-side { position: fixed; right: 12px; top: calc(var(--dx-tb-bottom, var(--dx-sticky-h, 120px)) + 10px); margin: 0; z-index: 20; }
   .dx-canvas.dx-side-on .dx-side { margin: 0; }
   .dx-side-inner { box-shadow: 0 8px 28px rgba(16, 48, 61, .18); }
 }
@@ -323,6 +326,10 @@ html:has(body.writing), body.writing { scroll-padding-top: calc(var(--dx-sticky-
 .wr-embed .dx-above > * { width: auto; }
 .wr-embed .dx-page { width: auto; min-height: 62vh; margin: 8px 0; padding: 18px 16px; box-shadow: var(--shadow-sm); border-radius: var(--r); zoom: 1; }
 .wr-embed .dx-page .ql-editor { min-height: 50vh; }
+@media (max-width: 1150px) {
+  body.writing-focus .wr-hbtn span:not(.wr-hcount), body.writing-focus .wr-rec-t { display: none; }
+  body.writing-focus .wr-hbtn { padding: 0 9px; }
+}
 @media (max-width: 900px) {
   .wr-cls, .wr-hbtn span:not(.wr-hcount), .wr-rec-t { display: none; }
   .wr-hbtn { padding: 0 9px; }

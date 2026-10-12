@@ -64,7 +64,7 @@ const writerSetPref = (key, value) => { try { localStorage.setItem(key, String(v
 
 /* ====================== the page ====================== */
 VisorRouter.add('/write/:id', async (el, { id }, query) => {
-  Object.assign(WR, { assignmentId: id, embed: query.get('embed') === 'panel', events: [], offline: null, offlinePause: null, queue: [], seq: 0, confirmedText: '', copied: new Set(), copiedHashes: new Set(), hashWaits: [], pendingSrc: null, lastBeforeInput: null, composing: false, saving: false, lastLock: undefined, banner: null, data: null, session: null, token: null, lease: null, panelCtx: null, researchSent: undefined,
+  Object.assign(WR, { assignmentId: id, embed: query.get('embed') === 'panel', instrChoice: null, instrShown: false, sideOpen: false, srcTab: null, events: [], offline: null, offlinePause: null, queue: [], seq: 0, confirmedText: '', copied: new Set(), copiedHashes: new Set(), hashWaits: [], pendingSrc: null, lastBeforeInput: null, composing: false, saving: false, lastLock: undefined, banner: null, data: null, session: null, token: null, lease: null, panelCtx: null, researchSent: undefined,
     imageIds: new Set(), imageToken: null, queueDetached: false, lastRange: null, textCache: null, find: null, findDirty: false, outline: null, outlineSig: '', outlineRev: 0, pages: 1, zoom: 1, loads: 0, docsUI: false, lastCanEdit: undefined, breaksSig: '', printing: false, pastePending: null, pasteConv: null, storedOwn: false, selSig: '', changeN: 0, fitW: 0, selWords: null });
   WR.surf = WR.embed ? 'panel' : 'tab';
   WR.surfaceId = wsSurfaceId(WR.embed);
@@ -296,6 +296,7 @@ function writerInstall() {
   on(document, 'cut', writerRememberCopy, true);
   on(document, 'keydown', writerDocKeys);
   on(window, 'resize', () => { writerApplyZoom(true); writerLayoutSoon(); });
+  on(window, 'scroll', writerSyncToolbarEdge, { passive: true });
   on(window, 'afterprint', writerAfterPrint);
   // A font that arrives late changes where lines (and pages) end
   if (document.fonts && document.fonts.addEventListener) on(document.fonts, 'loadingdone', () => writerLayoutSoon());
@@ -314,6 +315,8 @@ function writerTeardown() {
   WR.pagesObserver?.disconnect(); WR.pagesObserver = null;
   writerAfterPrint();
   document.documentElement.style.removeProperty('--dx-sticky-h');
+  document.body.classList.remove('writing-focus');
+  document.documentElement.style.removeProperty('--dx-tb-bottom');
 }
 
 /* ====================== Quill and op capture ====================== */
@@ -2034,7 +2037,7 @@ function writerDownload(kind) {
   if (kind === 'txt') {
     let text = writerText().split(WR_EMBED).join('[image]');
     const bib = VisorCiteFormat.bibliography(WR.doc?.sources || [], WR.data.assignment.writing.citationStyle);
-    if (bib.items.length) {
+    if (bib.items.length && writerWorksMode() === 'page') {
       const plain = h => { const d = document.createElement('div'); d.innerHTML = h; return d.textContent; };
       text += `\n\n${bib.heading}\n\n${bib.items.map(i => plain(i.html)).join('\n')}`;
     }
@@ -2110,6 +2113,14 @@ function writerSyncBarHeight() {
   wr.style.setProperty('--wr-bar-h', `${h}px`);
   wr.style.setProperty('--dx-tb-h', `${t}px`);
   document.documentElement.style.setProperty('--dx-sticky-h', `${h + t}px`);
+  writerSyncToolbarEdge();
+}
+// Where the toolbar ends on screen right now (the site's bar above it scrolls
+// away): narrow windows float the Sources panel just under it
+function writerSyncToolbarEdge() {
+  const tb = $('dxToolbar');
+  if (!tb || !WR.sideOpen) return;
+  document.documentElement.style.setProperty('--dx-tb-bottom', `${Math.max(0, Math.round(tb.getBoundingClientRect().bottom))}px`);
 }
 // Re-draw everything that depends on the session state. The header and the
 // start card are only rebuilt when something they show changed (beats arrive
@@ -2270,6 +2281,10 @@ function writerToggleSources(on) {
   $('wrSideBtn')?.setAttribute('aria-expanded', String(WR.sideOpen));
   writerSetPref(`visor-side:${WR.data.assignment.id}`, WR.sideOpen ? '1' : '0');
   if (WR.sideOpen) setTimeout(() => side.querySelector('.dx-side-body button, .dx-side-body a')?.focus({ preventScroll: true }), 260);
+  else if (side.contains(document.activeElement)) $('wrSideBtn')?.focus({ preventScroll: true });
+  // Fit zoom re-fits once the panel has finished sliding
+  if (WR.zoomSetting === 'fit') setTimeout(() => writerApplyZoom(true), 320);
+  writerSyncBarHeight();
 }
 
 /* ---- the Instructions dropdown, under the toolbar ----
@@ -2429,15 +2444,15 @@ function writerEditSource(id, tab) {
   const written = s.type === 'written';
   WR.srcTab = tab || (written ? 'write' : id ? 'details' : 'link');
   const f = (k, label, ph = '') => `<div class="field"><label for="se-${k}">${label}</label><input id="se-${k}" class="input" value="${esc(written ? '' : s[k] || '')}" placeholder="${esc(ph)}" /></div>`;
-  const tabBtn = (k, label) => `<button type="button" role="tab" data-tab="${k}" aria-selected="false">${label}</button>`;
+  const tabBtn = (k, label) => `<button type="button" role="tab" id="seTab-${k}" data-tab="${k}" aria-controls="sePane-${k}" aria-selected="false" tabindex="-1">${label}</button>`;
   openModal({ title: id ? 'Edit source' : 'Add a source', sub: `Formatted in ${styleName}.`, wide: true, body: `
     <div class="seg src-tabs" role="tablist" aria-label="How to add it">${id ? '' : tabBtn('link', 'From a link')}${tabBtn('details', 'Fill in the details')}${tabBtn('write', 'Write it yourself')}</div>
-    <div class="src-pane" data-pane="link" role="tabpanel">
+    <div class="src-pane" id="sePane-link" data-pane="link" role="tabpanel" aria-labelledby="seTab-link">
       <div class="field"><label for="seQuery">Link, DOI or ISBN</label>
         <div class="src-find"><input id="seQuery" class="input" placeholder="https://… · 10.1000/xyz123 · 978-0-…" autocomplete="off" /><button type="button" class="btn btn-primary" id="seFind">Find</button></div>
         <div class="hint">Visor reads the page (or looks the DOI or ISBN up) and fills in what it can find. You check it and add anything it missed.</div></div>
     </div>
-    <div class="src-pane" data-pane="details" role="tabpanel">
+    <div class="src-pane" id="sePane-details" data-pane="details" role="tabpanel" aria-labelledby="seTab-details">
       <div id="seFound" class="src-found hidden" role="status"></div>
       ${f('title', 'Title')}
       <div class="field"><label for="se-authors">Authors <span class="label-note">one per line</span></label><textarea id="se-authors" class="input" style="min-height:70px;">${esc(written ? '' : (s.authors || []).join('\n'))}</textarea></div>
@@ -2449,7 +2464,7 @@ function writerEditSource(id, tab) {
       <div class="input-row">${f('volume', 'Volume')}${f('issue', 'Issue')}</div>
       ${f('pages', 'Pages', 'e.g. 45-67')}
     </div>
-    <div class="src-pane" data-pane="write" role="tabpanel">
+    <div class="src-pane" id="sePane-write" data-pane="write" role="tabpanel" aria-labelledby="seTab-write">
       <div class="field"><label for="se-written">The citation</label><textarea id="se-written" class="input" style="min-height:96px;" maxlength="1500" placeholder="Paste a citation, or type it in ${styleName} style. Put a title in *asterisks* to make it italic.">${esc(written ? s.written || '' : '')}</textarea></div>
       <div class="field"><label for="se-inTextWritten">In-text citation <span class="label-note">optional</span></label><input id="se-inTextWritten" class="input" maxlength="120" value="${esc(written ? s.inTextWritten || '' : '')}" placeholder="${style === 'apa' ? '(Smith, 2021)' : '(Smith 12)'}" /><div class="hint">What goes in your essay when you cite it. Left empty, Visor makes one from the first word.</div></div>
     </div>
@@ -2459,14 +2474,23 @@ function writerEditSource(id, tab) {
   const body = $('modalBody');
   const show = k => {
     WR.srcTab = k;
-    body.querySelectorAll('.src-tabs [data-tab]').forEach(b => { const on = b.dataset.tab === k; b.setAttribute('aria-selected', String(on)); b.setAttribute('aria-pressed', String(on)); });
+    body.querySelectorAll('.src-tabs [data-tab]').forEach(b => { const on = b.dataset.tab === k; b.setAttribute('aria-selected', String(on)); b.tabIndex = on ? 0 : -1; b.classList.toggle('on', on); });
     body.querySelectorAll('.src-pane').forEach(p => p.classList.toggle('on', p.dataset.pane === k));
     body.querySelector('.src-preview').classList.toggle('hidden', k === 'link');
     $('seSave').disabled = k === 'link';
     writerSourcePreview();
     setTimeout(() => (k === 'link' ? $('seQuery') : k === 'write' ? $('se-written') : $('se-title'))?.focus(), 30);
   };
-  body.querySelectorAll('.src-tabs [data-tab]').forEach(b => b.addEventListener('click', () => show(b.dataset.tab)));
+  const tabs = [...body.querySelectorAll('.src-tabs [data-tab]')];
+  tabs.forEach(b => b.addEventListener('click', () => show(b.dataset.tab)));
+  // Left and right move between the tabs, as tabs do
+  body.querySelector('.src-tabs').addEventListener('keydown', e => {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
+    e.preventDefault();
+    const i = tabs.findIndex(b => b.dataset.tab === WR.srcTab);
+    const n = e.key === 'Home' ? 0 : e.key === 'End' ? tabs.length - 1 : (i + (e.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
+    show(tabs[n].dataset.tab); tabs[n].focus();
+  });
   body.addEventListener('input', e => { e.target.classList?.remove('needs'); writerSourcePreview(); });
   body.addEventListener('change', writerSourcePreview);
   $('seFind').onclick = () => writerLookupSource();
@@ -2496,10 +2520,15 @@ async function writerLookupSource() {
   const q = $('seQuery')?.value.trim();
   if (!q) { formError('seErr', 'Paste a link, a DOI or an ISBN.'); return; }
   const btn = $('seFind');
+  if (btn.disabled) return; // already looking (Enter pressed again)
+  const body = $('modalBody');
   btn.disabled = true; btn.innerHTML = '<span class="spinner spinner-sm"></span> Finding…';
   formError('seErr', '');
+  // Only the dialog that asked, still open and still on this tab, takes the answer
+  const same = () => body.isConnected && $('modalBody') === body && WR.srcTab === 'link';
   try {
     const r = await wapi(`/api/write/${WR.doc.id}/sources/lookup`, { method: 'POST', body: { query: q } });
+    if (!same()) return;
     const src = r.source || {};
     for (const k of WR_SRC_FIELDS) {
       const el = $(`se-${k}`); if (!el) continue;
@@ -2515,8 +2544,8 @@ async function writerLookupSource() {
       : `${I.check}<span>Found it. Check the details, then add the source.</span>`;
     for (const k of r.missing || []) $(`se-${k}`)?.classList.add('needs');
     WR.srcTab = 'details';
-    $('modalBody').querySelector('.src-tabs [data-tab="details"]').click();
-  } catch (e) { formError('seErr', e.message); }
+    body.querySelector('.src-tabs [data-tab="details"]').click();
+  } catch (e) { if (same()) formError('seErr', e.message); }
   finally { if (btn.isConnected) { btn.disabled = false; btn.textContent = 'Find'; } }
 }
 async function writerSaveSource(id) {

@@ -23,7 +23,7 @@ On the class's **Assignments** page, **New → Writing assignment**, then pick a
 
 AI sites are blocked by default in both (untick **Block AI sites** to only record visits). Blocking works through the Visor extension, so in an open session a student without the extension isn't blocked; tick **Require the Visor extension** if every student must have it.
 
-Change anything you like (time limit, the window when sessions can start, allowed sites, citation style, document style, word limits, starter text), then **Save and publish**. **Document style** sets how a new essay looks: an MLA essay (Times New Roman 12, double-spaced) or Docs default (Arial 11, 1.15 spacing). Students write in a Google-Docs-style editor with menus, a toolbar, pictures, tables, find and replace and an outline, and everything they do is recorded as before.
+Change anything you like (time limit, the window when sessions can start, allowed sites, citation style, document style, Works Cited, word limits, starter text); the **Preview** beside the form shows what students will see as you go. Then **Save and publish**. **Document style** sets how a new essay looks: an MLA essay (Times New Roman 12, double-spaced) or Docs default (Arial 11, 1.15 spacing). Students write in a Google-Docs-style editor with menus, a toolbar, pictures, tables, find and replace and an outline, and everything they do is recorded as before.
 
 **Folders.** **New → Folder** makes a folder (a unit, a week) with a colour and an optional description; folders can hold folders, three deep. Drag rows to reorder them, drop a row onto a folder (or onto a folder name in the breadcrumb) to move it, or use a row's gear menu: **Move to…**, **Move up**, **Move down**. Deleting a folder never deletes what's in it: its contents move up a level. Students see a folder once something in it is published.
 
@@ -33,12 +33,13 @@ Change anything you like (time limit, the window when sessions can start, allowe
 
 ## 3. On the day
 
-Students see what's due under **Coming up** on Home and on their Calendar (with anything overdue in red). They open the assignment and click **Start writing session**. Then:
+Students see what's due under **Coming up** on Home and on their Calendar (with anything overdue in red). They open the assignment, read the **Instructions** at the top of the page, and click **Start writing session**; the site's bar then slides away and the editor fills the window until the session ends. Then:
 
 - Writing is only on while the Visor tab has focus. If a student leaves it, writing stops at once and the pause is recorded, with its length and reason. They see the same "Away 2m 14s" you see.
 - The extension records their research (searches, pages and time on them, text copied), adds citations with **Cite this page** (or Alt+Shift+C), and in locked sessions keeps them on the allowed sites.
 - In a locked session a student can click **Research in side panel**: they leave full screen and keep writing in Chrome's side panel while they browse. Blocked and AI sites stay blocked, every page is recorded, and time on other tabs counts as research time, not time away. Untick "Let students switch to the side panel" to keep a locked assignment in full screen.
-- Untick "Let students cite a page in one click" if students should write their citations themselves. Sources added by hand still work.
+- **Works Cited** decides where sources go: **a page after the essay** (built from what students cite; the default), **a side panel** next to the essay (not part of it, not printed), or **off** (no citation tools: students write their own Works Cited in the essay).
+- Students add a source from a link, a DOI or an ISBN (Visor fills in what the page or the free Crossref and Open Library catalogues say, and tells them what's missing), by filling in the details, or by writing or pasting the whole citation. Untick "Let students cite a page in one click" to turn off only the extension's Cite button.
 
 Home's **Live now** box lists every assignment with students writing right now. Open the assignment's **Live** tab to watch: status, time left, words, pastes, time away, and whether the extension and lockdown are on. **Needs attention** filters to students who've been away over a minute, lost the extension, visited an AI site, or pasted a big block from outside. You can pause, message, add time or end a session for one student or everyone.
 

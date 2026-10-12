@@ -194,6 +194,20 @@ test('route: a written source is added, formatted, edited and deleted (MLA)', as
   assert.deepStrictEqual(r.data.doc.sources.map(x => x.id).sort(), [s.id, page.id].sort());
 });
 
+test('route: an edit can’t leave a source with nothing to cite', async () => {
+  const { stu, doc } = await essay('mla');
+  const url = `/api/write/${doc.id}/sources`;
+  let r = await stu.post(url, { source: { type: 'written', written: 'Smith, John. *A Book*. 2020.' } });
+  const w = r.data.source;
+  r = await stu.patch(`${url}/${w.id}`, { source: { written: '   ' } });
+  assert.deepStrictEqual([r.status, r.data.error], [400, 'Write or paste the citation.']);
+  r = await stu.patch(`${url}/${w.id}`, { source: { type: 'webpage' } });
+  assert.deepStrictEqual([r.status, r.data.error], [400, 'A source needs at least a title or a link.'], 'switching kinds with nothing filled in');
+  r = await stu.post(url, { source: { title: 'Sleep', url: 'https://example.org/sleep' } });
+  r = await stu.patch(`${url}/${r.data.source.id}`, { source: { title: '', url: '' } });
+  assert.strictEqual(r.status, 400);
+});
+
 test('route: written sources in APA guess "(Word, year)" or "(Word, n.d.)"', async () => {
   const { stu, doc } = await essay('apa');
   const url = `/api/write/${doc.id}/sources`;

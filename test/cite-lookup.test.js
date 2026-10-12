@@ -92,6 +92,15 @@ const stub = http.createServer((req, res) => {
   const html = body => send(200, 'text/html; charset=utf-8', body);
   const json = (status, data) => send(status, 'application/json', JSON.stringify(data));
   let m;
+  if (u === '/empty-deflate') {
+    // Deflate blocks that decode to nothing, forever: only the raw-byte cap stops it
+    res.writeHead(200, { 'Content-Type': 'text/html', 'Content-Encoding': 'deflate' });
+    res.write(Buffer.from([0x78, 0x9c]));
+    const block = Buffer.alloc(13107 * 5);
+    for (let i = 0; i < block.length; i += 5) block.set([0x00, 0x00, 0x00, 0xff, 0xff], i);
+    const pump = () => { if (res.destroyed) return; while (res.write(block)) { if (res.destroyed) return; } res.once('drain', pump); };
+    return pump();
+  }
   if (u === '/article' || u === '/r/0') return html(NEWS);
   if (u === '/journal') return html(JOURNAL);
   if ((m = /^\/r\/(\d+)$/.exec(u))) return send(302, null, '', { Location: `/r/${m[1] - 1}` });
@@ -549,4 +558,17 @@ test('route: 20 lookups per student per 5 minutes', async () => {
   // per student
   const doc2 = (await next.get(`/api/write/${a.id}`)).data.doc;
   assert.strictEqual((await next.post(`/api/write/${doc2.id}/sources/lookup`, { query: `${stubBase}/article` })).status, 200);
+});
+
+test('lookup: compressed data that never decodes stops at the raw-byte cap, not the timeout', async () => {
+  const t = Date.now();
+  await assert.rejects(L.lookup(`${stubBase}/empty-deflate`, open), refused(422, PAGE));
+  assert.ok(Date.now() - t < 5000, `stopped after ${Date.now() - t} ms`);
+});
+
+test('lookup: at most a few at once on one server', async () => {
+  const many = Array.from({ length: L.LIMITS.CONCURRENT + 3 }, () => L.lookup(`${stubBase}/article`, open).then(() => 'ok', e => e.status));
+  const out = await Promise.all(many);
+  assert.ok(out.filter(x => x === 503).length >= 1, JSON.stringify(out));
+  assert.ok(out.filter(x => x === 'ok').length >= L.LIMITS.CONCURRENT - 1);
 });
