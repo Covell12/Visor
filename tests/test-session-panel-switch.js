@@ -301,6 +301,18 @@ const CITE_OFF = 'One-click citing is turned off for this assignment.';
   ck('a switch racing the start: the rules agree with the state', [rs.researchMode, rs.lockActive, catchAll(rules)], [true, true, false]);
   R.chrome.sidePanel.setOptions = setOptions;
 
+  // The blocked page: an AI site was already recorded (ai-site, blocked) before
+  // the redirect, so it isn't recorded again; another site off a locked list is
+  const queued = async (h) => ((await sessionOf(h)).researchQueue || []).map((e) => `${e.type}:${e.host}`);
+  await R.send({ channel: 'visor-bridge', type: 'RESEARCH_MODE', payload: { docId: 'd5', on: false } }, visor);
+  switchedLongAgo(R);
+  await settle();
+  const before = (await queued(R)).length;
+  r = await R.send({ type: 'VISOR_BLOCKED', url: 'https://chatgpt.com/' }, { tab: { id: 7 } });
+  ck('blocked page, AI site: says so, records nothing more', [r.reason, (await queued(R)).length - before], ['ai', 0]);
+  r = await R.send({ type: 'VISOR_BLOCKED', url: 'https://example.com/page' }, { tab: { id: 7 } });
+  ck('blocked page, a site off the locked list: recorded as blocked', [r.reason, (await queued(R)).slice(before)], ['not-allowed', ['blocked:example.com']]);
+
   console.log(out.every(Boolean) ? `\nall passed (${out.length} checks)` : `\n${out.filter((x) => !x).length} FAILED`);
   process.exit(out.every(Boolean) ? 0 : 1);
 })().catch((e) => { console.error(e); process.exit(1); });

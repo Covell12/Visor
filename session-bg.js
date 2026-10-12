@@ -751,11 +751,19 @@ chrome.tabs.onUpdated.addListener(async (tabId, info) => {
   }
 });
 
-chrome.runtime.onMessage.addListener((msg, sender) => {
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (!msg) return false;
   if (msg.type === 'VISOR_BLOCKED') {
-    // From blocked.html: the attempt is part of the session record
-    withState((x) => { queueEvent(x, { type: 'blocked', url: capUrl(msg.url), host: hostOf(msg.url) }); }).catch(() => {});
+    // From blocked.html: the attempt is part of the session record. An AI site
+    // was already recorded (an ai-site event, blocked) before the redirect, so
+    // only other sites get a 'blocked' event. The answer says which it was, for
+    // the page's wording.
+    getState().then(async (s) => {
+      const reason = s && s.active ? VisorLockdown.blockedReason(msg.url, s.settings, s.origin, { research: inResearch(s) }) : null;
+      if (reason !== 'ai') await withState((x) => { queueEvent(x, { type: 'blocked', url: capUrl(msg.url), host: hostOf(msg.url) }); }).catch(() => {});
+      sendResponse({ reason });
+    }).catch(() => sendResponse({ reason: null }));
+    return true;
   }
   if (msg.type === 'VISOR_BACK_TO_WRITING') {
     getState().then(async (s) => {
