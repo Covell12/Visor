@@ -119,7 +119,11 @@ body.writing .route-view { min-height: 100vh; }
 body:not(.writing-focus) .wr-user { display: none; }
 /* Outside a session the site's bar is there, so the editor's own icon isn't */
 body:not(.writing-focus) .wr-logo { display: none; }
-body:not(.writing-focus) .wr-title-row { padding-left: 7px; }
+/* ...an arrow back to the assignment takes its place */
+body.writing-focus .wr-back, .wr-embed .wr-back { display: none; }
+.wr-back { flex: none; width: 32px; height: 32px; margin: 2px -4px 0 -6px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; color: var(--ink-2); transition: background-color .15s, color .15s; }
+.wr-back:hover { background: #E8EEF2; color: var(--ink); }
+.wr-back svg { width: 20px; height: 20px; }
 a.wr-cls { text-decoration: none; transition: border-color .15s, color .15s; }
 a.wr-cls:hover { border-color: var(--brand); color: var(--brand); }
 body.embed #appView > .topbar { display: none; }
@@ -234,6 +238,7 @@ html:has(body.writing), body.writing { scroll-padding-top: calc(var(--dx-sticky-
 .dx-side-inner { width: 320px; max-height: calc(100vh - var(--wr-bar-h, 96px) - var(--dx-tb-h, 44px) - 36px); display: flex; flex-direction: column; background: #fff; border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 1px 3px rgba(60, 64, 67, .1); box-sizing: border-box; }
 .dx-side-head { display: flex; align-items: center; gap: 8px; padding: 10px 8px 10px 16px; border-bottom: 1px solid var(--line); }
 .dx-side-head b { font-size: 15px; }
+.dx-side-head b:focus { outline: none; }
 .dx-side-style { font-size: 11.5px; font-weight: 700; color: var(--ink-2); padding: 1px 7px; border-radius: 999px; background: #EEF3F6; }
 .dx-side-head .btn-icon { margin-left: auto; }
 .dx-side-body { overflow-y: auto; padding: 12px 14px 16px; }
@@ -243,6 +248,9 @@ html:has(body.writing), body.writing { scroll-padding-top: calc(var(--dx-sticky-
 .dx-src:hover { border-color: #C9D5DC; box-shadow: 0 2px 6px rgba(16, 48, 61, .06); }
 .dx-src-text { font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; padding-left: 1.4em; text-indent: -1.4em; }
 .dx-src-row { display: flex; align-items: center; gap: 4px; margin-top: 8px; flex-wrap: wrap; }
+/* "Check: …" on its own line, so it never pushes the icons out of the card */
+.dx-src-check { margin-top: 8px; }
+.dx-src-check .chip-check { white-space: normal; text-align: left; max-width: 100%; }
 .dx-src-in { flex: 1; min-width: 0; font-size: 12px; color: var(--ink-2); font-family: var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dx-src .btn-sm { padding: 4px 10px; }
 .dx-side-empty { padding: 14px; border: 1px dashed var(--field-line); border-radius: 8px; font-size: 13px; color: var(--ink-2); margin-bottom: 12px; }

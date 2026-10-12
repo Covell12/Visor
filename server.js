@@ -2630,7 +2630,7 @@ app.post('/api/write/:docId/sources', ah(async (req, res) => {
     await repo.withRecords(async tx => {
       const sess = await tx.get('session', s.id);
       const last = sess.researchLast != null ? await tx.get('research', research.chunkId(sess.id, sess.researchLast)) : null;
-      const chunks = research.appendEvents(sess, last, [{ t, type: 'cite', url: src.url, host: (() => { try { return new URL(src.url).hostname; } catch { return ''; } })(), title: src.title || (src.written || '').slice(0, 300), sourceId: src.id }]);
+      const chunks = research.appendEvents(sess, last, [{ t, type: 'cite', url: src.url, host: (() => { try { return new URL(src.url).hostname; } catch { return ''; } })(), title: src.title || (src.written || '').replace(/\*([^*]+)\*/g, '$1').slice(0, 300), sourceId: src.id }]);
       for (const c of chunks) tx.put('research', c);
       sess.researchLast = chunks[chunks.length - 1].no;
       tx.put('session', sess);
