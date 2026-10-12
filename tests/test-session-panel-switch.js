@@ -42,20 +42,27 @@ function makeChrome(seed = {}) {
     { id: 5, windowId: 1, url: 'http://localhost:3000/write/a1' }
   ];
   const rec = (name) => async (...args) => { calls.push([name, ...JSON.parse(JSON.stringify(args))]); };
+  const ipc = () => new Promise((r) => setTimeout(r, 2));
   const chrome = {
     runtime: { onMessage: ev(), onInstalled: ev(), getManifest: () => ({ version: '4.0.0' }), lastError: null, id: 'test', getURL: (p) => `chrome-extension://test/${p}` },
     sidePanel: { setOptions: rec('setOptions'), setPanelBehavior: rec('setPanelBehavior'), open: rec('open') },
     action: { setBadgeText: rec('setBadgeText'), setBadgeBackgroundColor: rec('setBadgeBackgroundColor'), setTitle: rec('setTitle'), setPopup: rec('setPopup') },
-    tabs: { onUpdated: ev(), onActivated: ev(), onRemoved: ev(), query: async () => tabs, get: async (id) => tabs.find((t) => t.id === id), update: rec('tabs.update') },
-    windows: { onFocusChanged: ev(), create: rec('windows.create'), WINDOW_ID_NONE: -1 },
+    tabs: { onUpdated: ev(), onActivated: ev(), onRemoved: ev(), query: async () => tabs, get: async (id) => tabs.find((t) => t.id === id), update: rec('tabs.update'), create: rec('tabs.create'), sendMessage: async (...args) => { await rec('tabs.sendMessage')(...args); return { ok: true }; } },
+    // No Chrome window in focus: nothing is being looked at
+    windows: { onFocusChanged: ev(), create: rec('windows.create'), update: rec('windows.update'), getLastFocused: async () => ({ id: 1, focused: false, tabs }), WINDOW_ID_NONE: -1 },
     storage: { local: store('local'), session: store('session'), onChanged },
     alarms: { create: rec('alarms.create'), clear: rec('alarms.clear'), onAlarm: ev() },
     permissions: { contains: async () => false, request: async () => false },
-    scripting: { registerContentScripts: rec('registerContentScripts'), unregisterContentScripts: rec('unregisterContentScripts'), getRegisteredContentScripts: async () => [], executeScript: async () => [] },
+    // Records which tab, which files and which arguments (a toast's text)
+    scripting: { registerContentScripts: rec('registerContentScripts'), unregisterContentScripts: rec('unregisterContentScripts'), getRegisteredContentScripts: async () => [], executeScript: async (o) => { calls.push(['executeScript', JSON.parse(JSON.stringify({ tabId: o.target && o.target.tabId, files: o.files, args: o.args }))]); return []; } },
     webNavigation: { onCommitted: ev() },
-    contextMenus: { create: rec('contextMenus.create'), removeAll: rec('contextMenus.removeAll'), update: rec('contextMenus.update'), onClicked: ev() },
+    contextMenus: { create: rec('contextMenus.create'), removeAll: (cb) => { calls.push(['contextMenus.removeAll']); if (cb) cb(); }, update: rec('contextMenus.update'), onClicked: ev() },
     commands: { onCommand: ev() },
-    declarativeNetRequest: { updateDynamicRules: async (u) => { calls.push(['dnr.update', JSON.parse(JSON.stringify(u))]); dnr = dnr.filter((r) => !(u.removeRuleIds || []).includes(r.id)).concat(u.addRules || []); }, getDynamicRules: async () => dnr }
+    // Like Chrome: each call takes a moment, and adding a rule whose id is already there fails
+    declarativeNetRequest: {
+      updateDynamicRules: async (u) => { calls.push(['dnr.update', JSON.parse(JSON.stringify(u))]); await ipc(); const kept = dnr.filter((r) => !(u.removeRuleIds || []).includes(r.id)); if ((u.addRules || []).some((a) => kept.some((r) => r.id === a.id))) throw new Error('duplicate rule id'); dnr = kept.concat(u.addRules || []); },
+      getDynamicRules: async () => { await ipc(); return dnr; }
+    }
   };
   let dnr = seed.dnr || [];
   Object.assign(chrome.storage.local.data, seed.local || {});
@@ -65,11 +72,12 @@ function makeChrome(seed = {}) {
 function load(seed) {
   const { chrome, calls, tabs } = makeChrome(seed);
   const fetches = [];
+  const beat = { active: true };   // what the server's beat answers (a test may add leaseSurf)
   const ctx = {
     chrome, console, setTimeout, clearTimeout, setInterval, clearInterval, URL, TextEncoder, crypto: require('crypto').webcrypto,
     fetch: async (url, init) => {
       fetches.push([url, init && init.method, init && init.body ? JSON.parse(init.body) : null]);
-      const body = /session\/beat/.test(url) ? { active: true } : { ok: true };
+      const body = /session\/beat/.test(url) ? { ...beat } : { ok: true };
       return { ok: true, status: 200, json: async () => body };
     }
   };
@@ -85,12 +93,20 @@ function load(seed) {
     }
     resolve(undefined);
   });
-  return { chrome, calls, tabs, fetches, send, ctx };
+  return { chrome, calls, tabs, fetches, send, ctx, beat };
 }
 
 const visor = { origin: 'http://localhost:3000', url: 'http://localhost:3000/write/a1', tab: { id: 5, windowId: 1 } };
 const settle = () => new Promise((r) => setTimeout(r, 20));
 const callsOf = (calls, name) => calls.filter((c) => c[0] === name).map((c) => c.slice(1));
+// The locked session's "everything else goes to the blocked page" rule, and an AI-site rule
+const catchAll = (rules) => rules.some((x) => x.priority === 1 && x.action.type === 'redirect' && !x.condition.requestDomains && x.condition.regexFilter === '^https?://.*');
+const blocksAi = (rules) => rules.some((x) => x.action.type === 'redirect' && (x.condition.requestDomains || []).includes('chatgpt.com'));
+const sessionOf = async (h) => (await h.chrome.storage.session.get('visorSession')).visorSession;
+const beatNow = async (h) => { h.chrome.alarms.onAlarm.fns.forEach((f) => f({ name: 'visor-flush' })); await settle(); await settle(); };
+// The last research-mode switch was a minute ago (the beat waits 15 s after one)
+const switchedLongAgo = (h) => { const s = h.chrome.storage.session.data.visorSession; if (s) s.researchAt = Date.now() - 60000; };
+const CITE_OFF = 'One-click citing is turned off for this assignment.';
 
 (async () => {
   const h = load();
@@ -121,6 +137,7 @@ const callsOf = (calls, name) => calls.filter((c) => c[0] === name).map((c) => c
   ck('  …and every open tab’s', callsOf(h.calls, 'setOptions').filter((c) => c[0].tabId).map((c) => [c[0].tabId, c[0].path, c[0].enabled]), [[1, 'sessionpanel.html', true], [2, 'sessionpanel.html', true], [5, 'sessionpanel.html', true]]);
   ck('  the minute alarm is set', callsOf(h.calls, 'alarms.create').at(-1), ['visor-flush', { periodInMinutes: 1 }]);
   ck('  research isn’t recorded without the permission', callsOf(h.calls, 'registerContentScripts').length, 0);
+  ck('  the right-click cite item is added', callsOf(h.calls, 'contextMenus.create').map((c) => c[0].id), ['visor-cite']);
 
   // A tab navigating during the session keeps the session panel
   h.calls.length = 0;
@@ -134,6 +151,9 @@ const callsOf = (calls, name) => calls.filter((c) => c[0] === name).map((c) => c
 
   const ps = await h.send({ type: 'VISOR_PANEL_STATE' }, {});
   ck('the panel learns the session', [ps.active, ps.assignmentId, ps.origin, ps.title, ps.extToken], [true, 'a1', 'http://localhost:3000', 'Essay', 'tok']);
+  ck('  one-click citing and side-panel mode default to on', [ps.oneClickCite, ps.panelBrowsing, ps.researchMode], [true, true, false]);
+  r = await h.send({ channel: 'visor-bridge', type: 'RESEARCH_MODE', payload: { docId: 'd1', on: true } }, visor);
+  ck('  research mode in an open session: succeeds, changes nothing', [r.ok, callsOf(h.calls, 'dnr.update').length, (await sessionOf(h)).researchMode], [true, 0, false]);
 
   // The session ends: v3.6 behavior, exactly
   h.calls.length = 0;
@@ -167,6 +187,119 @@ const callsOf = (calls, name) => calls.filter((c) => c[0] === name).map((c) => c
   const r3 = load();
   await settle(); await settle();
   ck('a normal start (no flag, no rules) changes nothing', callsOf(r3.calls, 'setPopup').length, 0);
+
+  // ── A locked session: one-click citing off, research mode (side panel) ────
+  const L = load();
+  await settle();
+  await L.send({ channel: 'visor-bridge', type: 'CONNECT', payload: { token: 'tok', user: { id: 'u1', name: 'Sam' } } }, visor);
+  const locked = { mode: 'locked', researchTracking: true, title: 'Essay', allowedSites: ['en.wikipedia.org'], blockedSites: ['chatgpt.com'], blockAiSites: true, oneClickCite: false, panelBrowsing: true };
+  const startLocked = (docId, settings) => L.send({ channel: 'visor-bridge', type: 'SESSION_START', payload: { docId, assignmentId: 'a2', sessionToken: 'wsess2', settings } }, visor);
+  L.calls.length = 0;
+  r = await startLocked('d2', locked);
+  ck('locked session started', [r.ok, r.lockActive], [true, true]);
+  ck('  one-click citing off: no right-click item', [callsOf(L.calls, 'contextMenus.create').length, callsOf(L.calls, 'contextMenus.removeAll').length > 0], [0, true]);
+  ck('  the allowed list is enforced (catch-all redirect)', catchAll(await L.chrome.declarativeNetRequest.getDynamicRules()), true);
+  ck('  an open tab off the list is sent away', callsOf(L.calls, 'tabs.update').map((c) => c[0]), [1]);
+  let ps3 = await L.send({ type: 'VISOR_PANEL_STATE' }, {});
+  ck('  the panel learns the switches', [ps3.oneClickCite, ps3.panelBrowsing, ps3.researchMode], [false, true, false]);
+
+  r = await L.send({ type: 'VISOR_CITE_ACTIVE', from: 'panel' }, {});
+  ck('the panel’s cite button is refused', r, { ok: false, error: CITE_OFF });
+  L.calls.length = 0;
+  L.chrome.commands.onCommand.fns.forEach((f) => f('cite-page', L.tabs[1]));
+  L.chrome.contextMenus.onClicked.fns.forEach((f) => f({ menuItemId: 'visor-cite' }, L.tabs[1]));
+  await settle();
+  ck('Alt+Shift+C and a stale right-click item only say so', callsOf(L.calls, 'executeScript').map((c) => [c[0].tabId, c[0].files, c[0].args]), [[2, undefined, [CITE_OFF]], [2, undefined, [CITE_OFF]]]);
+  ck('  and nothing reaches the editor', callsOf(L.calls, 'tabs.sendMessage').length, 0);
+
+  L.calls.length = 0;
+  r = await L.send({ channel: 'visor-bridge', type: 'RESEARCH_MODE', payload: { docId: 'd2', on: true } }, visor);
+  ck('research mode on', r, { ok: true, researchMode: true });
+  let rules = await L.chrome.declarativeNetRequest.getDynamicRules();
+  ck('  the catch-all is gone, the AI rules stay', [catchAll(rules), blocksAi(rules)], [false, true]);
+  ck('  the state says so', (await sessionOf(L)).researchMode, true);
+  ck('  open tabs aren’t swept (the rules got looser)', callsOf(L.calls, 'tabs.update').length, 0);
+  ps3 = await L.send({ type: 'VISOR_PANEL_STATE' }, {});
+  ck('  the panel knows', ps3.researchMode, true);
+  r = await L.send({ channel: 'visor-bridge', type: 'RESEARCH_MODE', payload: { docId: 'other', on: false } }, visor);
+  ck('another document’s request is ignored', [r, (await sessionOf(L)).researchMode], [{ ok: false, error: 'no session' }, true]);
+  r = await startLocked('d2', locked);
+  ck('a re-sent SESSION_START (reload) keeps research mode', [(await sessionOf(L)).researchMode, catchAll(await L.chrome.declarativeNetRequest.getDynamicRules())], [true, false]);
+
+  L.calls.length = 0;
+  r = await L.send({ channel: 'visor-bridge', type: 'RESEARCH_MODE', payload: { docId: 'd2', on: false } }, visor);
+  ck('research mode off', r, { ok: true, researchMode: false });
+  rules = await L.chrome.declarativeNetRequest.getDynamicRules();
+  ck('  the catch-all is back', [catchAll(rules), blocksAi(rules)], [true, true]);
+  ck('  tabs opened while researching are left alone', callsOf(L.calls, 'tabs.update').map((c) => c[0]), []);
+  r = await L.send({ channel: 'visor-bridge', type: 'RESEARCH_MODE', payload: { docId: 'd2', on: false } }, visor);
+  ck('  saying it again changes nothing', [r, (await L.chrome.declarativeNetRequest.getDynamicRules()).length === rules.length], [{ ok: true, researchMode: false }, true]);
+
+  // The beat says which surface holds the lease; the extension catches up
+  L.beat.leaseSurf = 'panel';
+  await beatNow(L);
+  ck('beat: just after the tab switched, the beat doesn’t undo it', (await sessionOf(L)).researchMode, false);
+  switchedLongAgo(L);
+  await beatNow(L);
+  ck('beat: the side panel holds the lease, so research mode goes on', [(await sessionOf(L)).researchMode, catchAll(await L.chrome.declarativeNetRequest.getDynamicRules())], [true, false]);
+  switchedLongAgo(L);
+  L.beat.leaseSurf = null;
+  await beatNow(L);
+  ck('beat: no lease news leaves it alone', (await sessionOf(L)).researchMode, true);
+  L.beat.leaseSurf = 'tab';
+  await beatNow(L);
+  ck('beat: the tab took the lease back, so research mode goes off', [(await sessionOf(L)).researchMode, catchAll(await L.chrome.declarativeNetRequest.getDynamicRules())], [false, true]);
+  // The tab's message and the beat at the same moment: one rebuild after the other
+  const both = await Promise.all([1, 2].map(() => L.send({ channel: 'visor-bridge', type: 'RESEARCH_MODE', payload: { docId: 'd2', on: true } }, visor)));
+  rules = await L.chrome.declarativeNetRequest.getDynamicRules();
+  ck('two switches at once: both work, the lock stays on', [both.map((x) => x.ok), (await sessionOf(L)).lockActive, catchAll(rules), blocksAi(rules)], [[true, true], true, false, true]);
+  await L.send({ channel: 'visor-bridge', type: 'RESEARCH_MODE', payload: { docId: 'd2', on: false } }, visor);
+
+  // Side-panel mode turned off for the assignment
+  L.beat.leaseSurf = null;
+  await L.send({ channel: 'visor-bridge', type: 'SESSION_END', payload: { docId: 'd2' } }, visor);
+  L.calls.length = 0;
+  r = await startLocked('d3', { ...locked, oneClickCite: true, panelBrowsing: false });
+  ck('one-click citing on: the right-click item is added', callsOf(L.calls, 'contextMenus.create').map((c) => c[0].id), ['visor-cite']);
+  r = await L.send({ channel: 'visor-bridge', type: 'RESEARCH_MODE', payload: { docId: 'd3', on: true } }, visor);
+  ck('side-panel mode off: research mode is refused', r, { ok: false, error: 'Side-panel mode is turned off for this assignment.' });
+  ck('  the allowed list still applies', [(await sessionOf(L)).researchMode, catchAll(await L.chrome.declarativeNetRequest.getDynamicRules())], [false, true]);
+  L.beat.leaseSurf = 'panel';
+  await beatNow(L);
+  ck('  a beat naming the panel doesn’t switch it either', (await sessionOf(L)).researchMode, false);
+  ps3 = await L.send({ type: 'VISOR_PANEL_STATE' }, {});
+  ck('  the panel learns the switches', [ps3.oneClickCite, ps3.panelBrowsing, ps3.researchMode], [true, false, false]);
+
+  // Chrome restarted while the side panel held the lease: the reloaded page
+  // says so in the settings, so the extension starts in research mode and
+  // leaves the student's research tabs alone
+  L.beat.leaseSurf = null;
+  await L.send({ channel: 'visor-bridge', type: 'SESSION_END', payload: { docId: 'd3' } }, visor);
+  const R = load();
+  await settle();
+  await R.send({ channel: 'visor-bridge', type: 'CONNECT', payload: { token: 'tok', user: { id: 'u1', name: 'Sam' } } }, visor);
+  R.calls.length = 0;
+  r = await R.send({ channel: 'visor-bridge', type: 'SESSION_START', payload: { docId: 'd4', assignmentId: 'a2', sessionToken: 'wsess4', settings: { ...locked, research: true } } }, visor);
+  rules = await R.chrome.declarativeNetRequest.getDynamicRules();
+  ck('restart mid-research: starts in research mode', [r.ok, (await sessionOf(R)).researchMode, catchAll(rules), blocksAi(rules)], [true, true, false, true]);
+  ck('  research tabs aren’t sent away', callsOf(R.calls, 'tabs.update').length, 0);
+  // A research switch racing a session start: whichever lands, the rules
+  // match the state at the end
+  await R.send({ channel: 'visor-bridge', type: 'SESSION_END', payload: { docId: 'd4' } }, visor);
+  // (setting up the side panel on each tab takes a moment in a real browser;
+  // the switch lands while the start is still doing that)
+  const setOptions = R.chrome.sidePanel.setOptions;
+  R.chrome.sidePanel.setOptions = (...a) => new Promise((done) => setTimeout(() => done(setOptions(...a)), 8));
+  const race = [
+    R.send({ channel: 'visor-bridge', type: 'SESSION_START', payload: { docId: 'd5', assignmentId: 'a2', sessionToken: 'wsess5', settings: locked } }, visor),
+    new Promise((r) => setTimeout(r, 12)).then(() => R.send({ channel: 'visor-bridge', type: 'RESEARCH_MODE', payload: { docId: 'd5', on: true } }, visor))
+  ];
+  await Promise.all(race);
+  await settle();
+  const rs = await sessionOf(R);
+  rules = await R.chrome.declarativeNetRequest.getDynamicRules();
+  ck('a switch racing the start: the rules agree with the state', [rs.researchMode, rs.lockActive, catchAll(rules)], [true, true, false]);
+  R.chrome.sidePanel.setOptions = setOptions;
 
   console.log(out.every(Boolean) ? `\nall passed (${out.length} checks)` : `\n${out.filter((x) => !x).length} FAILED`);
   process.exit(out.every(Boolean) ? 0 : 1);

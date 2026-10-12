@@ -9,7 +9,8 @@
  *   • the toolbar badge says REC, with a title saying research is recorded;
  *   • the side panel is the session panel (sessionpanel.html) on every tab;
  *   • research is recorded (research capture below; research.js parses searches);
- *   • locked sessions keep the student on allowed sites (lockdown below);
+ *   • locked sessions keep the student on allowed sites (lockdown below), or,
+ *     while they write in the side panel (research mode), off blocked sites;
  *   • every minute the queue of research events is sent, and the extension
  *     tells the server it's still here.
  *
@@ -148,6 +149,9 @@ async function sessionStart(payload, sender) {
     // Sent again for the same session (a reload, another tab): keep the open visit
     current: prev && prev.docId === docId ? prev.current || null : null,
     lastSearch: prev && prev.docId === docId ? prev.lastSearch || null : null,
+    // Writing in the side panel (locked sessions): kept across a re-send too,
+    // or, if the extension lost its state (a browser restart), as the page says
+    researchMode: prev && prev.docId === docId ? !!prev.researchMode : !!settings.research,
     lockActive: false
   };
   await setState(state);
@@ -157,8 +161,10 @@ async function sessionStart(payload, sender) {
   await setBadge(true, recording);
   await enterSessionPanelMode();
   if (recording) await startResearchCapture();
-  if (state.settings.mode === 'locked' || state.settings.blockAiSites) await lockdownOn(state);
-  addCiteMenu();
+  if (state.settings.mode === 'locked' || state.settings.blockAiSites) await relock();
+  // One-click citing turned off for this assignment: no right-click item
+  if (state.settings.oneClickCite === false) removeCiteMenu();
+  else addCiteMenu();
   chrome.alarms.create(FLUSH_ALARM, { periodInMinutes: 1 });
   await extBeat();
   return { ok: true, recording, lockActive: (await getState()).lockActive };
@@ -174,7 +180,7 @@ async function sessionEnd(reason) {
     await flushResearch().catch(() => {});
   }
   await stopResearchCapture();
-  await lockdownOff();
+  await lockChained(() => lockdownOff());
   await chrome.alarms.clear(FLUSH_ALARM).catch(() => {});
   removeCiteMenu();
   await setState(null);
@@ -210,7 +216,8 @@ async function disconnectedByServer() {
 }
 
 // The extension's beat: the server learns it's still here and whether the
-// lockdown is on; the extension learns whether the session is still running.
+// lockdown is on; the extension learns whether the session is still running,
+// and which surface holds the editing lease (leaseSurf).
 async function extBeat() {
   const s = await getState();
   if (!s || !s.active) return;
@@ -218,9 +225,56 @@ async function extBeat() {
     const r = await visorApi('/api/ext/session/beat', { method: 'POST', body: { docId: s.docId, lockActive: !!s.lockActive, hasHostPermission: await hasHostPermission(), version: chrome.runtime.getManifest().version }, origin: s.origin });
     if (!r.active) return sessionEnd('server');
     if (r.deadlineAt !== s.deadlineAt) await patchState((x) => { x.deadlineAt = r.deadlineAt; });
+    // The tab drives research mode; this catches up if a message was missed.
+    // Not right after a switch: the tab moves the lease just after its message.
+    const settling = s.researchAt && Date.now() - s.researchAt < RESEARCH_SETTLE_MS;
+    if (s.settings.mode === 'locked' && s.settings.panelBrowsing !== false && !settling) {
+      if (r.leaseSurf === 'panel' && !s.researchMode) await setResearchMode(true);
+      else if (r.leaseSurf === 'tab' && s.researchMode) await setResearchMode(false);
+    }
   } catch (e) {
     if (e.status === 401) return disconnectedByServer();
   }
+}
+
+// Research mode: a locked session writing in the side panel. Other tabs are
+// research then, so the allowed list is set aside and only the blocked (AI)
+// sites stay blocked. Everything is recorded as usual.
+const RESEARCH_SETTLE_MS = 15_000;
+// One rule rebuild at a time (a session starting, a research switch, the
+// beat catching up, the session ending): two at once would collide, and each
+// one reads the state fresh, so none can undo a newer one
+let lockChain = Promise.resolve();
+function lockChained(job) {
+  const run = lockChain.then(job);
+  lockChain = run.catch(() => {});
+  return run;
+}
+function relock() {
+  return lockChained(async () => {
+    const cur = await getState();
+    if (cur && cur.active && (cur.settings.mode === 'locked' || cur.settings.blockAiSites)) await lockdownOn(cur);
+  });
+}
+function setResearchMode(on) {
+  return lockChained(() => switchResearchMode(on));
+}
+async function switchResearchMode(on) {
+  const s = await getState();
+  if (!s || !s.active) return { ok: false, error: 'no session' };
+  if (s.settings.mode === 'locked' && s.settings.panelBrowsing === false) return { ok: false, error: 'Side-panel mode is turned off for this assignment.' };
+  // Open sessions have no allowed list: nothing to change
+  if (s.settings.mode !== 'locked') return { ok: true, researchMode: !!s.researchMode };
+  // Already there (the tab says so once per page load): nothing to rebuild
+  if (!!s.researchMode === !!on) return { ok: true, researchMode: !!on };
+  // In the state chain, so a research event being written can't undo it
+  await withState((x) => { x.researchMode = !!on; x.researchAt = Date.now(); });
+  // The rules are rebuilt both ways. Tabs opened while researching stay as
+  // they are: the teacher allowed that research, and back in full screen the
+  // student can't look at them without a pause being recorded.
+  const next = await getState();
+  if (next && next.active) await lockdownOn(next, { sweep: false });
+  return { ok: true, researchMode: !!on };
 }
 
 // ── Messages from the Visor page (site-bridge.js) ─────────────────────────
@@ -269,6 +323,12 @@ async function handleBridge(msg, sender) {
       }
     }
     case 'REQUEST_PERMISSION': return requestHostPermission();
+    case 'RESEARCH_MODE': {
+      // The tab moved the editing lease to the side panel, or took it back
+      const s = await getState();
+      if (!s || !s.active || !p.docId || p.docId !== s.docId) return { ok: false, error: 'no session' };
+      return setResearchMode(!!p.on);
+    }
   }
   return { ok: false, error: 'unknown request' };
 }
@@ -429,7 +489,7 @@ async function beforeNavigate(details) {
   await withState(async (s) => {
     const hit = VisorResearch.siteMatch(details.url, s.settings.blockedSites);
     if (!hit) return;
-    const blocked = !!s.settings.blockAiSites || (s.settings.mode === 'locked' && s.lockActive && (s.settings.allowedSites || []).length > 0);
+    const blocked = !!s.settings.blockAiSites || (s.settings.mode === 'locked' && s.lockActive && !inResearch(s) && (s.settings.allowedSites || []).length > 0);
     const ev = { type: 'ai-site', url: capUrl(details.url), host: hostOf(details.url), site: hit, blocked };
     // Recorded with or without research tracking: it's part of the session
     queueEvent(s, ev);
@@ -509,8 +569,11 @@ chrome.runtime.onMessage.addListener((msg, sender) => {
 // details are read in the page by cite.js; the Visor editor formats them in
 // the assignment's style, inserts the in-text citation and adds the entry.
 // Outside a session the button still works: it copies an MLA citation.
+// A teacher can turn one-click citing off for an assignment (oneClickCite:
+// false): then all three only say so. Sources added by hand still work.
 
 const CITE_MENU = 'visor-cite';
+const CITE_OFF = 'One-click citing is turned off for this assignment.';
 
 async function readCitationMeta(tab) {
   if (!tab || !/^https?:/.test(tab.url || '') || VisorConfig.isVisorOrigin(tab.url)) {
@@ -534,6 +597,11 @@ async function activeTabForCite(windowId) {
 
 async function citeTab(tab, from) {
   const s = await getState();
+  // The panel button, the right-click item and Alt+Shift+C all come here
+  if (s && s.active && s.settings.oneClickCite === false) {
+    if (from !== 'panel') toastInTab(tab, CITE_OFF);
+    return { ok: false, error: CITE_OFF };
+  }
   let meta;
   try { meta = await readCitationMeta(tab); }
   catch (e) { if (from !== 'panel') toastInTab(tab, e.message); return { ok: false, error: e.message }; }
@@ -625,9 +693,15 @@ async function clearRules() {
   } catch (_) {}
 }
 
-async function lockdownOn(state) {
+// Research mode (setResearchMode above) loosens a locked session's rules
+function inResearch(s) {
+  return !!s.researchMode && s.settings.panelBrowsing !== false;
+}
+
+async function lockdownOn(state, { sweep = true } = {}) {
   await clearRules();
-  const rules = VisorLockdown.buildBlockRules(state.settings, { visorOrigin: state.origin, blockedPage: chrome.runtime.getURL('blocked.html') });
+  const research = inResearch(state);
+  const rules = VisorLockdown.buildBlockRules(state.settings, { visorOrigin: state.origin, blockedPage: chrome.runtime.getURL('blocked.html'), research });
   let ok = false;
   if (rules.length) {
     try { await chrome.declarativeNetRequest.updateDynamicRules({ addRules: rules }); ok = true; } catch (e) { console.warn('Visor lockdown rules failed:', e && e.message); }
@@ -637,11 +711,11 @@ async function lockdownOn(state) {
   const locked = state.settings.mode === 'locked' && (ok || !rules.length);
   await patchState((x) => { x.lockActive = locked; x.aiBlockActive = ok; });
   // Pages already open don't go through the new rules: send away the ones
-  // that aren't allowed now
-  if (ok) {
+  // that aren't allowed now. Not in research mode: those rules are looser.
+  if (ok && !research && sweep) {
     const tabs = await chrome.tabs.query({}).catch(() => []);
     for (const t of tabs) {
-      if (!t.url || !VisorLockdown.blockedReason(t.url, state.settings, state.origin)) continue;
+      if (!t.url || !VisorLockdown.blockedReason(t.url, state.settings, state.origin, { research })) continue;
       queueBlocked(t.url);
       chrome.tabs.update(t.id, { url: `${chrome.runtime.getURL('blocked.html')}?u=${t.url}` }).catch(() => {});
     }
@@ -695,6 +769,12 @@ chrome.runtime.onMessage.addListener((msg, sender) => {
           await chrome.tabs.update(sender.tab.id, { url: `${s.origin}/write/${encodeURIComponent(s.assignmentId)}` }).catch(() => {});
           await patchState((x) => { x.visorTabId = sender.tab.id; x.visorWindowId = sender.tab.windowId; });
         }
+        return;
+      }
+      // Writing in the side panel (research mode): the panel is next to every
+      // tab, so just leave the blocked page (or close it if there's no way back)
+      if (inResearch(s) && sender.tab && sender.tab.id !== s.visorTabId) {
+        chrome.tabs.goBack(sender.tab.id).catch(() => chrome.tabs.remove(sender.tab.id).catch(() => {}));
         return;
       }
       try { await chrome.tabs.update(s.visorTabId, { active: true }); } catch (_) {}
@@ -832,6 +912,7 @@ async function panelState() {
   return {
     active: true, docId: s.docId, assignmentId: s.assignmentId, origin: s.origin, title: s.settings.title || 'Writing session',
     startedAt: s.startedAt, deadlineAt: s.deadlineAt, recording: !!s.recording, mode: s.settings.mode,
-    citationStyle: s.settings.citationStyle || 'mla', sessionToken: s.sessionToken, extToken: auth ? auth.token : null
+    citationStyle: s.settings.citationStyle || 'mla', sessionToken: s.sessionToken, extToken: auth ? auth.token : null,
+    oneClickCite: s.settings.oneClickCite !== false, panelBrowsing: s.settings.panelBrowsing !== false, researchMode: !!s.researchMode
   };
 }

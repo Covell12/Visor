@@ -20,7 +20,7 @@
 'use strict';
 
 (function () {
-  const TYPES = ['PING', 'CONNECT', 'DISCONNECT', 'SESSION_START', 'SESSION_END', 'OPEN_PANEL', 'REQUEST_PERMISSION'];
+  const TYPES = ['PING', 'CONNECT', 'DISCONNECT', 'SESSION_START', 'SESSION_END', 'OPEN_PANEL', 'REQUEST_PERMISSION', 'RESEARCH_MODE'];
   let version = '';
   try { version = chrome.runtime.getManifest().version; } catch (_) { return; }
   document.documentElement.dataset.visorExtension = version;

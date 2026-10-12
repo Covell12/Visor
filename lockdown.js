@@ -3,7 +3,7 @@
  * ----------------------------------------------------------------------------
  * Pure functions (no chrome.* calls), used by session-bg.js and tested in node.
  *
- * buildBlockRules(settings, { visorOrigin, blockedPage }) returns the
+ * buildBlockRules(settings, { visorOrigin, blockedPage, research }) returns the
  * declarativeNetRequest dynamic rules for a session:
  *
  *   locked, with allowed sites   allow (priority 2): Visor, the allowed sites,
@@ -14,6 +14,9 @@
  *   no allowed list, "block AI"  allow Visor and accounts.google.com; redirect
  *   (locked or open)             only the sites on the AI list
  *   "block AI" off, no list      no rules (AI visits are only recorded)
+ *
+ * research: true is a locked session writing in the side panel. The allowed
+ * list doesn't apply then, so it gets the "no allowed list" rules above.
  *
  * Only top-level pages (main_frame) are redirected. The blocked page reads the
  * original address from everything after "?u=" (it isn't re-encoded, so the
@@ -51,7 +54,7 @@
     return rules;
   }
 
-  function buildBlockRules(settings, { visorOrigin, blockedPage }) {
+  function buildBlockRules(settings, { visorOrigin, blockedPage, research }) {
     const s = settings || {};
     const locked = s.mode === 'locked';
     const allowed = (s.allowedSites || []).map(splitEntry).filter(Boolean);
@@ -60,7 +63,8 @@
     let id = RULE_BASE;
     const nextId = () => id++;
     const redirect = { type: 'redirect', redirect: { regexSubstitution: `${blockedPage}?u=\\0` } };
-    const listed = locked && allowed.length > 0;
+    // Research mode (side panel): the allowed list is set aside
+    const listed = locked && allowed.length > 0 && !research;
 
     // Nothing to redirect: an open session that only flags AI sites, or a
     // locked one with no allowed list and "block AI sites" turned off
@@ -89,9 +93,11 @@
   }
 
   // The same decision for a page that's already open when the lock starts:
-  // null when it may stay, else why it may not ('ai' or 'not-allowed')
-  function blockedReason(url, settings, visorOrigin) {
+  // null when it may stay, else why it may not ('ai' or 'not-allowed').
+  // opts.research: research mode, as in buildBlockRules.
+  function blockedReason(url, settings, visorOrigin, opts) {
     const s = settings || {};
+    const research = !!(opts && opts.research);
     let u;
     try { u = new URL(url); } catch (_) { return null; }
     if (!/^https?:$/.test(u.protocol)) return null;
@@ -102,7 +108,7 @@
     const allowed = (s.allowedSites || []).map(splitEntry).filter(Boolean);
     const blocked = (s.blockedSites || []).map(splitEntry).filter(Boolean);
     if (s.blockAiSites && blocked.some(under)) return 'ai';
-    if (s.mode === 'locked' && allowed.length && !allowed.some(under)) return 'not-allowed';
+    if (s.mode === 'locked' && !research && allowed.length && !allowed.some(under)) return 'not-allowed';
     return null;
   }
 

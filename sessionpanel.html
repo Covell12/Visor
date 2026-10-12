@@ -8,7 +8,8 @@
 </head>
 <body>
   <!-- During a Visor writing session: the assignment, the timer, the cite
-       button, and the student's own document from the Visor web app. -->
+       button, Open Google, and the student's own document from the Visor
+       web app. -->
   <header class="sp-head">
     <img src="logo.png" alt="Visor" class="sp-mark" width="33" height="22">
     <div class="sp-head-text">
@@ -19,10 +20,14 @@
   </header>
 
   <main id="sp-main" hidden>
-    <div class="sp-cite-row">
-      <button id="sp-cite" class="sp-cite" title="Alt+Shift+C">
+    <div class="sp-cite-row" id="sp-cite-row">
+      <button id="sp-cite" class="sp-cite sp-act-main" title="Alt+Shift+C">
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 21c3 0 7-1 7-8V5c0-1.25-.756-2.017-2-2H4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2 1 0 1 0 1 1v1c0 1-1 2-2 2s-1 .008-1 1.031V20c0 1 0 1 1 1z"/><path d="M15 21c3 0 7-1 7-8V5c0-1.25-.757-2.017-2-2h-4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2h.75c0 2.25.25 4-2.75 4v3c0 1 0 1 1 1z"/></svg>
         Cite this page
+      </button>
+      <button id="sp-google" class="sp-act-2" hidden title="Opens Google in a new tab">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.35-4.35"/></svg>
+        Open Google
       </button>
       <div id="sp-cite-status" class="sp-cite-status" role="status" aria-live="polite"></div>
     </div>

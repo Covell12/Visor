@@ -4,7 +4,8 @@
  * Locked with an allowed list: Visor, Google sign-in and the list are allowed,
  * everything else goes to blocked.html. Locked with no list, or open with
  * "block AI sites": only the AI list is redirected. Open and only flagging:
- * nothing. The regexes are run against real URLs here, the way Chrome would.
+ * nothing. Research mode (side panel) sets the allowed list aside. The
+ * regexes are run against real URLs here, the way Chrome would.
  * ==========================================================================*/
 
 'use strict';
@@ -93,6 +94,22 @@ ck('locked, no list, "block AI sites" off: nothing is redirected', buildBlockRul
   ck('Visor itself stays', blockedReason('https://visor-ed.web.app/write/1', st, opts.visorOrigin), null);
   ck('browser pages are left to the bounce', blockedReason('chrome://newtab/', st, opts.visorOrigin), null);
   ck('open session: only AI pages', [blockedReason('https://www.reddit.com/', { ...st, mode: 'open' }, opts.visorOrigin), blockedReason('https://gemini.google.com/', { ...st, mode: 'open' }, opts.visorOrigin)], [null, 'ai']);
+}
+
+// ── Research mode: a locked session writing in the side panel ──────────────
+{
+  const st = { mode: 'locked', allowedSites: ['en.wikipedia.org', 'google.com'], blockedSites: ['gemini.google.com', 'chatgpt.com'], blockAiSites: true };
+  const rules = buildBlockRules(st, { ...opts, research: true });
+  ck('research mode: a site off the allowed list loads', decide(rules, 'https://example.com/'), 'load');
+  ck('research mode: AI sites stay blocked', decide(rules, 'https://chatgpt.com/'), 'chrome-extension://abc/blocked.html?u=https://chatgpt.com/');
+  ck('research mode: an AI site under an allowed domain stays blocked', decide(rules, 'https://gemini.google.com/app'), 'chrome-extension://abc/blocked.html?u=https://gemini.google.com/app');
+  ck('research mode: no catch-all redirect', rules.some((r) => r.action.type === 'redirect' && !r.condition.requestDomains && r.condition.regexFilter === '^https?://.*'), false);
+  ck('research mode: the same rules as a locked session with no list', rules, buildBlockRules({ ...st, allowedSites: [] }, opts));
+  ck('research mode, "block AI sites" off: nothing is redirected', buildBlockRules({ ...st, blockAiSites: false }, { ...opts, research: true }), []);
+  ck('without research mode the list still applies', decide(buildBlockRules(st, opts), 'https://example.com/'), 'chrome-extension://abc/blocked.html?u=https://example.com/');
+  const why = (url, o) => blockedReason(url, st, opts.visorOrigin, o);
+  ck('blockedReason agrees in research mode', [why('https://example.com/', { research: true }), why('https://chatgpt.com/', { research: true }), why('https://gemini.google.com/app', { research: true })], [null, 'ai', 'ai']);
+  ck('…and without it', [why('https://example.com/'), why('https://example.com/', { research: false })], ['not-allowed', 'not-allowed']);
 }
 
 // ── Browser pages ──────────────────────────────────────────────────────────
