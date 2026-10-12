@@ -5,34 +5,42 @@ One page to get your first class writing in Visor.
 ## 1. Make a class (2 minutes)
 
 1. Sign in at your school's Visor address and choose **Create class** on Home ("English 10 – Period 3").
-2. Students join with the **join code** shown on the class (put it on the board), or add them on the **Students** tab by pasting their email addresses. Anyone without an account yet gets an invite and joins as soon as they sign up with that email.
-3. On the same tab, give extra time to students who need it (1.25×, 1.5×, 2×…). It's applied to every timed session automatically.
+2. Students join with the **access code** in the class's sidebar (put it on the board). Or open the class's **Members** page and use **Add members → Add by email…** to paste their email addresses. Anyone without an account yet gets an invite and joins as soon as they sign up with that email.
+3. On **Members**, give extra time to students who need it (1.25×, 1.5×, 2×…). It's applied to every timed session automatically.
 
-When everyone's in, **Close joining** so the code stops working.
+When everyone's in, use **Add members → Close joining with the code** so the code stops working.
+
+Every class gets a colour and a picture, shown on its tile on Home, in the **Courses** menu and on the **Calendar**. Change the colour in the class's **Settings** (or with the pencil on its picture).
 
 ## 2. Make a writing assignment
 
-On the class page, **New assignment → Writing**, then pick a preset:
+On the class's **Materials** page, **Add Materials → Writing assignment**, then pick a preset:
 
 - **In-class essay (locked):** 45 minutes, runs in full screen, needs the Visor Chrome extension, students can only paste text from their own essay, AI sites are blocked, and it submits itself when time runs out.
 - **Homework essay (open):** no time limit, pasting allowed, research recorded, AI sites recorded but not blocked.
 
 Change anything you like (time limit, the window when sessions can start, allowed sites, citation style, document style, word limits, starter text), then **Save and publish**. **Document style** sets how a new essay looks: an MLA essay (Times New Roman 12, double-spaced) or Docs default (Arial 11, 1.15 spacing). Students write in a Google-Docs-style editor with menus, a toolbar, pictures, tables, find and replace and an outline, and everything they do is recorded as before.
 
+**Folders.** **Add Materials → Folder** makes a folder (a unit, a week) with a colour and an optional description; folders can hold folders, three deep. Drag rows to reorder them, drop a row onto a folder (or onto a folder name in the breadcrumb) to move it, or use a row's gear menu: **Move to…**, **Move up**, **Move down**. Deleting a folder never deletes what's in it: its contents move up a level. Students see a folder once something in it is published.
+
+**Updates.** Post announcements on the class's **Updates** page, and pin the important ones to the top. To post the same update to several classes at once, use the box on Home's **Recent Activity** tab. Students see updates on the class page and in their own Recent Activity, next to newly published assignments.
+
+**Calendar.** The **Calendar** in the top bar shows every due date, discussion date and writing window across your classes (unpublished ones are marked, and only you see them). Filter it to one class, or switch to the list.
+
 ## 3. On the day
 
-Students open the assignment and click **Start writing session**. Then:
+Students see what's due under **Upcoming** on Home and on their Calendar (with anything overdue in red). They open the assignment and click **Start writing session**. Then:
 
 - Writing is only on while the Visor tab has focus. If a student leaves it, writing stops at once and the pause is recorded, with its length and reason. They see the same "Away 2m 14s" you see.
 - The extension records their research (searches, pages and time on them, text copied), adds citations with **Cite this page** (or Alt+Shift+C), and in locked sessions keeps them on the allowed sites.
 - In a locked session a student can click **Research in side panel**: they leave full screen and keep writing in Chrome's side panel while they browse. Blocked and AI sites stay blocked, every page is recorded, and time on other tabs counts as research time, not time away. Untick "Let students switch to the side panel" to keep a locked assignment in full screen.
 - Untick "Let students cite a page in one click" if students should write their citations themselves. Sources added by hand still work.
 
-Open the assignment's **Live** tab to watch: status, time left, words, pastes, time away, and whether the extension and lockdown are on. **Needs attention** filters to students who've been away over a minute, lost the extension, visited an AI site, or pasted a big block from outside. You can pause, message, add time or end a session for one student or everyone.
+Home's **Happening now** box lists every assignment with students writing right now. Open the assignment's **Live** tab to watch: status, time left, words, pastes, time away, and whether the extension and lockdown are on. **Needs attention** filters to students who've been away over a minute, lost the extension, visited an AI site, or pasted a big block from outside. You can pause, message, add time or end a session for one student or everyone.
 
 ## 4. Review
 
-On **Submissions**, open any essay:
+Home's **Needs review** box lists submitted work across your classes, oldest first. Or open an assignment's **Submissions** tab and any essay:
 
 - **Document:** the essay and its Works Cited. **Color by source** marks what was typed, pasted from a page copied during the session, pasted from outside Visor's view, cited, or your starter text.
 - **Replay:** watch the essay being written, with sessions, pauses and research marked on the timeline.

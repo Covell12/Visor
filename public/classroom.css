@@ -5,11 +5,7 @@
 /* ---------- shell ---------- */
 a.btn { text-decoration: none; }
 .topbar .brand { text-decoration: none; color: inherit; }
-.topnav { display: flex; gap: 4px; margin-left: 18px; }
-.topnav a { padding: 7px 12px; border-radius: 999px; color: var(--ink-2); text-decoration: none; font-weight: 600; font-size: 14px; }
-.topnav a:hover { background: var(--blue-soft); color: var(--ink); }
-.topnav a.active { background: var(--blue-soft); color: var(--blue-deep); }
-.route-view { min-height: calc(100vh - 64px); }
+.route-view { min-height: calc(100vh - 56px); }
 .page { max-width: 1100px; margin: 0 auto; padding: 26px 24px 70px; }
 .page h1 { font-size: 26px; margin: 0 0 2px; letter-spacing: -.01em; }
 .page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 20px; }
@@ -25,33 +21,22 @@ a.btn { text-decoration: none; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .check-row { display: flex; gap: 10px; align-items: flex-start; font-size: 14px; margin: 4px 0 16px; cursor: pointer; }
 .check-row input { margin-top: 3px; width: 16px; height: 16px; flex: none; }
-.input-sm { padding: 7px 10px; font-size: 13px; border-radius: 10px; }
+.input-sm { padding: 6px 9px; font-size: 13px; border-radius: 6px; }
 select.input { appearance: auto; }
 
 /* Visible focus for everything new (keyboard users). Not the editor's menus,
    toolbar, outline and find panel: docs-editor.css gives those their own
    (the :where keeps this rule's weight as it was for everything else). */
 .route-view :is(a, button, select, input, textarea):focus-visible:where(:not([class*="dui-"], .dx-menubar-slot [class*="dui-"] *, .dx-toolbar-slot [class*="dui-"] *, .dx-outline *, .dui-find *)),
-.modal button:focus-visible, .modal a:focus-visible, .topnav a:focus-visible, .brand:focus-visible, .collapse .ch:focus-visible {
-  outline: 3px solid var(--blue-deep); outline-offset: 2px;
+.modal button:focus-visible, .modal a:focus-visible, .topnav a:focus-visible, .topnav button:focus-visible, .brand:focus-visible, .dd-menu :is(a, button):focus-visible, .collapse .ch:focus-visible {
+  outline: 3px solid var(--brand); outline-offset: 2px;
 }
 
-/* ---------- class cards / lists ---------- */
-.class-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }
-.class-card { display: block; padding: 18px; text-decoration: none; color: inherit; }
-.class-card.archived { opacity: .7; }
-.class-card-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
-.class-name { font-weight: 700; font-size: 16.5px; }
-.class-meta { display: flex; flex-wrap: wrap; gap: 4px 12px; color: var(--ink-2); font-size: 13px; margin-top: 8px; }
-.class-upcoming { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 10px; display: flex; flex-direction: column; gap: 6px; font-size: 13.5px; }
-.class-upcoming .pill { font-size: 10px; padding: 2px 7px; }
+/* ---------- lists ---------- */
 .live-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--red); box-shadow: 0 0 0 0 rgba(217,83,79,.5); animation: livePulse 1.6s infinite; vertical-align: middle; }
 .live-dot-text { color: var(--red); display: inline-flex; align-items: center; gap: 6px; }
 @keyframes livePulse { 0% { box-shadow: 0 0 0 0 rgba(217,83,79,.5); } 70% { box-shadow: 0 0 0 7px rgba(217,83,79,0); } 100% { box-shadow: 0 0 0 0 rgba(217,83,79,0); } }
 @media (prefers-reduced-motion: reduce) { .live-dot { animation: none; } }
-.happening { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; background: var(--red-soft); border-radius: var(--r-lg); padding: 12px 16px; margin-bottom: 18px; }
-.happening .kicker { color: var(--red); display: flex; align-items: center; gap: 8px; }
-.happening-item { display: flex; flex-direction: column; background: #fff; border-radius: var(--r); padding: 8px 14px; text-decoration: none; color: inherit; box-shadow: var(--shadow-sm); }
 .list-card { overflow: hidden; }
 .list-row { display: flex; align-items: center; gap: 12px; padding: 13px 16px; border-bottom: 1px solid var(--line); text-decoration: none; color: inherit; }
 .list-row:last-child { border-bottom: 0; }
@@ -78,7 +63,6 @@ a.list-row:hover { background: var(--surface); }
 /* ---------- small screens ---------- */
 @media (max-width: 720px) {
   .page { padding: 18px 14px 60px; }
-  .topnav { display: none; }
   .roster th:nth-child(3), .roster td:nth-child(3) { display: none; }
 }
 
@@ -270,15 +254,15 @@ html:has(body.writing), body.writing { scroll-padding-top: calc(var(--dx-sticky-
 .wr-embed .dx-sources .wr-works { width: auto; margin: 8px 0; padding: 16px; box-shadow: var(--shadow-sm); border-radius: var(--r); zoom: 1; }
 
 /* ---------- segmented filters ---------- */
-.seg { display: inline-flex; flex-wrap: wrap; gap: 2px; background: #fff; border: 1.5px solid var(--line); border-radius: 999px; padding: 3px; }
-.seg button { border: 0; background: transparent; border-radius: 999px; padding: 6px 12px; font-size: 13px; font-weight: 600; color: var(--ink-2); }
-.seg button[aria-pressed="true"] { background: var(--blue-soft); color: var(--blue-deep); }
+.seg { display: inline-flex; flex-wrap: wrap; gap: 2px; background: #fff; border: 1px solid var(--field-line); border-radius: 6px; padding: 3px; }
+.seg button { border: 0; background: transparent; border-radius: 4px; padding: 6px 12px; font-size: 13px; font-weight: 600; color: var(--ink-2); }
+.seg button[aria-pressed="true"] { background: var(--brand-soft); color: var(--brand); }
 
 /* ---------- live board ---------- */
 .live-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
 .live-tools label { display: inline-flex; align-items: center; gap: 6px; }
 .live-banner { margin-bottom: 10px; }
-.live-card { overflow-x: auto; }
+.live-card { overflow-x: auto; position: relative; }
 .live-table th, .live-table td { white-space: nowrap; }
 .live-table tr.attn { background: #FFFBF3; }
 .live-table td.low { color: var(--red); font-weight: 700; }

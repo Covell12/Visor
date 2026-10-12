@@ -11,19 +11,24 @@ const siteLines = list => (list || []).join('\n');
 const STYLE_NAME = { mla: 'MLA 9', apa: 'APA 7', chicago: 'Chicago' };
 
 /* ====================== create / edit form ====================== */
-let af = null; // { classId, type, a (existing or null), groups, students }
+let af = null; // { classId, type, a (existing or null), groups, students, folders, folderId }
 
-async function openAssignmentForm(classId, type, existing = null) {
-  // The roster of this assignment's class (not whichever class page was open last)
-  let students = cp?.cls?.id === classId ? cp.cls.students : null;
-  if (!students) { try { students = (await api(`/api/classes/${classId}`)).class.students; } catch {} }
-  af = { classId, type, a: existing, students: students || [], groups: JSON.parse(JSON.stringify(existing?.group?.groups || [])) };
+// opts.folderId: the folder a new assignment goes in (Add Materials inside a folder)
+async function openAssignmentForm(classId, type, existing = null, opts = {}) {
+  // The roster and folders of this assignment's class (not whichever class page was open last)
+  let students = cp?.cls?.id === classId ? cp.cls.students : null, folders = cp?.cls?.id === classId ? cp.folders : null;
+  if (!students || !folders) { try { const r = await api(`/api/classes/${classId}`); students = r.class.students; folders = r.folders || []; } catch {} }
+  const folderId = existing ? existing.folderId || '' : opts.folderId || '';
+  af = { classId, type, a: existing, students: students || [], folders: folders || [], folderId, groups: JSON.parse(JSON.stringify(existing?.group?.groups || [])) };
   const a = existing || { title: '', instructions: '', dueAt: null, writing: CFG.writingPresets?.homework?.writing, discussion: { date: null, shareOwnStats: false } };
   const titles = { writing: 'writing assignment', group: 'group project', discussion: 'discussion' };
   const common = `
     <div class="field"><label for="afTitle">Title</label><input id="afTitle" class="input" maxlength="200" value="${esc(a.title)}" placeholder="${type === 'writing' ? 'e.g. Argument essay: school start times' : type === 'group' ? 'e.g. Civil rights movement presentation' : 'e.g. Socratic seminar: Chapter 4'}" /></div>
     <div class="field"><label for="afInstr">${type === 'discussion' ? 'Prompt' : 'Instructions'}</label><textarea id="afInstr" class="input" maxlength="20000" placeholder="What students should do. Line breaks are kept.">${esc(a.instructions)}</textarea></div>
-    <div class="field"><label for="afDue">Due <span class="label-note">optional</span></label><input id="afDue" class="input" type="datetime-local" value="${toLocalInput(a.dueAt)}" /></div>`;
+    <div class="form-grid" style="margin-top:0;">
+      <div class="field"><label for="afDue">Due <span class="label-note">optional</span></label><input id="afDue" class="input" type="datetime-local" value="${toLocalInput(a.dueAt)}" /></div>
+      ${af.folders.length ? `<div class="field"><label for="afFolder">Folder</label><select id="afFolder" class="input">${folderOptions(af.folders, af.folderId)}</select></div>` : ''}
+    </div>`;
   let extra = '';
   if (type === 'writing') extra = writingFields(a.writing || CFG.writingPresets.homework.writing, !existing);
   if (type === 'group') extra = `<div class="kicker" style="margin:18px 0 8px;">Groups</div><div id="afGroups"></div>`;
@@ -35,6 +40,16 @@ async function openAssignmentForm(classId, type, existing = null) {
   if (type === 'writing') syncWritingForm();
   if (type === 'group') renderGroupBuilder();
   setTimeout(() => $('afTitle')?.focus(), 50);
+}
+
+// <option>s for every folder, indented under its parent
+function folderOptions(folders, current) {
+  const out = [`<option value="" ${!current ? 'selected' : ''}>None (the top of the class)</option>`];
+  const walk = (parentId, depth) => folders.filter(f => (f.parentId || null) === parentId)
+    .sort((x, y) => matPos(x) - matPos(y) || (x.createdAt < y.createdAt ? 1 : -1))
+    .forEach(f => { out.push(`<option value="${f.id}" ${f.id === current ? 'selected' : ''}>${'\u2003'.repeat(depth)}${esc(f.name)}</option>`); walk(f.id, depth + 1); });
+  walk(null, 0);
+  return out.join('');
 }
 
 function writingFields(w, showPresets) {
@@ -114,11 +129,15 @@ function collectWriting() {
 }
 
 // publish: true = save and publish, false = save as draft, null = edit (keep as is)
-async function saveAssignment(publish) {
+// The footer buttons are off while it saves, so a double click saves once
+const saveAssignment = publish => modalBusy(() => saveAssignmentNow(publish));
+async function saveAssignmentNow(publish) {
   // A date or time box left half-filled reads as empty: say so instead of saving "no date"
   const half = [...document.querySelectorAll('.modal input[type=datetime-local]')].find(i => i.validity.badInput);
   if (half) { formError('afErr', 'One of the dates is only partly filled in. Finish it or clear it.'); half.focus(); return; }
   const body = { type: af.type, title: $('afTitle').value, instructions: $('afInstr').value, dueAt: fromLocalInput($('afDue').value) };
+  const folderId = $('afFolder') ? $('afFolder').value || null : af.folderId || null;
+  if (!af.a || folderId !== (af.a.folderId || null)) body.folderId = folderId;
   if (af.type === 'writing') body.writing = collectWriting();
   if (af.type === 'group') body.group = { groups: af.groups };
   if (af.type === 'discussion') body.discussion = { date: fromLocalInput($('afDiscDate').value), shareOwnStats: $('afShare').checked };
@@ -128,8 +147,13 @@ async function saveAssignment(publish) {
     else r = await api(`/api/classes/${af.classId}/assignments`, { method: 'POST', body });
     if (publish) r = await api(`/api/assignments/${r.assignment.id}/publish`, { method: 'POST', body: { published: true } });
     closeModal();
-    toast(af.a ? 'Saved' : publish ? 'Published. Students can see it now.' : 'Saved as a draft');
-    VisorRouter.go(`/a/${r.assignment.id}`, { replace: !!af.a });
+    toast(af.a ? 'Saved' : publish ? 'Published. Students can see it now.' : 'Saved as a draft. Students can’t see it until you publish it.');
+    // From the class's materials: stay on the list. From the assignment page: show it again.
+    if (cp && location.pathname === `/class/${af.classId}`) {
+      // A new one made somewhere else than the folder on screen: go and show it there
+      if (!af.a && (body.folderId || null) !== (cp.folder || null)) VisorRouter.go(`/class/${af.classId}${body.folderId ? '?folder=' + body.folderId : ''}`);
+      else refreshClass();
+    } else VisorRouter.go(`/a/${r.assignment.id}`, { replace: !!af.a });
   } catch (e) { formError('afErr', e.message); $('afErr').scrollIntoView({ block: 'nearest' }); }
 }
 
@@ -170,11 +194,17 @@ function autoGroups() {
   renderGroupBuilder();
 }
 
-/* ====================== assignment page ====================== */
+/* ====================== assignment page ======================
+   Inside the course frame (classes.js): the class's sidebar on the left,
+   the assignment in the middle, and on the overview a right-hand column
+   with the student's own work or the teacher's submission counts. */
 let ap = null; // { data, tab }
 
 VisorRouter.add('/a/:id', async (el, { id }, query) => {
+  el.innerHTML = `<div class="portal"><div class="loading-row"><span class="spinner"></span></div></div>`;
+  const mine = VisorRouter.seq();
   const data = await api(`/api/assignments/${id}`);
+  if (mine !== VisorRouter.seq()) return; // left while it loaded
   const a = data.assignment;
   const defaultTab = data.isTeacher ? (a.type === 'writing' && query.get('tab') === 'live' ? 'live' : (query.get('tab') || 'overview')) : 'overview';
   ap = { data, tab: defaultTab, stop: null };
@@ -187,26 +217,46 @@ function assignmentTab(tab) {
   history.replaceState(null, '', `/a/${ap.data.assignment.id}${tab === 'overview' ? '' : '?tab=' + tab}`);
   renderAssignmentPage();
 }
-async function reloadAssignment() { ap.data = await api(`/api/assignments/${ap.data.assignment.id}`); renderAssignmentPage(); }
+async function reloadAssignment() {
+  const id = ap.data.assignment.id, mine = VisorRouter.seq();
+  const data = await api(`/api/assignments/${id}`);
+  if (mine !== VisorRouter.seq() || ap?.data?.assignment?.id !== id) return;
+  ap.data = data; renderAssignmentPage();
+}
 
 function renderAssignmentPage() {
   if (ap.stop) { ap.stop(); ap.stop = null; }
   const { assignment: a, class: cls, isTeacher } = ap.data;
+  const course = { ...cls, isTeacher };
   const tabs = !isTeacher ? [] : a.type === 'writing' ? [['overview', 'Overview'], ['live', 'Live'], ['submissions', 'Submissions', ap.data.submissions.filter(s => s.status === 'submitted').length || null]]
     : a.type === 'group' ? [['overview', 'Overview'], ['groups', 'Groups', ap.data.groups.length]]
       : [['overview', 'Overview'], ['recordings', 'Recordings', ap.data.discussions.length]];
-  $('routeView').innerHTML = `<div class="page">
-    ${crumbs([['Home', '/'], [cls.name, `/class/${cls.id}`], [a.title]])}
-    <div class="page-head">
-      <div><h1>${esc(a.title)}</h1><div class="head-meta">${typePill(a.type)}${isTeacher ? (a.publishedAt ? '<span class="pill pill-green">Published</span>' : '<span class="pill pill-gray">Draft</span>') : ''}${a.dueAt ? `<span class="muted small">Due ${esc(vcDateTime(a.dueAt))}</span>` : ''}</div></div>
-      ${isTeacher ? `<div class="head-actions">
-        <button class="btn btn-ghost btn-sm" onclick="openAssignmentForm('${cls.id}','${a.type}',ap.data.assignment)">${I.edit}Edit</button>
-        <button class="btn btn-ghost btn-sm" onclick="togglePublish()">${a.publishedAt ? 'Unpublish' : 'Publish'}</button>
-        <button class="btn btn-ghost btn-sm" onclick="duplicateAssignment()">${I.copy}Duplicate</button>
-        <button class="btn btn-danger btn-sm" onclick="deleteAssignment()">${I.trash}Delete</button></div>` : ''}
-    </div>
+  const status = !isTeacher && a.type === 'writing' ? ap.data.doc?.status || 'not-started' : null;
+  const overdue = status && isOverdue(a.dueAt, status);
+  const meta = [
+    `<span>${esc(TYPE_LABEL[a.type] || '')}</span>`,
+    a.type === 'discussion' && a.discussion?.date ? `<span>Discussion ${esc(vcDateTime(a.discussion.date))}</span>` : '',
+    a.dueAt || a.type !== 'discussion' ? `<span class="${overdue ? 'overdue' : ''}">${esc(vcDue(a.dueAt))}${overdue ? ' · overdue' : ''}</span>` : '',
+    isTeacher ? (a.publishedAt ? '<span class="pill pill-green">Published</span>' : '<span class="pill pill-gray">Not published</span>') : ''
+  ].filter(Boolean).join('');
+  const options = isTeacher ? ddHtml({ id: 'asgOpts', btn: `${I.gear}Options ${PI.down}`, right: true, items: [
+    { label: 'Edit', icon: I.edit, onclick: `openAssignmentForm('${cls.id}','${a.type}',ap.data.assignment)` },
+    { label: a.publishedAt ? 'Unpublish' : 'Publish', icon: a.publishedAt ? PI.eyeOff : I.eye, onclick: 'togglePublish()' },
+    { label: 'Move to…', icon: PI.move, onclick: 'moveFromAssignment()' },
+    { label: 'Duplicate…', icon: I.copy, onclick: `openDuplicate('${a.id}')` },
+    'sep',
+    { label: 'Delete', icon: I.trash, onclick: 'deleteAssignment()', danger: true }
+  ] }) : '';
+  const trail = [[cls.name, `/class/${cls.id}`], ...(ap.data.folderPath || []).map(f => [f.name, `/class/${cls.id}?folder=${f.id}`]), [a.title]];
+  const main = `<header class="course-head"><div style="min-width:0;flex:1;">
+      ${crumbs(trail)}
+      <div class="asg-head">${typeIcon(a.type)}<div class="asg-title"><h1>${esc(a.title)}</h1><div class="asg-meta">${meta}</div></div>
+        ${isTeacher ? `<div class="asg-actions">${!a.publishedAt ? `<button class="btn btn-primary btn-sm" onclick="togglePublish()">Publish</button>` : ''}${options}</div>` : ''}</div>
+    </div></header>
     ${tabs.length ? pageTabs(tabs, ap.tab, 'assignmentTab') : ''}
-    <div id="aBody"></div></div>`;
+    <div id="aBody"></div>`;
+  const right = ap.tab === 'overview' ? assignmentRightHtml() : '';
+  $('routeView').innerHTML = courseFrame(course, { active: 'materials', main, right });
   const body = $('aBody');
   if (!isTeacher) return renderStudentAssignment(body);
   if (ap.tab === 'live' && window.renderLiveBoard) { ap.stop = renderLiveBoard(body, ap.data); return; }
@@ -218,6 +268,45 @@ function renderAssignmentPage() {
 
 function instructionsHtml(a) {
   return a.instructions ? `<div class="card card-pad instructions">${esc(a.instructions).replace(/\n/g, '<br>')}</div>` : '';
+}
+
+// The right-hand column on the overview
+function assignmentRightHtml() {
+  const { assignment: a, isTeacher } = ap.data;
+  const box = (title, inner) => `<section class="side-box"><div class="side-box-h"><span>${title}</span></div>${inner}</section>`;
+  const details = box('Details', `<div class="side-box-b">
+      <div class="side-stat"><span>Type</span><b>${esc(TYPE_LABEL[a.type] || '')}</b></div>
+      ${a.type === 'writing' ? `<div class="side-stat"><span>Session</span><b>${a.writing.mode === 'locked' ? 'Locked (in class)' : 'Open'}</b></div>
+        <div class="side-stat"><span>Time limit</span><b>${a.writing.timeLimitMin ? `${a.writing.timeLimitMin} min` : 'None'}</b></div>
+        ${a.writing.minWords || a.writing.maxWords ? `<div class="side-stat"><span>Length</span><b>${a.writing.minWords || 0}–${a.writing.maxWords || '∞'} words</b></div>` : ''}` : ''}
+      ${a.type === 'discussion' && a.discussion?.date ? `<div class="side-stat"><span>Discussion</span><b>${esc(vcDateTime(a.discussion.date))}</b></div>` : ''}
+      ${a.dueAt || a.type !== 'discussion' ? `<div class="side-stat"><span>Due</span><b>${a.dueAt ? esc(vcDateTime(a.dueAt)) : 'No due date'}</b></div>` : ''}
+      ${isTeacher && a.publishedAt ? `<div class="side-stat"><span>Published</span><b>${esc(vcDate(a.publishedAt))}</b></div>` : ''}
+    </div>`);
+  if (!isTeacher) {
+    if (a.type !== 'writing') return details;
+    const d = ap.data.doc, st = d?.status || 'not-started';
+    const label = st === 'not-started' ? 'Open the editor' : st === 'submitted' ? 'View your essay' : st === 'returned' ? 'See feedback' : 'Keep writing';
+    return `${box('Your work', `<div class="side-box-p your-work">${statusPillDoc(st)}${isOverdue(a.dueAt, st) ? ' <span class="pill pill-red">Overdue</span>' : ''}
+      ${d?.words ? `<div class="your-work-line">${d.words.toLocaleString()} words</div>` : ''}
+      ${d?.submittedAt ? `<div class="your-work-line">Submitted ${esc(vcDateTime(d.submittedAt))}</div>` : ''}
+      ${d?.returnedAt && st === 'returned' ? `<div class="your-work-line">Returned ${esc(vcDateTime(d.returnedAt))}</div>` : ''}
+      <a class="btn btn-primary" href="/write/${a.id}" data-link>${I.pen}${label}</a></div>`)}${details}`;
+  }
+  if (a.type === 'writing') {
+    const subs = ap.data.submissions || [], n = st => subs.filter(s => s.status === st).length;
+    return `${box('Submissions', `<div class="side-box-b">
+        <a class="side-stat" href="/a/${a.id}?tab=submissions" data-link onclick="event.preventDefault();assignmentTab('submissions')"><span>To review</span><b>${n('submitted')}</b></a>
+        <a class="side-stat" href="/a/${a.id}?tab=submissions" data-link onclick="event.preventDefault();assignmentTab('submissions')"><span>Returned</span><b>${n('returned')}</b></a>
+        <a class="side-stat" href="/a/${a.id}?tab=submissions" data-link onclick="event.preventDefault();assignmentTab('submissions')"><span>In progress</span><b>${n('in-progress')}</b></a>
+        <a class="side-stat" href="/a/${a.id}?tab=submissions" data-link onclick="event.preventDefault();assignmentTab('submissions')"><span>Not started</span><b>${n('not-started')}</b></a>
+      </div><div class="side-box-p" style="border-top:1px solid var(--line);"><button class="btn btn-ghost btn-sm" style="width:100%;justify-content:center;" onclick="assignmentTab('live')">${PI.live}Watch live</button></div>`)}${details}`;
+  }
+  if (a.type === 'group') {
+    const groups = ap.data.groups || [];
+    return `${box('Groups', `<div class="side-box-b"><div class="side-stat"><span>Groups</span><b>${groups.length}</b></div><div class="side-stat"><span>Students in a group</span><b>${groups.reduce((t, g) => t + g.students.length, 0)} of ${ap.data.students?.length || 0}</b></div></div>`)}${details}`;
+  }
+  return `${box('Discussion', `<div class="side-box-b"><div class="side-stat"><span>Date</span><b>${a.discussion?.date ? esc(vcDateTime(a.discussion.date)) : 'Not set'}</b></div><div class="side-stat"><span>Recordings</span><b>${(ap.data.discussions || []).length}</b></div></div>`)}${details}`;
 }
 
 function renderAssignmentOverview(body) {
@@ -241,19 +330,19 @@ function renderAssignmentOverview(body) {
       ['Time up', w.autoSubmitOnTimeUp ? 'Submits automatically' : 'Session ends; student submits'],
       ['Pause grace', w.pauseGraceSec ? `${w.pauseGraceSec} seconds` : 'None: every time away is recorded']
     ];
-    settings = `<div class="card settings-table">${rows.map(([k, v]) => `<div class="st-row"><div class="st-k">${k}</div><div class="st-v">${esc(v)}</div></div>`).join('')}</div>`;
+    settings = `<h2 class="section-title" style="font-size:16px;margin:20px 0 10px;">Session settings</h2><div class="card settings-table">${rows.map(([k, v]) => `<div class="st-row"><div class="st-k">${k}</div><div class="st-v">${esc(v)}</div></div>`).join('')}</div>`;
   }
   if (a.type === 'discussion') settings = `<div class="card card-pad"><div class="kicker">Discussion</div><div>${a.discussion.date ? esc(vcDateTime(a.discussion.date)) : 'No date set'}</div><div class="small muted" style="margin-top:6px;">${a.discussion.shareOwnStats ? 'Students can see their own talk time and turns.' : 'Only you see the results.'}</div></div>`;
-  body.innerHTML = `${!a.publishedAt ? `<div class="callout amber" style="margin-bottom:14px;">This is a draft. Students can’t see it until you publish it.</div>` : ''}
-    ${instructionsHtml(a)}
-    ${a.type === 'writing' ? `<p class="muted small">${esc(ap.data.describe)}</p>` : ''}
+  body.innerHTML = `${!a.publishedAt ? `<div class="callout amber" style="margin-bottom:14px;">This assignment isn’t published. Students can’t see it until you publish it.</div>` : ''}
+    ${instructionsHtml(a) || `<div class="card card-pad muted small">No instructions. ${a.type === 'discussion' ? 'Add a prompt' : 'Add some'} with Options → Edit.</div>`}
+    ${a.type === 'writing' ? `<p class="muted small" style="margin:12px 0 0;">${esc(ap.data.describe)}</p>` : ''}
     ${settings}`;
 }
 
 function renderSubmissions(body) {
   const rows = ap.data.submissions;
   if (!rows.length) { body.innerHTML = `<div class="card"><div class="empty"><h4>No students in this class yet</h4></div></div>`; return; }
-  body.innerHTML = `<div class="card"><table class="roster subs">
+  body.innerHTML = `<div class="card" style="overflow-x:auto;position:relative;"><table class="roster subs">
     <thead><tr><th>Student</th><th>Status</th><th>Words</th><th>Sessions</th><th>Submitted</th><th>Score</th><th><span class="sr-only">Open</span></th></tr></thead>
     <tbody>${rows.map(r => `<tr>
       <td><div class="roster-name">${avatarHtml(r.student, 'avatar-sm')}<b>${esc(r.student.name)}</b></div></td>
@@ -265,14 +354,8 @@ function renderSubmissions(body) {
 function renderStudentAssignment(body) {
   const { assignment: a } = ap.data;
   if (a.type === 'writing') {
-    const d = ap.data.doc;
-    const st = d?.status || 'not-started';
     body.innerHTML = `${instructionsHtml(a)}
-      <div class="card card-pad">
-        <div class="small muted" style="margin-bottom:10px;">${esc(ap.data.describe)}</div>
-        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">${statusPillDoc(st)}${d?.words ? `<span class="muted small">${d.words.toLocaleString()} words</span>` : ''}${d?.submittedAt ? `<span class="muted small">Submitted ${esc(vcDateTime(d.submittedAt))}</span>` : ''}
-          <span style="flex:1"></span><a class="btn btn-primary" href="/write/${a.id}" data-link>${I.pen}${st === 'not-started' ? 'Open the editor' : st === 'submitted' ? 'View your essay' : st === 'returned' ? 'See feedback' : 'Keep writing'}</a></div>
-      </div>`;
+      <div class="card card-pad"><div class="kicker" style="margin-bottom:6px;">How this assignment works</div><div class="small">${esc(ap.data.describe)}</div></div>`;
     return;
   }
   if (a.type === 'group') { body.innerHTML = instructionsHtml(a) + studentGroupHtml(ap.data.myGroup); return; }
@@ -281,23 +364,38 @@ function renderStudentAssignment(body) {
 
 async function togglePublish() {
   const a = ap.data.assignment;
-  try { await api(`/api/assignments/${a.id}/publish`, { method: 'POST', body: { published: !a.publishedAt } }); toast(a.publishedAt ? 'Unpublished: students can’t see it now' : 'Published'); reloadAssignment(); }
+  try { await api(`/api/assignments/${a.id}/publish`, { method: 'POST', body: { published: !a.publishedAt } }); toast(a.publishedAt ? 'Unpublished: students can’t see it now' : 'Published. Students can see it now.'); reloadAssignment(); }
   catch (e) { toast(e.message, 'err'); }
 }
-async function duplicateAssignment() {
+// Options → Move to…: the class's folders come from the class page's data
+async function moveFromAssignment() {
+  const classId = ap.data.class.id;
+  try { if (cp?.cls?.id !== classId) await loadClass(classId, 'materials', null); else await loadClass(classId); }
+  catch (e) { return toast(e.message, 'err'); }
+  if (!cp.folders.length) return toast('This class has no folders yet. Make one with Add Materials → Folder on the class page.', 'err');
+  openMoveModal('assignment', ap.data.assignment.id);
+}
+// Copy into one of the teacher's classes (from the assignment page or the class's list)
+async function openDuplicate(id) {
   let list = [];
-  try { list = (await api('/api/classes')).classes.filter(c => c.isTeacher && !c.archived); } catch {}
-  openModal({ title: 'Duplicate assignment', sub: 'The copy starts as a draft, with the same settings.', body: `<div class="field"><label for="dupClass">Copy into</label><select id="dupClass" class="input">${list.map(c => `<option value="${c.id}" ${c.id === ap.data.class.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></div>`,
-    footer: `<button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="doDuplicate()">Duplicate</button>` });
-}
-async function doDuplicate() {
-  try { const r = await api(`/api/assignments/${ap.data.assignment.id}/duplicate`, { method: 'POST', body: { classId: $('dupClass').value } }); closeModal(); toast('Copied as a draft'); VisorRouter.go(`/a/${r.assignment.id}`); }
-  catch (e) { toast(e.message, 'err'); }
+  try { list = (await loadCourses()).filter(c => c.isTeacher && !c.archived); } catch {}
+  const from = ap?.data?.assignment?.id === id ? ap.data.class.id : cp?.cls?.id;
+  openModal({ title: 'Duplicate assignment', sub: 'The copy isn’t published, and has the same settings.', body: `<div class="field"><label for="dupClass">Copy into</label><select id="dupClass" class="input">${list.map(c => `<option value="${c.id}" ${c.id === from ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></div>`,
+    footer: `<button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="dupGo">Duplicate</button>` });
+  $('dupGo').onclick = () => modalBusy(async () => {
+    const classId = $('dupClass').value;
+    try {
+      const r = await api(`/api/assignments/${id}/duplicate`, { method: 'POST', body: { classId } });
+      closeModal(); toast('Copied. The copy isn’t published yet.');
+      if (cp && location.pathname === `/class/${classId}`) refreshClass();
+      else VisorRouter.go(`/a/${r.assignment.id}`);
+    } catch (e) { toast(e.message, 'err'); }
+  });
 }
 async function deleteAssignment() {
   const a = ap.data.assignment;
   if (!await confirmModal('Delete this assignment?', `"${a.title}" and all student work, sessions, research${a.type === 'group' ? ', group projects' : ''}${a.type === 'discussion' ? ', recordings' : ''} in it will be deleted. This cannot be undone.`, { okLabel: 'Delete', danger: true })) return;
-  try { await api(`/api/assignments/${a.id}`, { method: 'DELETE' }); toast('Assignment deleted'); VisorRouter.go(`/class/${ap.data.class.id}`); }
+  try { await api(`/api/assignments/${a.id}`, { method: 'DELETE' }); toast('Assignment deleted'); VisorRouter.go(`/class/${ap.data.class.id}${a.folderId ? '?folder=' + a.folderId : ''}`); }
   catch (e) { toast(e.message, 'err'); }
 }
 

@@ -99,7 +99,7 @@ function closeModal() {
 }
 function confirmModal(title, text, { okLabel = 'Confirm', danger = false } = {}) {
   return new Promise(resolve => {
-    openModal({ title, body: `<p style="margin:0;">${esc(text)}</p>`, footer: `<button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn ${danger ? 'btn-danger' : 'btn-primary'}" id="confirmOk">${esc(okLabel)}</button>`, onClose: () => resolve(false) });
+    openModal({ title: esc(title), body: `<p style="margin:0;">${esc(text)}</p>`, footer: `<button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn ${danger ? 'btn-danger' : 'btn-primary'}" id="confirmOk">${esc(okLabel)}</button>`, onClose: () => resolve(false) });
     $('confirmOk').onclick = () => { modalOnClose = null; closeModal(); resolve(true); };
   });
 }
@@ -256,6 +256,7 @@ async function signOut() {
   await api('/api/auth/logout', { method: 'POST' });
   me = null; project = null;
   window.VisorRouter?.stop(); // page timers (dashboard poll, live board) stop with the session
+  if (window.resetPortal) resetPortal(); // and the pages forget what they loaded
   if (location.pathname !== '/') history.pushState(null, '', '/');
   // Nothing of the last person's sign-in or sign-up stays in the forms
   for (const id of ['siEmail', 'siPassword', 'suEmail', 'suFirst', 'suLast', 'suPassword', 'suClassCode']) { const el = $(id); if (el) el.value = ''; }
@@ -352,16 +353,16 @@ async function saveProfile() {
 /* ====================== tutorial ====================== */
 const TUTORIAL = {
   teacher: [
-    { icon: 'school', title: '1. Create a class', text: 'Welcome to Visor Classroom. Start on <b>Home</b> with <b>Create class</b>. Each class gets a 6-character join code: put it on the board, or add students by email on the <b>Students</b> tab (anyone without an account joins automatically when they sign up). Set extra time for students who need it there too.' },
-    { icon: 'pen', title: '2. Make an assignment', text: 'On the class page, pick <b>Writing</b>, <b>Group project</b> or <b>Discussion</b>. For writing, the <b>In-class essay (locked)</b> preset is a timed session with pasting from outside sources off and AI sites blocked; <b>Homework essay (open)</b> records everything but blocks nothing. Publish it when you’re ready.' },
+    { icon: 'school', title: '1. Create a class', text: 'Welcome to Visor Classroom. Start on <b>Home</b> with <b>Create class</b>. Each class gets a 6-character access code: put it on the board, or add students by email on the class’s <b>Members</b> page (anyone without an account joins automatically when they sign up). Set extra time for students who need it there too.' },
+    { icon: 'pen', title: '2. Make an assignment', text: 'On the class’s <b>Materials</b> page, use <b>Add Materials</b> for a <b>Writing</b> assignment, <b>Group project</b> or <b>Discussion</b>, and folders to keep units together. Post announcements under <b>Updates</b>. For writing, the <b>In-class essay (locked)</b> preset is a timed session with pasting from outside sources off and AI sites blocked; <b>Homework essay (open)</b> records everything but blocks nothing. Publish it when you’re ready.' },
     { icon: 'puzzle', title: '3. Students write in Visor', text: 'Students write in Visor’s own editor during a session. Leaving the tab pauses their writing and is recorded. For locked sessions they need the Visor Chrome extension, which also records their research, keeps them on allowed sites and adds citations with one click.' },
     { icon: 'eye', title: '4. Watch live, then review', text: 'The assignment’s <b>Live</b> tab shows every student as they write: words, pauses, pastes, time left, with buttons to pause, message or add time. After they submit, open any essay to replay it keystroke by keystroke, read its research log, and see factual notes about how it was written.' },
     { icon: 'sparkle', title: '5. Feedback, groups and discussions', text: 'Leave a comment and score, then <b>Return to student</b>. Group projects give each group its own project for Google Docs reports, recordings and an AI-written summary. Discussions turn a recording into measured talk time and turns per student. Visor shows what happened; you make the call.' }
   ],
   student: [
-    { icon: 'school', title: '1. Join your class', text: 'Welcome to Visor Classroom. Click <b>Join a class</b> on Home and type the code your teacher gives you (or your teacher adds you by email). Your assignments then show up in your <b>To do</b> list.' },
-    { icon: 'puzzle', title: '2. Connect the extension', text: 'Some sessions need the Visor Chrome extension. Install it, then click <b>Connect extension</b> on Home. During a session it records the searches and pages you use for research, and its <b>Cite this page</b> button adds a citation to your essay.' },
-    { icon: 'pen', title: '3. Write in a session', text: 'Open an assignment and click <b>Start writing session</b>. Visor records how your writing happens, not just the result. If you leave the Visor tab, writing pauses until you come back, and you see the same pause your teacher sees.' },
+    { icon: 'school', title: '1. Join your class', text: 'Welcome to Visor Classroom. Click <b>Join a class</b> on Home and type the access code your teacher gives you (or your teacher adds you by email). Your classes show up on Home and in the <b>Courses</b> menu; what’s due shows under <b>Upcoming</b> and on the <b>Calendar</b>.' },
+    { icon: 'puzzle', title: '2. Connect the extension', text: 'Some sessions need the Visor Chrome extension. Install it, then use the <b>Visor extension</b> box on Home to connect it. During a session it records the searches and pages you use for research, and its <b>Cite this page</b> button adds a citation to your essay.' },
+    { icon: 'pen', title: '3. Write in a session', text: 'Open an assignment, click <b>Open the editor</b>, then <b>Start writing session</b>. Visor records how your writing happens, not just the result. If you leave the Visor tab, writing pauses until you come back, and you see the same pause your teacher sees.' },
     { icon: 'doc', title: '4. Cite and submit', text: 'Use <b>Insert citation</b> or the extension’s cite button to add sources; your Works Cited list builds itself. When you’re done, click <b>Submit</b>. Your teacher can return it with feedback and a score.' },
     { icon: 'users', title: '5. Group projects and discussions', text: 'In group projects, the extension sends your group’s Google Doc history to Visor automatically, and you can add meeting recordings. In class discussions, your teacher may share your own talk time and turns with you.' }
   ]

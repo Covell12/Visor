@@ -7,6 +7,7 @@
      /a/:assignmentId        assignment page
      /write/:assignmentId    the student editor (?embed=panel inside the extension)
      /review/:docId          teacher review
+     /calendar               due dates across classes (calendar.js)
      /project/:id            the existing project view
      /extension/connect      connect the Visor extension */
 
@@ -16,6 +17,7 @@ const VisorRouter = (() => {
   const routes = [];
   let cleanup = null;     // the current page's teardown (timers, listeners)
   let started = false;
+  let seq = 0;            // counts navigations, so a slow page can tell it's been left
 
   // Pages register here: VisorRouter.add('/class/:id', (el, params, query) => {...})
   function add(pattern, render) {
@@ -41,11 +43,18 @@ const VisorRouter = (() => {
     document.querySelector('#appView > .shell')?.classList.remove('hidden');
   }
 
+  // The top bar: Home, Courses (any class or assignment page) or Calendar
   function setNav(path) {
-    document.querySelectorAll('.topnav a').forEach(a => a.classList.toggle('active', a.getAttribute('href') === path || (a.dataset.nav === 'home' && path === '/')));
+    const section = path === '/' ? 'home' : /^\/(class|a|review|write)\//.test(path) ? 'courses' : /^\/calendar\/?$/.test(path) ? 'calendar' : '';
+    document.querySelectorAll('.topnav [data-nav]').forEach(a => {
+      const on = a.dataset.nav === section;
+      a.classList.toggle('active', on);
+      if (a.tagName === 'A') { if (on) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current'); }
+    });
   }
 
   async function render() {
+    const mine = ++seq;
     if (cleanup) { try { cleanup(); } catch {} cleanup = null; }
     const path = location.pathname;
     const query = new URLSearchParams(location.search);
@@ -57,8 +66,11 @@ const VisorRouter = (() => {
     else { showRouteView(); $('routeView').innerHTML = ''; window.scrollTo(0, 0); }
     try {
       const out = await hit.r.render($('routeView'), hit.params, query);
+      // Left while it loaded: stop its timers instead of keeping them
+      if (mine !== seq) { if (typeof out === 'function') try { out(); } catch {} return; }
       if (typeof out === 'function') cleanup = out;
     } catch (e) {
+      if (mine !== seq) return;
       $('routeView').innerHTML = `<div class="page"><div class="callout red">${esc(e.message || 'This page could not load.')}</div><p><a href="/" data-link>Back to home</a></p></div>`;
     }
   }
@@ -77,6 +89,7 @@ const VisorRouter = (() => {
     if (url.origin !== location.origin) return;
     e.preventDefault();
     document.querySelectorAll('.menu').forEach(x => x.classList.add('hidden'));
+    if (window.ddClose) ddClose();
     go(url.pathname + url.search);
   });
   window.addEventListener('popstate', () => { if (started) render(); });
@@ -85,6 +98,9 @@ const VisorRouter = (() => {
     add,
     go,
     render,
+    // The current navigation's number: a page that awaits something checks it
+    // is still current before it draws (VisorRouter.seq() !== mine → leave it)
+    seq: () => seq,
     // Called by app.js once someone is signed in
     start() { started = true; render(); },
     // Signed out: end the current page (its timers and listeners)

@@ -9,6 +9,7 @@
 <link rel="stylesheet" href="/vendor/quill/quill.snow.css" />
 <link rel="stylesheet" href="/doc-format.css" />
 <link rel="stylesheet" href="/classroom.css" />
+<link rel="stylesheet" href="/portal.css" />
 <link rel="stylesheet" href="/docs-editor.css" />
 <link rel="stylesheet" href="/review-doc.css" />
 </head>
@@ -23,7 +24,7 @@
       <p>Visor Classroom is where students write, research and discuss, and where teachers see the whole process: every session, every source, every voice.</p>
     </div>
     <div class="how">
-      <div><b>1</b><span>Teachers create a class and give students the join code.</span></div>
+      <div><b>1</b><span>Teachers create a class and give students its access code.</span></div>
       <div><b>2</b><span>Students write in Visor's editor during a session; the extension records their research and adds citations.</span></div>
       <div><b>3</b><span>Teachers watch live, replay any essay, and review group projects and class discussions.</span></div>
     </div>
@@ -89,9 +90,14 @@
 <!-- ================= APP ================= -->
 <div id="appView" class="hidden">
   <header class="topbar">
-    <a class="brand" href="/" data-link><img src="/logo.png" alt="" /> Visor</a>
+    <a class="brand" href="/" data-link aria-label="Visor home"><img src="/logo.png" alt="" /><span>Visor</span></a>
     <nav class="topnav" aria-label="Main">
       <a href="/" data-link data-nav="home">Home</a>
+      <div class="dd" id="coursesDd">
+        <button type="button" class="topnav-btn" id="coursesBtn" data-nav="courses" aria-haspopup="true" aria-expanded="false" aria-controls="coursesMenu" onclick="toggleCoursesMenu()">Courses <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
+        <div id="coursesMenu" class="dd-menu courses-menu hidden"></div>
+      </div>
+      <a href="/calendar" data-link data-nav="calendar">Calendar</a>
     </nav>
     <div class="school" id="topSchool"></div>
     <div class="spacer"></div>
@@ -186,6 +192,8 @@
 <script src="/cite-format.js"></script>
 <script src="/classes.js"></script>
 <script src="/assignments.js"></script>
+<script src="/updates.js"></script>
+<script src="/calendar.js"></script>
 <script src="/vendor/quill/quill.js"></script>
 <script src="/doc-format.js"></script>
 <script src="/docs-ui.js"></script>

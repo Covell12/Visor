@@ -32,6 +32,7 @@ const { IS_FIREBASE, IS_PROD } = require('./lib/platform');
 const { OAuth2Client } = require('google-auth-library');
 const classes = require('./lib/classes');
 const assignments = require('./lib/assignments');
+const materials = require('./lib/materials');
 const { DEFAULT_AI_SITES } = require('./lib/sites');
 const writing = require('./lib/writing');
 const sessionsLib = require('./lib/sessions');
@@ -1247,28 +1248,34 @@ const fullName = u => (u ? `${u.firstName} ${u.lastName}`.trim() : '');
 // Live sessions: not ended, and heard from in the last 3 minutes.
 const isLive = s => s.state !== 'ended' && Date.now() - Date.parse(s.lastBeat || s.startedAt || 0) < 3 * 60 * 1000;
 
-// Counts and upcoming work for a class card.
-async function classSummary(cls, isTeacher, meId) {
-  const assignments = (await repo.listRecords('assignment', { classId: cls.id })).filter(a => isTeacher || a.publishedAt);
+// Counts and upcoming work for a class card. `loaded` passes on lists the
+// caller already read (the class page), so they aren't read twice.
+async function classSummary(cls, isTeacher, meId, loaded = {}) {
+  const assignments = (loaded.assignments || await repo.listRecords('assignment', { classId: cls.id })).filter(a => isTeacher || a.publishedAt);
   const out = { assignmentCount: assignments.length, upcoming: [] };
-  const soon = assignments.filter(a => a.publishedAt && a.dueAt && Date.parse(a.dueAt) > Date.now() - 864e5)
-    .sort((a, b) => (a.dueAt < b.dueAt ? -1 : 1)).slice(0, 3);
-  out.upcoming = soon.map(a => ({ id: a.id, title: a.title, type: a.type, dueAt: a.dueAt }));
+  // What's coming up: for a student, only what's still due and not handed in
+  let handedIn = new Set();
   if (isTeacher) {
-    const sessions = await repo.listRecords('session', { classId: cls.id });
-    const docs = await repo.listRecords('doc', { classId: cls.id });
+    const sessions = loaded.sessions || await repo.listRecords('session', { classId: cls.id });
+    const docs = loaded.docs || await repo.listRecords('doc', { classId: cls.id });
     out.activeSessions = sessions.filter(isLive).length;
     out.toReview = docs.filter(d => d.status === 'submitted').length;
   } else {
-    const docs = await repo.listRecords('doc', { classId: cls.id, studentId: meId });
-    out.submitted = docs.filter(d => d.status === 'submitted' || d.status === 'returned').length;
+    const docs = loaded.docs || await repo.listRecords('doc', { classId: cls.id, studentId: meId });
+    const done = docs.filter(d => d.status === 'submitted' || d.status === 'returned');
+    out.submitted = done.length;
+    handedIn = new Set(done.map(d => d.assignmentId));
   }
+  const after = isTeacher ? Date.now() - 864e5 : Date.now();
+  const soon = assignments.filter(a => a.publishedAt && a.dueAt && Date.parse(a.dueAt) > after && !handedIn.has(a.id))
+    .sort((a, b) => (a.dueAt < b.dueAt ? -1 : 1)).slice(0, 3);
+  out.upcoming = soon.map(a => ({ id: a.id, title: a.title, type: a.type, dueAt: a.dueAt }));
   return out;
 }
 
 function publicClass(core, cls, me) {
   const isTeacher = cls.teacherId === me.id;
-  const base = { id: cls.id, name: cls.name, archived: !!cls.archived, createdAt: cls.createdAt, isTeacher, teacher: publicUser(core.users[cls.teacherId]), studentCount: cls.studentIds.length };
+  const base = { id: cls.id, name: cls.name, color: classes.colorFor(cls), archived: !!cls.archived, createdAt: cls.createdAt, isTeacher, teacher: publicUser(core.users[cls.teacherId]), studentCount: cls.studentIds.length };
   if (!isTeacher) return base;
   return {
     ...base,
@@ -1304,8 +1311,8 @@ app.post('/api/classes/join', requireAuth, ah(async (req, res) => {
 app.get('/api/classes/:id', requireAuth, ah(async (req, res) => {
   const core = await repo.readCore();
   const got = classFor(req, core);
-  const assignments = await classAssignmentsFor(got);
-  res.json({ class: { ...publicClass(core, got.cls, got.me), ...(await classSummary(got.cls, got.isTeacher, got.me.id)) }, assignments });
+  const page = await classPageFor(got);
+  res.json({ class: { ...publicClass(core, got.cls, got.me), ...(await classSummary(got.cls, got.isTeacher, got.me.id, page.loaded)) }, assignments: page.assignments, folders: page.folders });
 }));
 
 function teacherClass(req, core) {
@@ -1344,10 +1351,54 @@ app.delete('/api/classes/:id/invites', requireAuth, ah(async (req, res) => {
   res.json({ class: out });
 }));
 
-// The assignments on a class page (students only see published ones).
-async function classAssignmentsFor(got) {
-  const list = (await repo.listRecords('assignment', { classId: got.cls.id })).filter(a => got.isTeacher || a.publishedAt);
-  return list.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1)).map(a => ({ id: a.id, type: a.type, title: a.title, publishedAt: a.publishedAt || null, dueAt: a.dueAt || null, createdAt: a.createdAt }));
+// A class's folders and assignments as the class page places them
+// (lib/materials.js tidies anything pointing at a folder that's gone).
+async function classMaterials(classId) {
+  const [folders, list] = await Promise.all([repo.listRecords('folder', { classId }), repo.listRecords('assignment', { classId })]);
+  return materials.tidy(folders, list);
+}
+
+function publicFolder(f) {
+  return { id: f.id, classId: f.classId, parentId: f.parentId || null, name: f.name, color: f.color || null, description: f.description || '', position: materials.effectivePosition(f), createdAt: f.createdAt, updatedAt: f.updatedAt };
+}
+
+// Where a writing assignment stands, for the teacher's class page.
+function writingStats(a, docs, sessions) {
+  const mine = docs.filter(d => d.assignmentId === a.id && d.studentId !== 'template');
+  const count = status => mine.filter(d => d.status === status).length;
+  return { submitted: count('submitted'), returned: count('returned'), inProgress: count('in-progress'), live: sessions.filter(s => s.assignmentId === a.id && isLive(s)).length };
+}
+
+// The assignments and folders on a class page. Students only see published
+// assignments and the folders holding one; the teacher also gets each writing
+// assignment's counts, a student their own status. `position` is the place in
+// its level (lib/materials.js). `loaded` is handed on to classSummary.
+async function classPageFor(got) {
+  const { folders, assignments: all } = await classMaterials(got.cls.id);
+  const list = all.filter(a => got.isTeacher || a.publishedAt);
+  const [docs, sessions] = got.isTeacher
+    ? await Promise.all([repo.listRecords('doc', { classId: got.cls.id }), repo.listRecords('session', { classId: got.cls.id })])
+    : [await repo.listRecords('doc', { classId: got.cls.id, studentId: got.me.id }), []];
+  const item = a => {
+    const out = {
+      id: a.id, type: a.type, title: a.title, publishedAt: a.publishedAt || null, dueAt: a.dueAt || null, createdAt: a.createdAt,
+      folderId: a.folderId, position: materials.effectivePosition(a), discussionDate: a.discussion?.date || null
+    };
+    if (got.isTeacher) out.stats = a.type === 'writing' ? writingStats(a, docs, sessions) : null;
+    else out.status = a.type === 'writing' ? (docs.find(d => d.assignmentId === a.id)?.status || 'not-started') : null;
+    return out;
+  };
+  const shown = got.isTeacher ? folders : materials.studentVisibleFolders(folders, list);
+  // A student gets each item's place among what they can see (0, 1, 2…), so
+  // gaps in the stored positions don't give away hidden drafts
+  const rank = got.isTeacher ? null : new Map();
+  if (rank) for (const lvl of [null, ...shown.map(f => f.id)]) materials.levelItems(shown, list, lvl).forEach((x, i) => rank.set(`${x.kind}:${x.id}`, i));
+  const ranked = (kind, x) => (rank ? { ...x, position: rank.get(`${kind}:${x.id}`) ?? 0 } : x);
+  return {
+    assignments: materials.sortLevel(list).map(item).map(x => ranked('assignment', x)),
+    folders: materials.sortLevel(shown).map(publicFolder).map(x => ranked('folder', x)),
+    loaded: { assignments: all, docs, sessions }
+  };
 }
 
 // Home page: what's happening now and what needs review (teachers), or a
@@ -1388,8 +1439,9 @@ app.get('/api/dashboard', requireAuth, ah(async (req, res) => {
 
 // Everything a class owns: assignments, student documents with their op logs
 // and pictures, sessions, research, discussions (and their recordings),
-// feedback, and the group projects its assignments created. `studentId`
-// narrows it to one student's data (the teacher's "delete this student's data").
+// feedback, folders, updates, and the group projects its assignments created.
+// `studentId` narrows it to one student's data (the teacher's "delete this
+// student's data"), which leaves the folders and updates alone.
 async function deleteClassRecords(core, cls, { studentId } = {}) {
   const who = studentId ? { studentId } : {};
   const docs = await repo.listRecords('doc', { classId: cls.id, ...who });
@@ -1408,6 +1460,8 @@ async function deleteClassRecords(core, cls, { studentId } = {}) {
   await repo.deleteRecords('discussion', { classId: cls.id });
   for (const a of await repo.listRecords('assignment', { classId: cls.id })) await repo.deleteRecords('feedback', { assignmentId: a.id });
   await repo.deleteRecords('assignment', { classId: cls.id });
+  await repo.deleteRecords('folder', { classId: cls.id });
+  await repo.deleteRecords('announcement', { classId: cls.id });
   for (const p of Object.values(core.projects).filter(p => p.classId === cls.id)) await deleteProjectEverything(p.id);
 }
 async function deleteProjectEverything(projectId) {
@@ -1471,10 +1525,14 @@ async function submissionRows(core, cls, a) {
   }).sort((x, y) => x.student.lastName.localeCompare(y.student.lastName) || x.student.firstName.localeCompare(y.student.firstName));
 }
 
+// A new assignment goes at the top of its folder (or of the class)
 app.post('/api/classes/:id/assignments', requireAuth, ah(async (req, res) => {
   const core = await repo.readCore();
   const got = teacherClass(req, core);
   const a = assignments.createAssignment(got.cls, req.body || {});
+  const { folders, assignments: list } = await classMaterials(got.cls.id);
+  a.folderId = materials.folderInClass(folders, req.body?.folderId);
+  a.position = materials.topPosition(materials.levelItems(folders, list, a.folderId));
   await repo.putRecord('assignment', a);
   if (a.type === 'group') await syncGroupProjects(a, got.cls, got.me);
   res.json({ assignment: await repo.getRecord('assignment', a.id) });
@@ -1484,16 +1542,19 @@ app.get('/api/assignments/:id', requireAuth, ah(async (req, res) => {
   const core = await repo.readCore();
   const got = await assignmentFor(req, core);
   const { a, cls } = got;
-  const classInfo = { id: cls.id, name: cls.name };
+  const classInfo = { id: cls.id, name: cls.name, color: classes.colorFor(cls), archived: !!cls.archived, teacher: { id: cls.teacherId, name: fullName(core.users[cls.teacherId]) }, studentCount: cls.studentIds.length };
+  if (got.isTeacher) Object.assign(classInfo, { joinCode: cls.joinCode, joinOpen: cls.joinOpen !== false });
+  // The folders above it, top first, for the breadcrumb
+  const folderPath = materials.folderPath(materials.tidy(await repo.listRecords('folder', { classId: cls.id }), []).folders, a.folderId);
   if (got.isTeacher) {
-    const out = { assignment: a, class: classInfo, isTeacher: true, describe: assignments.describeWriting(a.writing) };
+    const out = { assignment: a, class: classInfo, folderPath, isTeacher: true, describe: assignments.describeWriting(a.writing) };
     if (a.type === 'writing') out.submissions = await submissionRows(core, cls, a);
     if (a.type === 'group') out.groups = await groupRows(core, a);
     if (a.type === 'discussion') out.discussions = await discussionRows(a);
     out.students = cls.studentIds.map(id => publicUser(core.users[id])).filter(Boolean);
     return res.json(out);
   }
-  const out = { assignment: assignments.studentView(a), class: classInfo, isTeacher: false, describe: assignments.describeWriting(a.writing, classes.multiplierFor(cls, got.me.id)) };
+  const out = { assignment: assignments.studentView(a), class: classInfo, folderPath, isTeacher: false, describe: assignments.describeWriting(a.writing, classes.multiplierFor(cls, got.me.id)) };
   if (a.type === 'writing') {
     const d = (await repo.listRecords('doc', { assignmentId: a.id, studentId: got.me.id }))[0];
     out.doc = d ? { id: d.id, status: d.status, words: d.stats?.words || 0, submittedAt: d.submittedAt || null, returnedAt: d.returnedAt || null } : null;
@@ -1503,11 +1564,25 @@ app.get('/api/assignments/:id', requireAuth, ah(async (req, res) => {
   res.json(out);
 }));
 
+// { folderId } moves it to the top of that folder (null = the top of the
+// class). Sent on its own it only moves: nothing else about it changes.
 app.patch('/api/assignments/:id', requireAuth, ah(async (req, res) => {
   const core = await repo.readCore();
   const got = await teacherAssignment(req, core);
-  const a = await repo.updateRecord('assignment', got.a.id, x => { assignments.patchAssignment(x, req.body || {}, got.cls); });
-  if (a.type === 'group') await syncGroupProjects(a, got.cls, got.me);
+  const body = req.body || {};
+  let move = null;
+  if (Object.prototype.hasOwnProperty.call(body, 'folderId')) {
+    const { folders, assignments: list } = await classMaterials(got.cls.id);
+    const folderId = materials.folderInClass(folders, body.folderId);
+    const before = list.find(x => x.id === got.a.id)?.folderId ?? null;
+    if (folderId !== before) move = { folderId, position: materials.topPosition(materials.levelItems(folders, list, folderId)) };
+  }
+  const edit = !move || Object.keys(body).some(k => k !== 'folderId');
+  const a = await repo.updateRecord('assignment', got.a.id, x => {
+    if (edit) assignments.patchAssignment(x, body, got.cls);
+    if (move) Object.assign(x, move);
+  });
+  if (a.type === 'group' && edit) await syncGroupProjects(a, got.cls, got.me);
   res.json({ assignment: await repo.getRecord('assignment', a.id) });
 }));
 
@@ -1519,13 +1594,17 @@ app.post('/api/assignments/:id/publish', requireAuth, ah(async (req, res) => {
   res.json({ assignment: a });
 }));
 
-// Copy to another of the teacher's classes (or the same one)
+// Copy to another of the teacher's classes (or the same one). The copy goes at
+// the top of the original's folder in the same class, or of the other class.
 app.post('/api/assignments/:id/duplicate', requireAuth, ah(async (req, res) => {
   const core = await repo.readCore();
   const got = await teacherAssignment(req, core);
   const target = classes.classFor(core, got.me, req.body?.classId || got.cls.id);
   if (!target.isTeacher) throw new HttpError(403, 'you can only copy into your own classes');
   const copy = assignments.duplicateAssignment(got.a, target.cls);
+  const { folders, assignments: list } = await classMaterials(target.cls.id);
+  copy.folderId = target.cls.id === got.cls.id ? (list.find(x => x.id === got.a.id)?.folderId ?? null) : null;
+  copy.position = materials.topPosition(materials.levelItems(folders, list, copy.folderId));
   await repo.putRecord('assignment', copy);
   res.json({ assignment: copy });
 }));
@@ -1535,6 +1614,289 @@ app.delete('/api/assignments/:id', requireAuth, ah(async (req, res) => {
   const got = await teacherAssignment(req, core);
   await deleteAssignmentRecords(core, got.a);
   res.json({ ok: true });
+}));
+
+// ---- Folders and their order (class materials) ----
+// Folders are "folder" records keyed by classId; an assignment's folderId says
+// which one it's in. Folders and assignments in one place share one order
+// (lib/materials.js). Only the class teacher changes them.
+
+async function teacherFolder(req, core) {
+  const f = await repo.getRecord('folder', req.params.fid);
+  if (!f) throw new HttpError(404, 'folder not found');
+  const got = classes.classFor(core, meOrThrow(req, core), f.classId);
+  if (!got.isTeacher) throw new HttpError(403, 'only the class teacher can do that');
+  return { f, ...got };
+}
+
+// { name, parentId?, color?, description? } → a folder at the top of its level
+app.post('/api/classes/:id/folders', requireAuth, ah(async (req, res) => {
+  const core = await repo.readCore();
+  const got = teacherClass(req, core);
+  const { folders, assignments: list } = await classMaterials(got.cls.id);
+  if (folders.length >= materials.MAX_FOLDERS) throw new HttpError(400, `A class can have at most ${materials.MAX_FOLDERS} folders`);
+  const parentId = materials.checkPlace(folders, req.body?.parentId);
+  const folder = materials.newFolder(got.cls.id, req.body || {}, { parentId, position: materials.topPosition(materials.levelItems(folders, list, parentId)) });
+  await repo.putRecord('folder', folder);
+  res.json({ folder: publicFolder(folder) });
+}));
+
+// { name?, color?, description?, parentId? }. A new parentId moves the folder,
+// and everything in it, to the top of that level.
+app.patch('/api/folders/:fid', requireAuth, ah(async (req, res) => {
+  const core = await repo.readCore();
+  const got = await teacherFolder(req, core);
+  const body = req.body || {};
+  const fields = materials.cleanFolderInput(body, got.f);
+  let move = null;
+  if (Object.prototype.hasOwnProperty.call(body, 'parentId')) {
+    const { folders, assignments: list } = await classMaterials(got.cls.id);
+    const before = folders.find(f => f.id === got.f.id)?.parentId ?? null;
+    const to = materials.levelId(body.parentId);
+    if (to !== before) {
+      const parentId = materials.checkPlace(folders, to, got.f.id);
+      move = { parentId, position: materials.topPosition(materials.levelItems(folders, list, parentId)) };
+    }
+  }
+  const folder = await repo.updateRecord('folder', got.f.id, x => { Object.assign(x, fields, move || {}); x.updatedAt = now(); });
+  if (!folder) throw new HttpError(404, 'folder not found');
+  res.json({ folder: publicFolder(folder) });
+}));
+
+// The level a record is in as the transaction reads it (a folder that no
+// longer exists counts as the top, as in materials.tidy)
+const ORDER_CHANGED = 'The list changed while you were moving things. Reload and try again.';
+function levelOf(kind, r, known) {
+  const id = materials.levelId(kind === 'folder' ? r.parentId : r.folderId);
+  return id && known.has(id) ? id : null;
+}
+
+// Deleting a folder never deletes assignments: what was in it moves up into
+// the folder's place, in its order, and that level is numbered again.
+app.delete('/api/folders/:fid', requireAuth, ah(async (req, res) => {
+  const core = await repo.readCore();
+  const got = await teacherFolder(req, core);
+  const { folders, assignments: list } = await classMaterials(got.cls.id);
+  const parentId = folders.find(f => f.id === got.f.id)?.parentId ?? null;
+  const order = materials.levelAfterDelete(folders, list, got.f.id);
+  const known = new Set(folders.map(f => f.id));
+  await repo.withRecords(async t => {
+    const fresh = new Map();
+    for (const x of order) { const r = await t.get(x.kind, x.id); if (r) fresh.set(`${x.kind}:${x.id}`, r); }
+    // Something moved out since the read above: start again rather than undo it
+    for (const [k, r] of fresh) if (![got.f.id, parentId].includes(levelOf(k.split(':')[0], r, known))) throw new HttpError(409, ORDER_CHANGED);
+    // The order as the transaction sees it (a reorder may have landed since)
+    const now_ = materials.tidy(folders.map(f => fresh.get(`folder:${f.id}`) || f), list.map(a => fresh.get(`assignment:${a.id}`) || a));
+    materials.levelAfterDelete(now_.folders, now_.assignments, got.f.id).forEach((x, i) => {
+      const r = fresh.get(`${x.kind}:${x.id}`);
+      if (!r) return;
+      r.position = i;
+      if (x.kind === 'folder') r.parentId = parentId; else r.folderId = parentId;
+      t.put(x.kind, r);
+    });
+    t.del('folder', got.f.id);
+  });
+  res.json({ ok: true });
+}));
+
+// { folderId: null | id, items: [{ kind: 'folder' | 'assignment', id }] }:
+// the new order of one level. items must be exactly what's in the level now.
+app.put('/api/classes/:id/materials/order', requireAuth, ah(async (req, res) => {
+  const core = await repo.readCore();
+  const got = teacherClass(req, core);
+  const { folders, assignments: list } = await classMaterials(got.cls.id);
+  const folderId = materials.folderInClass(folders, req.body?.folderId);
+  const items = req.body?.items;
+  if (!Array.isArray(items)) throw new HttpError(400, 'items must be a list');
+  if (!materials.sameItems(materials.levelItems(folders, list, folderId), items)) throw new HttpError(409, ORDER_CHANGED);
+  const known = new Set(folders.map(f => f.id));
+  await repo.withRecords(async t => {
+    const recs = [];
+    for (const x of items) {
+      const r = await t.get(x.kind, x.id);
+      if (!r || r.classId !== got.cls.id || levelOf(x.kind, r, known) !== folderId) throw new HttpError(409, ORDER_CHANGED);
+      recs.push([x.kind, r]);
+    }
+    recs.forEach(([kind, r], i) => { r.position = i; t.put(kind, r); });
+  });
+  res.json({ ok: true });
+}));
+
+// ---- Class updates (announcements) ----
+// A teacher's posts on a class page: "announcement" records keyed by classId.
+// Pinned ones stay at the top; the rest page back by date.
+
+const UPDATE_MAX = 5000;
+function cleanUpdateBody(v) {
+  const body = typeof v === 'string' ? v.replace(/\r\n?/g, '\n').trim() : '';
+  if (!body) throw new HttpError(400, 'Write something to post');
+  if (body.length > UPDATE_MAX) throw new HttpError(400, 'Updates can be at most 5,000 characters');
+  return body;
+}
+
+function newUpdate(cls, me, body, pinned = false) {
+  const t = now();
+  return { id: uid(), classId: cls.id, authorId: me.id, body, pinned: pinned === true, createdAt: t, updatedAt: t, editedAt: null };
+}
+
+// What the page sees of an update (the author's name and colour, no email)
+function publicUpdate(core, u) {
+  const author = own(core.users, u.authorId);
+  return { id: u.id, classId: u.classId, body: u.body, pinned: !!u.pinned, createdAt: u.createdAt, editedAt: u.editedAt || null, author: { id: u.authorId, name: fullName(author), avatarColor: author?.avatarColor || null } };
+}
+
+const newestFirst = (x, y) => Date.parse(y.createdAt) - Date.parse(x.createdAt) || (x.id < y.id ? 1 : x.id > y.id ? -1 : 0);
+
+// ?before=<ISO>&beforeKey=<key>&limit= for lists that page back in time,
+// newest first with ties in descending key order. limit is kept to 1–50 (20
+// when not given). The next page starts after the last item shown: its time
+// and key, so items that share a time are neither lost nor repeated.
+function pageParams(q) {
+  const n = Math.round(Number(q.limit));
+  const limit = q.limit === undefined || q.limit === '' || !Number.isFinite(n) ? 20 : Math.min(50, Math.max(1, n));
+  if (q.before === undefined || q.before === '') return { limit, older: () => true, first: true };
+  const before = Date.parse(q.before);
+  if (!Number.isFinite(before)) throw new HttpError(400, "before isn't a date Visor can read");
+  const key = typeof q.beforeKey === 'string' && q.beforeKey ? q.beforeKey.slice(0, 200) : null;
+  // Older than the cursor: an earlier time, or the same time and a smaller key
+  const older = (at, k) => { const t = Date.parse(at); return t < before || (t === before && key !== null && String(k) < key); };
+  return { limit, older, first: false };
+}
+
+async function teacherUpdate(req, core) {
+  const u = await repo.getRecord('announcement', req.params.uid);
+  if (!u) throw new HttpError(404, 'update not found');
+  const got = classes.classFor(core, meOrThrow(req, core), u.classId);
+  if (!got.isTeacher) throw new HttpError(403, 'only the class teacher can do that');
+  return { u, ...got };
+}
+
+// The class's updates: every pinned one on the first page, then the rest
+// newest first, `limit` at a time.
+app.get('/api/classes/:id/updates', requireAuth, ah(async (req, res) => {
+  const core = await repo.readCore();
+  const got = classFor(req, core);
+  const { limit, older, first } = pageParams(req.query);
+  const all = (await repo.listRecords('announcement', { classId: got.cls.id })).sort(newestFirst);
+  const rest = all.filter(u => !u.pinned && older(u.createdAt, u.id));
+  res.json({
+    pinned: first ? all.filter(u => u.pinned).map(u => publicUpdate(core, u)) : [],
+    updates: rest.slice(0, limit).map(u => publicUpdate(core, u)),
+    more: rest.length > limit
+  });
+}));
+
+// { body, pinned? }
+app.post('/api/classes/:id/updates', requireAuth, ah(async (req, res) => {
+  const core = await repo.readCore();
+  const got = teacherClass(req, core);
+  if (got.cls.archived) throw new HttpError(400, 'This class is archived');
+  const u = newUpdate(got.cls, got.me, cleanUpdateBody(req.body?.body), req.body?.pinned);
+  await repo.putRecord('announcement', u);
+  res.json({ update: publicUpdate(core, u) });
+}));
+
+// { classIds: [...], body }: the same update in several classes at once. Every
+// class must be one of the caller's running classes, or nothing is posted.
+app.post('/api/updates', requireAuth, ah(async (req, res) => {
+  const core = await repo.readCore();
+  const me = meOrThrow(req, core);
+  const raw = Array.isArray(req.body?.classIds) ? req.body.classIds : [];
+  if (!raw.length) throw new HttpError(400, 'Pick at least one class');
+  if (raw.length > 50) throw new HttpError(400, 'Post to at most 50 classes at a time');
+  const targets = [...new Set(raw.map(String))].map(id => {
+    const got = classes.classFor(core, me, id);
+    if (!got.isTeacher) throw new HttpError(403, 'only the class teacher can do that');
+    if (got.cls.archived) throw new HttpError(400, 'This class is archived');
+    return got.cls;
+  });
+  const body = cleanUpdateBody(req.body?.body);
+  const list = targets.map(cls => newUpdate(cls, me, body));
+  await repo.withRecords(async t => { for (const u of list) t.put('announcement', u); });
+  res.json({ updates: list.map(u => publicUpdate(core, u)) });
+}));
+
+// { body?, pinned? }. A changed body is marked as edited.
+app.patch('/api/updates/:uid', requireAuth, ah(async (req, res) => {
+  const core = await repo.readCore();
+  const got = await teacherUpdate(req, core);
+  const b = req.body || {};
+  const body = b.body !== undefined ? cleanUpdateBody(b.body) : undefined;
+  const u = await repo.updateRecord('announcement', got.u.id, x => {
+    if (body !== undefined && body !== x.body) { x.body = body; x.editedAt = now(); }
+    if (typeof b.pinned === 'boolean') x.pinned = b.pinned;
+    x.updatedAt = now();
+  });
+  if (!u) throw new HttpError(404, 'update not found');
+  res.json({ update: publicUpdate(core, u) });
+}));
+
+app.delete('/api/updates/:uid', requireAuth, ah(async (req, res) => {
+  const core = await repo.readCore();
+  const got = await teacherUpdate(req, core);
+  await repo.deleteRecord('announcement', got.u.id);
+  res.json({ ok: true });
+}));
+
+// ---- Recent activity and the calendar ----
+
+// The caller's classes that are still running (teaching or enrolled), newest first
+function activeClassesOf(core, me) {
+  return Object.values(core.classes).filter(c => !c.archived && (c.teacherId === me.id || c.studentIds.includes(me.id)))
+    .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+}
+
+// Home: updates and newly published assignments across those classes, newest
+// first, `limit` at a time. Drafts never show, not even to their teacher.
+app.get('/api/activity', requireAuth, ah(async (req, res) => {
+  const core = await repo.readCore();
+  const me = meOrThrow(req, core);
+  const { limit, older } = pageParams(req.query);
+  const perClass = await Promise.all(activeClassesOf(core, me).map(async cls => {
+    const [updates, list] = await Promise.all([repo.listRecords('announcement', { classId: cls.id }), repo.listRecords('assignment', { classId: cls.id })]);
+    const where = { classId: cls.id, className: cls.name, color: classes.colorFor(cls) };
+    const teacher = { id: cls.teacherId, name: fullName(own(core.users, cls.teacherId)) };
+    return [
+      ...updates.map(u => ({ kind: 'update', at: u.createdAt, update: publicUpdate(core, u), ...where })),
+      ...list.filter(a => a.publishedAt).map(a => ({ kind: 'assignment', at: a.publishedAt, assignmentId: a.id, title: a.title, type: a.type, dueAt: a.dueAt || null, ...where, teacher }))
+    ];
+  }));
+  const key = x => `${x.kind}:${x.update?.id || x.assignmentId}`;
+  const items = perClass.flat().filter(x => older(x.at, key(x)))
+    .sort((x, y) => Date.parse(y.at) - Date.parse(x.at) || (key(x) < key(y) ? 1 : -1));
+  // key: what the page sends back as beforeKey to get the next page
+  res.json({ items: items.slice(0, limit).map(x => ({ ...x, key: key(x) })), more: items.length > limit });
+}));
+
+// ?from=<ISO>&to=<ISO> (at most 100 days): due dates, discussion dates and
+// writing windows in the caller's running classes. Students see published
+// assignments with their own status; teachers see drafts too.
+const CALENDAR_MAX_DAYS = 100;
+app.get('/api/calendar', requireAuth, ah(async (req, res) => {
+  const core = await repo.readCore();
+  const me = meOrThrow(req, core);
+  const from = Date.parse(req.query.from), to = Date.parse(req.query.to);
+  if (!req.query.from || !req.query.to || !Number.isFinite(from) || !Number.isFinite(to)) throw new HttpError(400, 'Give the calendar a from and a to date');
+  if (to <= from) throw new HttpError(400, 'The calendar has to end after it starts');
+  if (to - from > CALENDAR_MAX_DAYS * 864e5) throw new HttpError(400, `Show at most ${CALENDAR_MAX_DAYS} days at a time`);
+  const mine = activeClassesOf(core, me);
+  const perClass = await Promise.all(mine.map(async cls => {
+    const isTeacher = cls.teacherId === me.id;
+    const [list, docs] = await Promise.all([repo.listRecords('assignment', { classId: cls.id }), isTeacher ? [] : repo.listRecords('doc', { classId: cls.id, studentId: me.id })]);
+    const events = [];
+    for (const a of list.filter(a => isTeacher || a.publishedAt)) {
+      const status = isTeacher || a.type !== 'writing' ? null : (docs.find(d => d.assignmentId === a.id)?.status || 'not-started');
+      const dates = { due: a.dueAt, discussion: a.discussion?.date, opens: a.writing?.windowStart, closes: a.writing?.windowEnd };
+      for (const [kind, at] of Object.entries(dates)) {
+        const t = at ? Date.parse(at) : NaN;
+        if (!Number.isFinite(t) || t < from || t >= to) continue;
+        events.push({ id: `${a.id}:${kind}`, kind, at, assignmentId: a.id, title: a.title, type: a.type, classId: cls.id, className: cls.name, color: classes.colorFor(cls), published: !!a.publishedAt, status });
+      }
+    }
+    return events;
+  }));
+  const events = perClass.flat().sort((x, y) => Date.parse(x.at) - Date.parse(y.at) || (x.id < y.id ? -1 : 1));
+  res.json({ events, classes: mine.map(c => ({ id: c.id, name: c.name, color: classes.colorFor(c), isTeacher: c.teacherId === me.id })) });
 }));
 
 // ---- Live session board (Section 7.9) ----
