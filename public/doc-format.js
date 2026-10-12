@@ -246,6 +246,21 @@
     return segments(textLength, formats).filter(s => !isEmpty(s.attrs));
   }
 
+  // The indexes of the pictures in the text: EMBED characters whose attrs name
+  // an upload. A bare U+FFFC (pasted into an essay saved before pictures
+  // existed) is only a character, never a picture.
+  function imageIndexes(text, formats) {
+    const t = String(text == null ? '' : text);
+    const out = [];
+    if (t.indexOf(EMBED) < 0) return out;
+    for (const seg of segments(t.length, formats)) {
+      if (!seg.attrs.image) continue;
+      const end = Math.min(t.length, seg.at + seg.len);
+      for (let i = seg.at; i < end; i++) if (t.charCodeAt(i) === 0xFFFC) out.push(i);
+    }
+    return out;
+  }
+
   /* ---------------- stored document <-> Quill delta ---------------- */
 
   const defaultImageSrc = id => (id ? '/api/images/' + id : TRANSPARENT_GIF);
@@ -265,8 +280,11 @@
   }
 
   // Quill delta ops for text + '\n'. Characters get their inline formats, each
-  // line break its block formats, each EMBED an image (with width, alt and any
-  // inline formats such as a link). Plain data, so it works in node too.
+  // line break its block formats, each EMBED that names an upload an image
+  // (with width, alt and any inline formats such as a link). A bare EMBED, with
+  // no image id (pasted into an older essay), stays a plain character: still
+  // one index, so the text and every position match. Plain data, so it works
+  // in node too.
   function docToDelta(text, formats, opts) {
     const full = String(text == null ? '' : text) + '\n';
     const imageSrc = opts && typeof opts.imageSrc === 'function' ? opts.imageSrc : defaultImageSrc;
@@ -282,8 +300,10 @@
       let pos = seg.at;
       while (sp < specials.length && specials[sp] < end) {
         const i = specials[sp++];
+        const isBreak = full.charCodeAt(i) === 10;
+        if (!isBreak && !a.image) continue;   // a bare EMBED: text, taken with the characters around it
         if (i > pos) pushText(ops, full.slice(pos, i), inline);
-        if (full.charCodeAt(i) === 10) {
+        if (isBreak) {
           if (block === undefined) block = pick(a, isBlockKey);
           pushText(ops, '\n', block);
         } else {
@@ -399,7 +419,7 @@
   const api = {
     EMBED, TRANSPARENT_GIF, FONTS, SIZES, LINE_HEIGHTS, DOC_STYLES, INLINE_KEYS, BLOCK_KEYS, EMBED_KEYS, QUILL_FORMATS, SRC_CATEGORIES,
     cleanValue, cleanAttrs, isBlockKey, isInlineKey, isEmbedKey, wordCount,
-    insertRuns, deleteRuns, formatRuns, segments, compactFormats, sameAttrs,
+    insertRuns, deleteRuns, formatRuns, segments, compactFormats, imageIndexes, sameAttrs,
     docToDelta, deltaText, imageIdFromSrc, styleClass, registerQuill
   };
   root.VisorDocFormat = api;

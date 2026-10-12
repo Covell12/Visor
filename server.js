@@ -2255,7 +2255,7 @@ async function processReportFor(core, doc, a) {
   });
   return report;
 }
-const PROCESS_VERSION = 5;
+const PROCESS_VERSION = 6;
 
 app.get('/api/review/:docId', ah(async (req, res) => {
   const got = await teacherDocFor(req);

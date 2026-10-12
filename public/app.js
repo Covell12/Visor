@@ -271,9 +271,15 @@ document.addEventListener('keydown', e => {
 });
 
 /* ====================== shell ====================== */
+// Every page's script (router.js, then review.js, writer.js…) has run. The
+// router mustn't start before: a direct load of /review/… or /write/… whose
+// /api/me answered first would find no page for the address and go Home.
+const scriptsReady = document.readyState === 'loading'
+  ? new Promise(res => document.addEventListener('DOMContentLoaded', res, { once: true }))
+  : Promise.resolve();
 async function boot() {
   try {
-    await configReady;
+    await Promise.all([configReady, scriptsReady]);
     // Visor Classroom: the extension's side panel embeds the editor without a cookie
     if (window.VisorRouter && VisorRouter.isEmbed()) return VisorRouter.startEmbed();
     const r = await api('/api/me');

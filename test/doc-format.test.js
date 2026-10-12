@@ -192,10 +192,10 @@ test('docToDelta: inline formats on text, block formats on line breaks, images a
     { insert: '\n', attributes: { header: 2, lineheight: '2' } }
   ]);
   assert.strictEqual(D.deltaText(ops), text + '\n');
-  // imageSrc is the caller's; with no image id it still gets a src
-  const withToken = D.docToDelta(E + E, [{ at: 0, len: 1, attrs: { image: ID } }], { imageSrc: id => (id ? '/api/images/' + id + '?t=tok' : D.TRANSPARENT_GIF) });
-  assert.deepStrictEqual(withToken, [{ insert: { image: '/api/images/' + ID + '?t=tok' } }, { insert: { image: D.TRANSPARENT_GIF } }, { insert: '\n' }]);
-  assert.deepStrictEqual(D.docToDelta(E, [], { imageSrc: () => '' }), [{ insert: { image: D.TRANSPARENT_GIF } }, { insert: '\n' }]);
+  // imageSrc is the caller's; if it gives nothing the picture still gets a src
+  const withToken = D.docToDelta(E, [{ at: 0, len: 1, attrs: { image: ID } }], { imageSrc: id => (id ? '/api/images/' + id + '?t=tok' : D.TRANSPARENT_GIF) });
+  assert.deepStrictEqual(withToken, [{ insert: { image: '/api/images/' + ID + '?t=tok' } }, { insert: '\n' }]);
+  assert.deepStrictEqual(D.docToDelta(E, [{ at: 0, len: 1, attrs: { image: ID } }], { imageSrc: () => '' }), [{ insert: { image: D.TRANSPARENT_GIF } }, { insert: '\n' }]);
   // Adjacent inserts with equal attributes merge, the way Delta.push does
   assert.deepStrictEqual(D.docToDelta('ab\n\ncd', [{ at: 2, len: 2, attrs: { table: 'row-x' } }, { at: 0, len: 1, attrs: { color: '#000000' } }, { at: 1, len: 1, attrs: { color: '#000000', bold: null } }]), [
     { insert: 'ab', attributes: { color: '#000000' } }, { insert: '\n\n', attributes: { table: 'row-x' } }, { insert: 'cd\n' }
@@ -225,7 +225,8 @@ test('docToDelta and deltaText round-trip random documents with embeds, tables a
       const a = per[i];
       const keep = test => { const o = {}; for (const k of Object.keys(a)) if (test(k)) o[k] = a[k]; return Object.keys(o).length ? o : null; };
       let op;
-      if (full[i] === E) op = { insert: { image: a.image ? '/api/images/' + a.image : D.TRANSPARENT_GIF }, attributes: keep(k => D.isInlineKey(k) || k === 'width' || k === 'alt') };
+      // An EMBED is a picture when it names its upload; a bare one is a character
+      if (full[i] === E && a.image) op = { insert: { image: '/api/images/' + a.image }, attributes: keep(k => D.isInlineKey(k) || k === 'width' || k === 'alt') };
       else op = { insert: full[i], attributes: full[i] === '\n' ? keep(D.isBlockKey) : keep(D.isInlineKey) };
       if (!op.attributes) delete op.attributes;
       const last = want[want.length - 1];
@@ -242,6 +243,27 @@ test('docToDelta and deltaText round-trip random documents with embeds, tables a
   // deltaText takes whatever a delta holds: retains and deletes add no text
   assert.strictEqual(D.deltaText([{ insert: 'Hi ' }, { insert: { image: 'x' } }, { retain: 3 }, { delete: 1 }, { insert: '\n' }]), 'Hi ' + E + '\n');
   assert.strictEqual(D.deltaText(null), '');
+});
+
+test('a bare EMBED with no image id (from an older essay) is a character, not a picture', () => {
+  // "Pasted from Word ￼ with an object char." saved before pictures existed, then bold over "Word ￼"
+  const text = 'Pasted from Word ' + E + ' with an object char.\nSecond line';
+  const formats = [{ at: 12, len: 6, attrs: { bold: true } }];
+  const ops = D.docToDelta(text, formats);
+  assert.deepStrictEqual(ops, [
+    { insert: 'Pasted from ' }, { insert: 'Word ' + E, attributes: { bold: true } }, { insert: ' with an object char.\nSecond line\n' }
+  ]);
+  assert.ok(!ops.some(op => typeof op.insert !== 'string'), 'no image embed, no blank placeholder');
+  assert.strictEqual(D.deltaText(ops), text + '\n', 'still one index per character');
+  assert.deepStrictEqual(D.imageIndexes(text, formats), []);
+  // Next to a real picture: only the one that names its upload is an image
+  const mixed = E + 'ab' + E;
+  const withPic = [{ at: 3, len: 1, attrs: { image: ID, width: '200' } }];
+  assert.deepStrictEqual(D.docToDelta(mixed, withPic), [{ insert: E + 'ab' }, { insert: { image: '/api/images/' + ID }, attributes: { width: '200' } }, { insert: '\n' }]);
+  assert.deepStrictEqual(D.imageIndexes(mixed, withPic), [3]);
+  // The same picture twice in a row (equal attrs merge into one segment) is two images
+  assert.deepStrictEqual(D.imageIndexes('x' + E + E, [{ at: 1, len: 1, attrs: { image: ID } }, { at: 2, len: 1, attrs: { image: ID } }]), [1, 2]);
+  assert.deepStrictEqual(D.imageIndexes('', null), []);
 });
 
 test('imageIdFromSrc: our own image URLs only', () => {

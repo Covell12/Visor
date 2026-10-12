@@ -225,3 +225,105 @@ test('stats count words and outside pastes', () => {
   assert.strictEqual(doc.stats.externalPasteChars, 17);
   assert.strictEqual(doc.stats.typedChars, 8);
 });
+
+test('a paste that arrives in pieces counts as one paste', () => {
+  const doc = freshDoc();
+  const paste = { internal: false };
+  const st = W.applyBatch(doc, [ins(0, 'a'.repeat(30), { src: 'paste', paste }), ins(30, 'b'.repeat(20), { src: 'paste', paste, part: 1 }), ins(50, 'c'.repeat(5), { src: 'paste', paste, part: 2 }), ins(55, 'short', { src: 'paste', paste })], { baseSeq: 0 });
+  assert.strictEqual(st[1].paste.part, 1);
+  W.updateStats(doc, st);
+  assert.strictEqual(doc.stats.pastes, 2, 'three pieces and one more paste');
+  assert.strictEqual(doc.stats.biggestPaste, 55, 'the pieces add up');
+  assert.strictEqual(doc.stats.externalPasteChars, 60);
+});
+
+// A link of exactly 2,048 characters (the most one link may be), different for each i
+const longLink = i => { const head = 'https://example.com/' + i.toString(36) + '/'; return head + 'x'.repeat(2048 - head.length); };
+const tooMuch = e => e.status === 413 && /too much formatting/.test(e.message);
+
+test('formatting has an overall limit: a batch that pushes it past is refused with 413', () => {
+  const doc = freshDoc();
+  W.applyBatch(doc, [ins(0, 'x'.repeat(5000))], { baseSeq: 0 });
+  // 300 one-character links, each with a 300-character alt text: about 630 KB, accepted
+  const linkOps = (from, n) => Array.from({ length: n }, (_, i) => fmt(from + i, 1, { link: longLink(from + i), alt: 'a'.repeat(300) }));
+  const ok = W.applyBatch(doc, linkOps(0, 300), { baseSeq: 1 });
+  assert.strictEqual(ok.length, 300);
+  assert.deepStrictEqual(Object.keys(ok[0].attrs), ['link'], 'alt text on text (no picture) is dropped');
+  assert.ok(W.formatBytes(doc.formats) < W.LIMITS.FORMAT_BYTES);
+  // 300 more would make about 1.25 MB: refused, and nothing changes
+  const before = JSON.stringify(doc);
+  assert.throws(() => W.applyBatch(doc, linkOps(300, 300), { baseSeq: 301 }), tooMuch);
+  assert.strictEqual(JSON.stringify(doc), before);
+  // Ordinary edits still go through
+  W.applyBatch(doc, [ins(5000, ' more words', { attrs: { bold: true } }), del(0, 10), fmt(20, 5, { italic: true })], { baseSeq: 301 });
+  assert.strictEqual(doc.seq, 304);
+  // The cap counts the tidy list: the same link over and over is one run
+  W.applyBatch(doc, Array.from({ length: 500 }, (_, i) => fmt(1000 + i, 1, { link: longLink(1) })), { baseSeq: 304 });
+  assert.ok(W.formatBytes(W.compactFormats(doc.formats, doc.text.length)) < W.LIMITS.FORMAT_BYTES);
+});
+
+test('formatting has an overall limit on the number of runs', () => {
+  const doc = freshDoc();
+  doc.text = 'x'.repeat(50000);
+  // Alternating bold and italic one-character runs can't merge
+  const run = i => ({ at: i, len: 1, attrs: i % 2 ? { italic: true } : { bold: true } });
+  const max = W.LIMITS.FORMAT_RUNS;
+  doc.formats = Array.from({ length: max - 5 }, (_, i) => run(i));
+  doc.formatsCompacted = doc.formats.length;
+  const more = (from, n) => Array.from({ length: n }, (_, i) => fmt(from + i, 1, run(from + i).attrs));
+  assert.throws(() => W.applyBatch(doc, more(max - 5, 10), { baseSeq: 0 }), tooMuch);
+  assert.strictEqual(doc.formats.length, max - 5);
+  W.applyBatch(doc, more(max - 5, 5), { baseSeq: 0 });
+  assert.strictEqual(W.compactFormats(doc.formats, doc.text.length).length, max);
+  assert.throws(() => W.applyBatch(doc, more(max, 1), { baseSeq: 5 }), tooMuch);
+});
+
+test('a document already over the formatting limit can still be edited, but not given more', () => {
+  const doc = freshDoc();
+  doc.text = 'x'.repeat(50000);
+  const max = W.LIMITS.FORMAT_RUNS;
+  doc.formats = Array.from({ length: max + 2000 }, (_, i) => ({ at: i, len: 1, attrs: i % 2 ? { italic: true } : { bold: true } }));
+  // Typing where there's no formatting, and deleting, go through
+  W.applyBatch(doc, [ins(40000, 'typed'), del(45000, 10)], { baseSeq: 0 });
+  W.applyBatch(doc, [del(0, 100)], { baseSeq: 2 });
+  assert.strictEqual(doc.seq, 3);
+  assert.strictEqual(doc.formats.length, max + 1900);
+  // Adding formatting doesn't
+  assert.throws(() => W.applyBatch(doc, [fmt(30000, 1, { underline: true }), fmt(30002, 1, { underline: true })], { baseSeq: 3 }), tooMuch);
+  assert.strictEqual(doc.seq, 3);
+});
+
+test('alt text and width are kept only on pictures', () => {
+  const id = 'cd'.repeat(16);
+  const E = W.EMBED;
+  assert.deepStrictEqual(W.cleanOp(ins(0, 'abc', { attrs: { alt: 'x', width: 300, bold: true } })).attrs, { bold: true });
+  assert.strictEqual(W.cleanOp(ins(0, 'abc', { attrs: { alt: 'x' } })).attrs, undefined);
+  const doc = freshDoc();
+  W.applyBatch(doc, [ins(0, 'ab'), ins(2, E, { src: 'image', attrs: { image: id, alt: 'A chart' } }), ins(3, 'cd')], { baseSeq: 0 });
+  const stamped = W.applyBatch(doc, [
+    fmt(0, 2, { alt: 'nothing to describe' }),          // text only: skipped
+    fmt(0, 2, { alt: 'x', width: '300', italic: true }), // text only: just the italic
+    fmt(2, 1, { alt: 'A bar chart', width: '200' }),     // the picture: kept
+    fmt(0, 5, { width: null })                          // a span with the picture in it: kept
+  ], { baseSeq: 3 });
+  assert.deepStrictEqual(stamped.map(o => o.attrs), [{ italic: true }, { alt: 'A bar chart', width: '200' }, { width: null }]);
+  assert.deepStrictEqual(stamped.map(o => o.n), [4, 5, 6]);
+  assert.deepStrictEqual(W.compactFormats(doc.formats, doc.text.length).find(r => r.attrs.image).attrs, { image: id, alt: 'A bar chart' });
+  // An op that doesn't fit is still refused, not skipped
+  assert.throws(() => W.applyBatch(doc, [fmt(4, 9, { alt: 'x' })], { baseSeq: 6 }), e => e.status === 409);
+});
+
+test('snapshots keep their formatting tidy, and the oldest go when it gets large', () => {
+  const doc = freshDoc();
+  doc.text = 'x'.repeat(5000);
+  // About 840 KB of links: under the document's limit, but four snapshots of it aren't
+  doc.formats = Array.from({ length: 400 }, (_, i) => ({ at: i * 2, len: 1, attrs: { link: longLink(i) } }));
+  doc.formats.push({ at: 4000, len: 5, attrs: { bold: true } }, { at: 4005, len: 5, attrs: { bold: true } });
+  for (let b = 0; b < 16; b++) W.applyBatch(doc, Array.from({ length: 500 }, (_, i) => ins(doc.text.length + i, 'y')), { baseSeq: doc.seq });
+  assert.strictEqual(doc.seq, 8000);
+  const each = W.formatBytes(doc.snapshots[0].formats);
+  assert.ok(each * 2 <= W.LIMITS.SNAPSHOT_FORMAT_BYTES && each * 3 > W.LIMITS.SNAPSHOT_FORMAT_BYTES, `${each} bytes each`);
+  assert.deepStrictEqual(doc.snapshots.map(s => s.seq), [6000, 8000]);
+  assert.strictEqual(doc.snapshots[1].formats.length, 401, 'the two bold runs are one in the snapshot');
+  assert.deepStrictEqual(doc.snapshots[1].formats, W.compactFormats(doc.formats, doc.text.length));
+});

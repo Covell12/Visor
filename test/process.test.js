@@ -138,6 +138,18 @@ test('research with the side panel open: its own figure and note, never time awa
   assert.deepStrictEqual(r.notes.map(n => n.text), ['Researched on other tabs with the side panel open for 3 min in session 1.']);
 });
 
+test('a paste that arrived in pieces is one row on the Process tab', () => {
+  const st = makeDoc('');
+  typeText(st, 0, 'Intro ');
+  const paste = { internal: false };
+  write(st, [{ k: 'i', at: 6, s: 'x'.repeat(40), src: 'paste', paste }, { k: 'i', at: 46, s: 'y'.repeat(25), src: 'paste', paste, part: 1, gap: 0 }]);
+  const r = P.build({ doc: st.doc, ops: st.log, sessions: [session('sess1', T0, T0 + 60000)] });
+  assert.strictEqual(r.pastes.length, 1);
+  assert.strictEqual(r.pastes[0].len, 65);
+  assert.strictEqual(r.pastes[0].survivedChars, 65);
+  assert.strictEqual(r.totals.pastes, 1);
+});
+
 test('a quiet, typed essay gets no warnings', () => {
   const st = makeDoc('');
   typeText(st, 0, 'A short typed answer.');
@@ -187,4 +199,26 @@ test('structure from the toolbar counts as typed, never as an injected block', (
   assert.ok(!r.notes.some(n => n.rule === 'injected'), 'no injected note');
   assert.strictEqual(r.survival.chars.other, 0);
   assert.strictEqual(r.survival.pct.typed, 100);
+});
+
+test('a bare U+FFFC pasted into an older essay is text, not an inserted image', () => {
+  const E = W.EMBED;
+  const st = makeDoc('');
+  typeText(st, 0, 'Intro. ');
+  // Saved before pictures existed, when any string was accepted (cleanOp now refuses this)
+  const legacy = { n: st.doc.seq + 1, t: T0 + 60e3, st: T0 + 60e3, k: 'i', at: 7, s: 'Pasted from Word ' + E + ' with an object char.\nSecond line', src: 'paste', paste: { hash: null, len: 51, origin: null, internal: false }, sid: 'sess1', surf: 'tab' };
+  W.applyOp(st.doc, legacy);
+  st.doc.seq = legacy.n;
+  st.log.push(legacy);
+  const r = P.build({ doc: st.doc, ops: st.log, sessions: [session('sess1', T0, T0 + 600e3)], studentName: 'Sam' });
+  assert.strictEqual(r.survival.images, 0);
+  assert.ok(!r.notes.some(n => n.rule === 'images'), 'no "Inserted 1 image." note');
+  assert.strictEqual(r.survival.chars['pasted-outside'], 42, 'the stray character counts with the paste it came in (41 letters and it)');
+  assert.strictEqual(r.engine.matchesDoc, true);
+  // A real picture next to it is still an image
+  write(st, [{ k: 'i', at: 0, s: E, src: 'image', attrs: { image: 'ef'.repeat(16) } }]);
+  const s = P.survival(P.provenance(st.log), st.doc.text, st.doc.formats);
+  assert.strictEqual(s.images, 1);
+  assert.strictEqual(s.chars.image, 0);
+  assert.deepStrictEqual(P.build({ doc: st.doc, ops: st.log, sessions: [session('sess1', T0, T0 + 600e3)], studentName: 'Sam' }).notes.filter(n => n.rule === 'images').map(n => n.text), ['Inserted 1 image.']);
 });

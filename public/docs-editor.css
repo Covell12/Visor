@@ -1,0 +1,304 @@
+/* Visor Classroom — the Docs-style menu bar, toolbar, menus, popovers, find
+   panel and outline (docs-ui.js). Everything is prefixed dui- so it never
+   meets the writer's own layout rules; the slots (#dxMenubar, #dxToolbar,
+   #dxOutline, #dxCanvas) and the page belong to classroom.css.
+   Loaded after classroom.css. Docs' look, in Visor's colours where Visor has one. */
+
+:root {
+  --dui-bar: #EDF2FA;            /* the toolbar pill */
+  --dui-hover: #DFE3EB;          /* hover on toolbar controls */
+  --dui-on: #D3E3FD;             /* pressed / open */
+  --dui-on-ink: #0B3A5B;
+  --dui-icon: #33494F;           /* toolbar icons: a dark slate, a touch softer than --ink */
+  --dui-sep: #C5CFD8;
+  --dui-menu-hover: #EEF2F7;
+  --dui-shadow: 0 2px 6px 2px rgba(16, 48, 61, .12), 0 1px 2px rgba(16, 48, 61, .22);
+  --dui-focus: var(--blue-deep, #1E9BC4);
+  --dui-check: var(--blue-deep, #1E9BC4);
+  --dui-ui: var(--font, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif);
+}
+
+.dui-i { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; display: block; }
+.dui-i .dui-bar { stroke: none; fill: var(--dui-c, #000); }
+.dui-colorbtn.is-none .dui-i .dui-bar { fill: none; stroke: #9AA9B3; stroke-width: 1; }
+[hidden].dui-g, .dui-menubar [hidden], .dui-layer [hidden], .dui-find[hidden], .dui-outline [hidden] { display: none !important; }
+
+/* ---------- menu bar ---------- */
+.dui-menubar { display: flex; align-items: center; gap: 1px; margin-left: -7px; font: 14px/20px var(--dui-ui); color: var(--ink, #10303D); user-select: none; -webkit-user-select: none; }
+.dui-mb-item { height: 26px; padding: 0 7px; border: 0; border-radius: 4px; background: transparent; color: inherit; font: inherit; letter-spacing: .005em; cursor: default; transition: background-color .08s; }
+.dui-mb-item:hover { background: rgba(16, 48, 61, .06); }
+.dui-mb-item.is-open, .dui-mb-item[aria-expanded="true"] { background: var(--dui-hover); }
+
+/* ---------- toolbar ---------- */
+.dui-toolbar { display: flex; align-items: center; flex-wrap: nowrap; height: 40px; padding: 0 8px; gap: 1px; background: var(--dui-bar); border-radius: 24px; overflow: hidden; white-space: nowrap; font: 14px/20px var(--dui-ui); color: var(--dui-icon); user-select: none; -webkit-user-select: none; box-sizing: border-box; width: 100%; min-width: 0; }
+.dui-toolbar.is-compact { height: 36px; padding: 0 4px; border-radius: 18px; }
+.dui-g { display: flex; align-items: center; gap: 1px; flex: none; }
+.dui-sep { width: 1px; height: 20px; margin: 0 4px; background: var(--dui-sep); flex: none; }
+.dui-spacer { flex: 1 1 8px; min-width: 8px; }
+.dui-btn { width: 28px; height: 28px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--dui-icon); display: inline-flex; align-items: center; justify-content: center; flex: none; cursor: default; transition: background-color .08s, color .08s; }
+.dui-btn:hover { background: var(--dui-hover); }
+.dui-btn:active { background: #D2D8E2; }
+.dui-btn[aria-pressed="true"], .dui-btn.is-open { background: var(--dui-on); color: var(--dui-on-ink); }
+.dui-btn[aria-disabled="true"] { color: #9AA9B3; background: transparent; }
+
+/* dropdowns: zoom, styles, font, align, line spacing */
+.dui-dd { height: 28px; padding: 0 0 0 7px; border: 0; border-radius: 4px; background: transparent; color: var(--ink, #10303D); display: inline-flex; align-items: center; gap: 0; flex: none; font: 14px/20px var(--dui-ui); cursor: default; transition: background-color .08s; text-align: left; }
+.dui-dd:hover { background: var(--dui-hover); }
+.dui-dd.is-open { background: var(--dui-on); }
+.dui-dd[aria-disabled="true"] { color: #9AA9B3; }
+.dui-dd[aria-disabled="true"]:hover { background: transparent; }
+.dui-dd-l { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dui-dd .dui-caret { width: 18px; height: 18px; color: var(--dui-icon); margin-right: 1px; }
+.dui-dd-zoom { width: 66px; }
+.dui-dd-style { width: 110px; }
+.dui-dd-font { width: 114px; }
+.dui-dd-align, .dui-dd-lh { padding-left: 5px; color: var(--dui-icon); }
+.dui-dd-align .dui-dd-l, .dui-dd-lh .dui-dd-l { display: flex; }
+.dui-dd-align .dui-caret, .dui-dd-lh .dui-caret { margin-left: -3px; }
+/* the side panel: smaller steps so Undo, Redo, Style, B, I, U and the lists fit in about 340px */
+.dui-toolbar.is-compact, .is-compact .dui-g { gap: 0; }
+.dui-toolbar.is-compact { padding: 0 2px; }
+.is-compact .dui-btn { width: 26px; }
+.is-compact .dui-sep { margin: 0 3px; }
+.is-compact .dui-dd-style { width: 78px; font-size: 13.5px; padding-left: 6px; }
+
+/* font size: − [11] + */
+.dui-size { display: flex; align-items: center; gap: 1px; }
+.dui-size-in { width: 34px; height: 24px; margin: 0 1px; padding: 0; border: 1px solid #8A9AA3; border-radius: 4px; background: transparent; color: var(--ink, #10303D); font: 14px/22px var(--dui-ui); text-align: center; outline: none; box-sizing: border-box; cursor: text; }
+.dui-size-in:hover { background: #fff; }
+.dui-size-in:focus { background: #fff; border-color: var(--dui-focus); box-shadow: 0 0 0 1px var(--dui-focus); }
+.dui-size-in[aria-disabled="true"] { color: #9AA9B3; border-color: #C5CFD8; cursor: default; }
+
+/* the right side */
+.dui-chip { height: 28px; padding: 0 9px; border: 0; border-radius: 14px; background: transparent; color: var(--ink, #10303D); display: inline-flex; align-items: center; gap: 6px; font: 600 13px/20px var(--dui-ui); flex: none; cursor: default; transition: background-color .08s, box-shadow .08s; }
+.dui-chip:hover { background: var(--dui-hover); }
+.dui-chip .dui-i { width: 16px; height: 16px; color: var(--dui-icon); }
+.dui-chip-wc { min-width: 70px; justify-content: center; color: var(--ink-2, #4F6B78); font-weight: 500; font-variant-numeric: tabular-nums; }
+.dui-chip-cite { background: #fff; box-shadow: inset 0 0 0 1px var(--dui-sep); margin-left: 2px; }
+.dui-chip-cite:hover { background: #fff; box-shadow: inset 0 0 0 1px var(--blue, #4DBEDC); }
+.dui-chip-cite.is-open { background: var(--dui-on); box-shadow: none; }
+.dui-chip[aria-disabled="true"] { color: #9AA9B3; }
+.dui-chip[aria-disabled="true"]:hover { background: transparent; }
+.dui-chip-cite[aria-disabled="true"]:hover { background: #fff; box-shadow: inset 0 0 0 1px var(--dui-sep); }
+.dui-g-wc + .dui-g-src, .dui-g-src + .dui-g-cite { margin-left: 2px; }
+
+/* ---------- the floating layer: menus, popovers, bubbles, tooltip ---------- */
+.dui-layer { position: fixed; left: 0; top: 0; width: 0; height: 0; z-index: 45; font: 14px/20px var(--dui-ui); color: var(--ink, #10303D); }
+.dui-tip { position: fixed; z-index: 2; max-width: 260px; padding: 4px 8px; border-radius: 4px; background: #2B3A40; color: #fff; font: 500 12px/16px var(--dui-ui); white-space: nowrap; pointer-events: none; opacity: 0; transition: opacity .1s; left: -999px; top: -999px; }
+.dui-tip.is-on { opacity: 1; }
+
+@keyframes dui-in { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: none; } }
+.dui-menu { position: fixed; min-width: 236px; max-width: 380px; padding: 6px 0; background: #fff; border-radius: 8px; box-shadow: var(--dui-shadow); overflow-y: auto; overscroll-behavior: contain; outline: none; user-select: none; -webkit-user-select: none; animation: dui-in .09s ease-out; box-sizing: border-box; }
+.dui-menu-main { min-width: 260px; }
+.dui-mi { display: flex; align-items: center; height: 32px; padding: 0 14px 0 0; cursor: default; color: var(--ink, #10303D); outline: none; }
+.dui-mi.is-active { background: var(--dui-menu-hover); }
+.dui-mi:focus-visible { box-shadow: inset 2px 0 0 var(--dui-focus); }
+.dui-mi-ic { width: 44px; flex: none; display: flex; align-items: center; justify-content: center; color: var(--dui-icon); }
+.dui-mi-ic .dui-ck { display: none; color: var(--dui-check); }
+.dui-mi.is-checked .dui-mi-ic .dui-ck { display: block; }
+.dui-mi.is-checked .dui-mi-ic .dui-ico { display: none; }
+.dui-mi-l { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 28px; }
+.dui-mi-sc { flex: none; color: var(--ink-2, #4F6B78); font-size: 13px; letter-spacing: .02em; }
+.dui-mi-ar { flex: none; color: var(--dui-icon); margin-right: -6px; }
+.dui-mi[aria-haspopup] .dui-mi-l { padding-right: 16px; }
+.dui-mi[aria-disabled="true"] { color: #A3B1B9; }
+.dui-mi[aria-disabled="true"] .dui-mi-ic, .dui-mi[aria-disabled="true"] .dui-mi-sc, .dui-mi[aria-disabled="true"] .dui-mi-ar { color: #B8C3CA; }
+.dui-mi[aria-disabled="true"].is-active { background: #F6F8FA; }
+.dui-msep { height: 1px; margin: 6px 0; background: #E3E9EE; }
+.dui-cite-in { font-weight: 600; margin-right: 8px; }
+.dui-cite-t { color: var(--ink-2, #4F6B78); }
+
+/* the paragraph styles menu shows each style */
+.dui-menu-styles .dui-mi { height: auto; min-height: 32px; padding-top: 4px; padding-bottom: 4px; }
+.dui-menu-styles.is-mla .dui-mi-l { font-family: "Times New Roman", Tinos, Times, serif; }
+.dui-menu-styles.is-docs .dui-mi-l { font-family: Arial, Arimo, Helvetica, sans-serif; }
+.dui-menu-styles .dui-st-normal .dui-mi-l { font-size: 14.5px; }
+.dui-menu-styles .dui-st-title .dui-mi-l { font-size: 25px; line-height: 32px; }
+.dui-menu-styles .dui-st-subtitle .dui-mi-l { font-size: 17px; color: #666; }
+.dui-menu-styles .dui-st-h1 .dui-mi-l { font-size: 21px; line-height: 28px; }
+.dui-menu-styles .dui-st-h2 .dui-mi-l { font-size: 17.5px; }
+.dui-menu-styles .dui-st-h3 .dui-mi-l { font-size: 15.5px; color: #434343; }
+
+/* the table-size grid */
+.dui-tgrid { padding: 8px 12px 6px; outline: none; }
+.dui-mi.dui-mi-grid { height: auto; display: block; padding: 6px 14px 4px; }
+.dui-mi.dui-mi-grid.is-active { background: transparent; }
+.dui-tg-cells { display: grid; gap: 3px; }
+.dui-tg-c { width: 18px; height: 18px; border: 1px solid #C9D3DA; border-radius: 2px; background: #fff; box-sizing: border-box; transition: background-color .05s, border-color .05s; }
+.dui-tg-c.is-on { background: var(--dui-on); border-color: #7FA9E8; }
+.dui-tg-l { margin-top: 8px; text-align: center; font-size: 13px; color: var(--ink-2, #4F6B78); font-variant-numeric: tabular-nums; }
+.dui-tgrid:focus-visible { outline: 2px solid var(--dui-focus); outline-offset: 2px; border-radius: 4px; }
+
+/* popovers */
+.dui-pop { position: fixed; padding: 12px; background: #fff; border-radius: 8px; box-shadow: var(--dui-shadow); animation: dui-in .09s ease-out; box-sizing: border-box; overflow: auto; overscroll-behavior: contain; }
+.dui-pop-grid { padding: 4px 0; }
+.dui-pop-size { padding: 6px 0; min-width: 56px; }
+.dui-size-opt { height: 30px; padding: 0 16px; display: flex; align-items: center; justify-content: center; font-size: 14px; cursor: default; font-variant-numeric: tabular-nums; }
+.dui-size-opt:hover, .dui-size-opt.is-active { background: var(--dui-menu-hover); }
+
+/* the ⋮ overflow */
+.dui-pop-more { padding: 6px; max-width: min(560px, calc(100vw - 16px)); }
+.dui-ovf { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; padding: 2px; color: var(--dui-icon); }
+.dui-ovf .dui-sep { display: none; }   /* a divider could start a wrapped line: groups get a gap instead */
+.dui-ovf .dui-g { min-height: 32px; }
+.dui-ovf-menus { display: flex; flex-wrap: wrap; gap: 1px; padding: 0 0 6px; margin: 0 0 6px; border-bottom: 1px solid #E3E9EE; color: var(--ink, #10303D); }
+.dui-ovf-menus .dui-mb-item { font-size: 14px; }
+
+/* colour palettes */
+.dui-pal { width: 232px; }
+.dui-pal-none { display: flex; align-items: center; gap: 8px; width: 100%; height: 30px; padding: 0 8px; margin: 0 0 8px; border: 0; border-radius: 4px; background: transparent; color: var(--ink, #10303D); font: 14px var(--dui-ui); cursor: default; }
+.dui-pal-none:hover, .dui-pal-none:focus-visible { background: var(--dui-menu-hover); outline: none; }
+.dui-pal-none .dui-i { color: var(--dui-icon); }
+.dui-sw-grid { display: grid; grid-template-columns: repeat(10, 23px); margin: 0 -2px; }
+.dui-sw-grid .dui-sw:nth-child(n+11):nth-child(-n+20) { margin-bottom: 6px; }
+/* each swatch is a 23×22 target (no dead gaps) with an 18px dot */
+.dui-sw { position: relative; width: 23px; height: 22px; padding: 0; border: 0; background: transparent; display: inline-flex; align-items: center; justify-content: center; cursor: default; outline: none; }
+.dui-sw::before { content: ""; position: absolute; left: 2.5px; top: 2px; width: 18px; height: 18px; border-radius: 50%; background: var(--c); box-shadow: inset 0 0 0 1px rgba(16, 48, 61, .14); transition: transform .08s, box-shadow .08s; }
+.dui-sw:hover::before, .dui-sw:focus-visible::before { transform: scale(1.18); box-shadow: inset 0 0 0 1px rgba(16, 48, 61, .2), 0 1px 3px rgba(16, 48, 61, .3); }
+.dui-sw:focus-visible::before { box-shadow: 0 0 0 2px #fff, 0 0 0 4px var(--dui-focus); }
+.dui-sw .dui-sw-ck { position: relative; width: 12px; height: 12px; stroke-width: 3; color: #fff; display: none; filter: drop-shadow(0 0 1px rgba(0, 0, 0, .55)); }
+.dui-sw.is-cur .dui-sw-ck { display: block; }
+.dui-sw.is-light .dui-sw-ck { color: #33494F; filter: none; }
+.dui-pal-h { margin: 12px 0 6px; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-2, #4F6B78); }
+.dui-sw-row { display: flex; flex-wrap: wrap; gap: 0; align-items: center; margin: 0 -2px; }
+.dui-sw-row .dui-sw-add { margin-left: 2px; }
+.dui-sw-add { position: relative; width: 22px; height: 22px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; color: var(--dui-icon); box-shadow: inset 0 0 0 1px #C5CFD8; cursor: pointer; }
+.dui-sw-add:hover, .dui-sw-add:focus-within { background: var(--dui-menu-hover); box-shadow: inset 0 0 0 1px var(--dui-focus); }
+.dui-sw-add .dui-i { width: 14px; height: 14px; }
+.dui-sw-add input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; border: 0; padding: 0; }
+
+/* insert a citation */
+.dui-pop-cite { padding: 6px 0; width: 340px; max-width: calc(100vw - 16px); }
+.dui-cites-h { padding: 6px 16px 8px; font-size: 12px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-2, #4F6B78); }
+.dui-cite { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; width: 100%; padding: 7px 16px; border: 0; background: transparent; text-align: left; font: 14px/19px var(--dui-ui); color: var(--ink, #10303D); cursor: default; }
+.dui-cite:hover, .dui-cite:focus-visible { background: var(--dui-menu-hover); outline: none; }
+.dui-cite .dui-cite-t { font-size: 12.5px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dui-cites-empty { margin: 6px 16px 8px; font-size: 13.5px; color: var(--ink-2, #4F6B78); line-height: 1.5; white-space: normal; }
+.dui-linkbtn { margin: 0 16px 8px; padding: 0; border: 0; background: none; color: var(--blue-deep, #1E9BC4); font: 600 13.5px var(--dui-ui); cursor: pointer; }
+.dui-linkbtn:hover { text-decoration: underline; }
+
+/* the link popover */
+.dui-pop-link { padding: 10px 12px; width: 380px; max-width: calc(100vw - 16px); }
+.dui-lp-f { display: flex; align-items: center; gap: 10px; height: 40px; }
+.dui-lp-f + .dui-lp-f, .dui-lp-sel + .dui-lp-f { border-top: 1px solid #E3E9EE; }
+.dui-lp-f > .dui-i { color: var(--dui-icon); }
+.dui-lp-f input { flex: 1; min-width: 0; height: 32px; padding: 0 4px; border: 0; border-bottom: 2px solid transparent; background: transparent; font: 14px var(--dui-ui); color: var(--ink, #10303D); outline: none; }
+.dui-lp-f input:focus { border-bottom-color: var(--dui-focus); }
+.dui-lp-sel { padding: 0 0 8px 28px; font-size: 12.5px; color: var(--ink-2, #4F6B78); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dui-lp-apply { flex: none; height: 32px; padding: 0 14px; border: 0; border-radius: 16px; background: var(--blue-deep, #1E9BC4); color: #fff; font: 600 13.5px var(--dui-ui); cursor: pointer; transition: background-color .1s, opacity .1s; }
+.dui-lp-apply:hover:not(:disabled) { background: #1786AB; }
+.dui-lp-apply:disabled { opacity: .45; cursor: default; }
+.dui-lp-err { margin: 6px 0 2px 28px; font-size: 12.5px; color: var(--red, #D9534F); }
+
+/* bubbles under the selection: a link, an image */
+.dui-bubble { position: fixed; display: flex; white-space: nowrap; align-items: center; gap: 2px; height: 40px; padding: 0 6px 0 12px; background: #fff; border-radius: 8px; box-shadow: var(--dui-shadow); color: var(--ink, #10303D); animation: dui-in .09s ease-out; user-select: none; -webkit-user-select: none; }
+.dui-bubble > .dui-i { color: var(--dui-icon); width: 16px; height: 16px; margin-right: 6px; }
+.dui-lb-url { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #1155CC; font-size: 14px; text-decoration: none; margin-right: 4px; }
+.dui-lb-url:hover { text-decoration: underline; }
+.dui-vsep { width: 1px; height: 20px; margin: 0 6px; background: #E3E9EE; flex: none; }
+.dui-ibub { padding: 0 6px; }
+.dui-seg { display: flex; gap: 2px; }
+.dui-seg button, .dui-bb { height: 28px; padding: 0 9px; border: 0; border-radius: 4px; background: transparent; color: var(--ink, #10303D); font: 13px/20px var(--dui-ui); cursor: default; display: inline-flex; align-items: center; gap: 6px; transition: background-color .08s; white-space: nowrap; }
+.dui-seg button:hover, .dui-bb:hover { background: var(--dui-hover); }
+.dui-seg button[aria-pressed="true"] { background: var(--dui-on); color: var(--dui-on-ink); }
+.dui-bb .dui-i { width: 16px; height: 16px; color: var(--dui-icon); }
+
+/* ---------- find and replace (top right of the canvas) ---------- */
+.dui-find { position: fixed; z-index: 30; width: 360px; padding: 8px 8px 8px 12px; background: #fff; border-radius: 8px; box-shadow: var(--dui-shadow); font: 14px/20px var(--dui-ui); color: var(--ink, #10303D); box-sizing: border-box; animation: dui-in .1s ease-out; }
+.dui-fd-row { display: flex; align-items: center; gap: 2px; }
+.dui-fd-field { flex: 1; min-width: 0; display: flex; align-items: center; height: 34px; border: 1px solid #C5CFD8; border-radius: 6px; padding: 0 8px; margin-right: 4px; background: #fff; transition: border-color .1s, box-shadow .1s; }
+.dui-fd-field:focus-within { border-color: var(--dui-focus); box-shadow: 0 0 0 1px var(--dui-focus); }
+.dui-fd-field input { flex: 1; min-width: 0; height: 30px; border: 0; padding: 0; outline: none; background: transparent; font: 14px var(--dui-ui); color: inherit; }
+.dui-fd-n { flex: none; margin-left: 6px; font-size: 12.5px; color: var(--ink-2, #4F6B78); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.dui-fd-rep { display: none; margin-top: 8px; padding-right: 92px; }
+.dui-find.is-replace .dui-fd-rep { display: block; }
+.dui-fd-rep .dui-fd-field { margin-right: 0; }
+.dui-find [data-f="mode"][aria-expanded="true"] { background: var(--dui-on); color: var(--dui-on-ink); }
+.dui-fd-foot { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
+.dui-fd-case { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--ink-2, #4F6B78); cursor: pointer; user-select: none; }
+.dui-fd-case input { width: 15px; height: 15px; margin: 0; accent-color: var(--blue-deep, #1E9BC4); }
+.dui-fbtn { display: none; height: 30px; padding: 0 12px; border: 1px solid #C5CFD8; border-radius: 15px; background: #fff; color: var(--ink, #10303D); font: 600 13px var(--dui-ui); cursor: pointer; transition: background-color .1s, border-color .1s; }
+.dui-find.is-replace .dui-fbtn { display: inline-flex; align-items: center; }
+.dui-fbtn:hover:not(:disabled) { background: var(--dui-menu-hover); }
+.dui-fbtn.is-primary { background: var(--blue-deep, #1E9BC4); border-color: var(--blue-deep, #1E9BC4); color: #fff; }
+.dui-fbtn.is-primary:hover:not(:disabled) { background: #1786AB; }
+.dui-fbtn:disabled { opacity: .45; cursor: default; }
+
+/* ---------- the outline ---------- */
+.dui-outline { padding: 16px 6px 16px 12px; font: 14px/20px var(--dui-ui); color: var(--ink, #10303D); box-sizing: border-box; }
+.dui-ol-head { display: flex; align-items: center; justify-content: space-between; margin: 0 0 8px 6px; font-weight: 600; font-size: 14px; }
+.dui-ol-head .dui-btn { width: 26px; height: 26px; }
+.dui-ol-list { display: flex; flex-direction: column; gap: 1px; max-height: calc(100vh - var(--wr-bar-h, 120px) - 120px); overflow-y: auto; overscroll-behavior: contain; }
+.dui-ol-item { display: block; width: 100%; min-height: 30px; padding: 5px 8px; border: 0; border-radius: 4px; background: transparent; color: var(--ink-2, #4F6B78); font: 13.5px/20px var(--dui-ui); text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; transition: background-color .08s, color .08s; }
+.dui-ol-item:hover { background: rgba(16, 48, 61, .06); color: var(--ink, #10303D); }
+.dui-ol-title { font-weight: 600; color: var(--ink, #10303D); }
+.dui-ol-subtitle { font-style: italic; }
+.dui-ol-h1 { padding-left: 8px; }
+.dui-ol-h2 { padding-left: 22px; }
+.dui-ol-h3 { padding-left: 36px; font-size: 13px; }
+.dui-ol-h4, .dui-ol-h5, .dui-ol-h6 { padding-left: 48px; font-size: 13px; }
+.dui-ol-empty { margin: 4px 6px; font-size: 13px; line-height: 1.5; color: var(--ink-3, #8AA0AB); }
+
+/* ---------- the floating word count ---------- */
+.dui-wc-float { position: fixed; left: 16px; bottom: 16px; height: 32px; padding: 0 14px; border: 0; border-radius: 16px; background: #fff; box-shadow: var(--dui-shadow); color: var(--ink, #10303D); font: 600 13px/20px var(--dui-ui); font-variant-numeric: tabular-nums; cursor: pointer; transition: box-shadow .1s; }
+.dui-wc-float:hover { box-shadow: 0 2px 8px 3px rgba(16, 48, 61, .16), 0 1px 3px rgba(16, 48, 61, .25); }
+
+/* ---------- dialogs (inside the app's modal) ---------- */
+.dui-wc-t { width: 100%; border-collapse: collapse; font-size: 14.5px; }
+.dui-wc-t th { text-align: left; font-weight: 500; color: var(--ink-2, #4F6B78); padding: 9px 0; }
+.dui-wc-t td { text-align: right; padding: 9px 0; font-variant-numeric: tabular-nums; color: var(--ink-2, #4F6B78); }
+.dui-wc-t td b { color: var(--ink, #10303D); font-weight: 700; }
+.dui-wc-t tr + tr th, .dui-wc-t tr + tr td { border-top: 1px solid var(--line, #DCEBF1); }
+.dui-switch-row { display: flex; align-items: center; gap: 12px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line, #DCEBF1); font-size: 14px; cursor: pointer; }
+.dui-switch { appearance: none; -webkit-appearance: none; flex: none; position: relative; width: 36px; height: 20px; margin: 0; border-radius: 10px; background: #C9D5DC; cursor: pointer; transition: background-color .15s; }
+.dui-switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, .25); transition: left .15s; }
+.dui-switch:checked { background: var(--green-deep, #4CA35C); }
+.dui-switch:checked::after { left: 18px; }
+.dui-switch:focus-visible { outline: 2px solid var(--dui-focus); outline-offset: 2px; }
+
+.dui-sc-g + .dui-sc-g { margin-top: 14px; }
+.dui-sc-h { font-size: 12px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--ink-2, #4F6B78); margin-bottom: 6px; }
+.dui-sc-grid { display: grid; grid-template-columns: repeat(auto-fill, 38px); gap: 4px; }
+.dui-sc-c { width: 38px; height: 38px; padding: 0; border: 1px solid var(--line, #DCEBF1); border-radius: 8px; background: #fff; color: var(--ink, #10303D); font: 20px/1 "Times New Roman", Tinos, Georgia, serif; cursor: pointer; transition: background-color .08s, border-color .08s, transform .08s; }
+.dui-sc-c:hover, .dui-sc-c:focus-visible { background: var(--blue-soft, #E4F5FA); border-color: var(--blue, #4DBEDC); outline: none; }
+.dui-sc-c:active { transform: scale(.95); }
+
+.dui-alt-l { display: block; font-size: 13px; font-weight: 600; margin-bottom: 6px; }
+.dui-alt textarea.input { min-height: 96px; }
+.dui-alt-n { margin-top: 6px; text-align: right; font-size: 12px; color: var(--ink-3, #8AA0AB); font-variant-numeric: tabular-nums; }
+
+.dui-keys { columns: 2 300px; column-gap: 32px; }
+.dui-keys-g { break-inside: avoid; margin-bottom: 18px; }
+.dui-keys-g h4 { margin: 0 0 6px; font-size: 13px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-2, #4F6B78); }
+.dui-keys-g table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.dui-keys-g td { padding: 5px 0; border-bottom: 1px solid var(--line, #DCEBF1); }
+.dui-keys-g td + td { text-align: right; white-space: nowrap; padding-left: 12px; }
+.dui-keys kbd { font: 12.5px/1 var(--mono, ui-monospace, Menlo, monospace); padding: 3px 7px; border-radius: 5px; background: var(--surface, #F3F9FB); border: 1px solid var(--line, #DCEBF1); color: var(--ink, #10303D); }
+
+/* ---------- focus rings ----------
+   classroom.css gives every button and field in the page (.route-view) and in
+   the modal a 3px ring 2px outside it (specificity 0,2,1). The doubled classes
+   here (0,3,0 and up) win, so each control keeps one ring of its own: buttons an
+   inset 2px ring (it doesn't spill onto neighbours), fields their own border. */
+.dui-mb-item.dui-mb-item:focus-visible, .dui-btn.dui-btn:focus-visible, .dui-dd.dui-dd:focus-visible,
+.dui-chip.dui-chip:focus-visible, .dui-ol-item.dui-ol-item:focus-visible { outline: 2px solid var(--dui-focus); outline-offset: -2px; }
+.dui-size-in.dui-size-in:focus-visible, .dui-fd-field.dui-fd-field input:focus-visible,
+.dui-lp-f.dui-lp-f input:focus-visible, .dui-sc-c.dui-sc-c:focus-visible { outline: none; }
+.dui-fbtn.dui-fbtn:focus-visible, .dui-fd-case.dui-fd-case input:focus-visible { outline: 2px solid var(--dui-focus); outline-offset: 2px; }
+.dui-sc-c.dui-sc-c:focus-visible { box-shadow: 0 0 0 2px var(--dui-focus); }
+
+/* the essay's selection while the link popover, the size box or find has focus */
+::highlight(dui-sel) { background-color: rgba(30, 155, 196, .22); }
+
+/* ---------- narrow screens and the side panel ---------- */
+@media (max-width: 520px) {
+  .dui-find { width: auto; left: 8px; }
+  .dui-pop-link { width: calc(100vw - 16px); }
+  .dui-fd-rep { padding-right: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dui-menu, .dui-pop, .dui-bubble, .dui-find { animation: none; }
+}
+@media print {
+  .dui-layer, .dui-find, .dui-toolbar, .dui-menubar, .dui-outline { display: none !important; }
+}

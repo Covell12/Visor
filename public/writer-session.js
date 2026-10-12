@@ -29,7 +29,9 @@ const WR = {
   timers: [], listeners: [], warned: false, timeUpShown: false, lastBeatAt: 0,
   seenMessage: null, unloadWarn: false,
   panelCtx: null,         // side panel: { focused, blocked } from the extension (PANEL_CONTEXT)
-  researchSent: undefined // the tab: the research mode last sent to the extension
+  researchSent: undefined, // the tab: the research mode last sent to the extension
+  imageToken: null,       // lets <img> load this essay's pictures (GET /api/write/:id, 12 h)
+  imageIds: new Set()     // pictures this essay may show: ids seen in it, plus uploads this visit
 };
 
 const serverNow = () => Date.now() + WR.serverOffset;
@@ -99,15 +101,17 @@ const wsPanelAllowed = () => {
   const w = WR.data.assignment.writing; return w.mode !== 'locked' || w.panelBrowsing !== false;
 };
 
-// fetch with the session token (and the extension token inside the side panel)
-async function wapi(path, { method = 'GET', body, keepalive = false } = {}) {
-  const headers = {};
-  if (body) headers['Content-Type'] = 'application/json';
+// fetch with the session token (and the extension token inside the side panel).
+// raw: a Blob sent as it is (a picture), with its own type, instead of JSON.
+async function wapi(path, { method = 'GET', body, raw, headers: extra, keepalive = false } = {}) {
+  const headers = { ...(extra || {}) };
+  if (raw) headers['Content-Type'] = raw.type || 'application/octet-stream';
+  else if (body) headers['Content-Type'] = 'application/json';
   if (WR.token) headers['X-Visor-Session'] = WR.token;
   if (WR.extToken) headers['X-Visor-Token'] = WR.extToken;
   let r;
   try {
-    r = await fetch(path, { method, headers, body: body ? JSON.stringify(body) : undefined, credentials: 'same-origin', keepalive });
+    r = await fetch(path, { method, headers, body: raw || (body ? JSON.stringify(body) : undefined), credentials: 'same-origin', keepalive });
   } catch (e) {
     const err = new Error('You seem to be offline.'); err.network = true; throw err;
   }
@@ -413,9 +417,12 @@ function wsInstall() {
   const changed = () => { writerRefresh(); wsBeat(); };
   on(window, 'focus', changed);
   // Losing focus (often to the side panel) sends what's typed right away, so a
-  // lease handoff doesn't strand the last keystrokes
-  on(window, 'blur', () => { changed(); writerFlush(); });
-  on(document, 'visibilitychange', () => { changed(); if (document.visibilityState === 'hidden') writerFlush({ unload: false }); });
+  // lease handoff doesn't strand the last keystrokes. Only a page with edits
+  // of its own stores them now: with none, it must not touch the stored copy
+  // (another tab's, or writing waiting for Send / Start a session).
+  const keep = () => { if (WR.queue.length) writerPersistQueue(true); };
+  on(window, 'blur', () => { keep(); changed(); writerFlush(); });
+  on(document, 'visibilitychange', () => { keep(); changed(); if (document.visibilityState === 'hidden') writerFlush({ unload: false }); });
   on(document, 'fullscreenchange', changed);
   on(window, 'online', () => { if (WR.offline) { wsBeat(); writerFlush(); } });
   on(window, 'offline', () => { if (wsActive()) wsGoOffline(); });
@@ -425,7 +432,7 @@ function wsInstall() {
   // (wsBeat keeps a hidden copy of the side panel quiet while Chrome is in use)
   WR.timers.push(setInterval(wsBeat, 10000));
   WR.timers.push(setInterval(wsTick, 1000));
-  WR.timers.push(setInterval(() => writerFlush(), 1500));
+  WR.timers.push(setInterval(() => writerFlush(), WR_FLUSH_MS));
   WR.timers.push(setInterval(wsCheckExtension, 15000));
 }
 function wsUninstall() {

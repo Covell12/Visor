@@ -1,0 +1,121 @@
+/* Visor Classroom — teacher views of the document: review page, colour by source, replay, print.
+   Loaded last (after classroom.css), so the rules here win over the old
+   .wr-paper / .src-view / .rp-text / .print-essay ones. The document's own
+   typography (fonts, sizes, line spacing, headings, lists, tables, pictures,
+   the .src-* source patterns) comes from doc-format.css through the
+   .doc-style-mla / .doc-style-docs class on each page. */
+
+/* ---------- a page of the essay (Document view, Works Cited, replay) ---------- */
+.rv-canvas { padding: 4px 0 8px; }
+/* 8.5 in wide with 1 in margins: 6.5 in of text, as on the student's page (the frame is a shadow, so it takes no width) */
+.rv-page { background: #fff; max-width: 8.5in; margin: 0 auto; padding: 1in; border-radius: 2px; box-shadow: 0 0 0 1px #e3e7ea, 0 1px 3px rgba(60,64,67,.12), 0 2px 10px rgba(60,64,67,.08); color: #000; overflow-wrap: break-word; }
+.rv-page.rv-essay { min-height: 11in; }
+.rv-page + .rv-page { margin-top: 20px; }
+/* The Quill inside a page: no frame, no padding, the page scrolls with the window */
+.rv-page .ql-container.ql-snow, .rv-doc .ql-container.ql-snow { border: 0; font-size: inherit; }
+.rv-page .ql-editor, .rv-doc .ql-editor { padding: 0; height: auto; min-height: 0; overflow: visible; color: #000; cursor: text; }
+.rv-page .ql-toolbar, .rv-doc .ql-toolbar { display: none; }
+@media (max-width: 900px) { .rv-page { padding: .6in .5in; } .rv-page.rv-essay { min-height: 0; } }
+@media (max-width: 560px) { .rv-page { padding: 28px 18px; } }
+
+/* ---------- Works Cited: its own page, in the document style ---------- */
+.rv-works h2 { margin: 0; font-family: inherit; font-size: inherit; font-weight: normal; text-align: center; color: #000; }
+.rv-bib { list-style: none; margin: 0; padding: 0; }
+.rv-bib li { display: block; padding: 0; margin: 0; }
+.rv-bib-text { display: block; padding-left: .5in; text-indent: -.5in; overflow-wrap: anywhere; }
+.rv-works.doc-style-mla, .doc-style-mla .rv-works { font-family: 'Times New Roman', Tinos, Times, serif; font-size: 12pt; line-height: 2; }
+.rv-works.doc-style-docs, .doc-style-docs .rv-works { font-family: Arial, Arimo, Helvetica, sans-serif; font-size: 11pt; line-height: 1.15; }
+.rv-works.doc-style-docs h2, .doc-style-docs .rv-works h2 { margin-bottom: 10pt; }
+.rv-works.doc-style-docs .rv-bib li, .doc-style-docs .rv-works .rv-bib li { margin-bottom: 8pt; }
+/* The teacher's hint under an entry (not part of the student's page, never printed) */
+.rv-check { display: inline-block; margin: 2px 0 6px .5in; border: 0; background: var(--amber-soft); color: #9a6212; border-radius: 999px; padding: 3px 10px; font: 700 12px/1.4 var(--font); text-indent: 0; }
+.rv-check::before { content: "⚠ "; }
+
+/* ---------- colour by source ---------- */
+.src-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12.5px; }
+.src-key { display: inline-flex; align-items: center; gap: 6px; padding: 1px 4px; border-radius: 4px; }
+.src-key i { width: 12px; height: 12px; border-radius: 3px; display: inline-block; border: 1px solid var(--line); background: #fff; }
+.src-key.src-typed i { background: var(--rp-typed); }
+.src-key.src-image i { background: var(--rp-image); }
+.src-bar { display: flex; height: 22px; border-radius: 999px; overflow: hidden; background: var(--surface); }
+.src-bar i { display: block; height: 100%; }
+.src-bar-typed { background: var(--rp-typed); }
+.src-bar-pasted-research { background: var(--rp-research); }
+.src-bar-pasted-outside { background: repeating-linear-gradient(135deg, var(--rp-outside) 0 6px, #f0b75e 6px 12px); }
+.src-bar-pasted-internal { background: var(--rp-internal); }
+.src-bar-cited { background: var(--rp-cited); }
+.src-bar-template { background: var(--rp-template); }
+.src-bar-other { background: repeating-linear-gradient(90deg, var(--rp-other) 0 4px, #f2a5a2 4px 8px); }
+.src-bar-image { background: var(--rp-image); }
+/* The legend's Image key: the outline the pictures get, around a small swatch */
+.src-key.src-image { outline-width: 1.5px; }
+
+/* ---------- Process tab ---------- */
+.rv-quote { white-space: pre-line; overflow-wrap: anywhere; }
+
+/* ---------- replay ---------- */
+/* The paper scrolls; the page inside is as wide as the student's (6.5 in of text) */
+.rp .rp-paper { padding: .6in 20px; }
+.rp .rp-page { position: relative; width: 6.5in; max-width: 100%; margin: 0 auto; }
+.rp .rp-page .ql-editor { cursor: default; }
+/* A long essay is still being prepared: its keyframes built, then the page drawn (replay-web.js rpBuildLoop) */
+.rp .rp-prep { display: none; }
+.rp.rp-busy .rp-prep { display: flex; align-items: center; justify-content: center; gap: 10px; min-height: 40vh; color: var(--ink-2); font-size: 14px; }
+.rp.rp-busy .rp-page { display: none; }
+.rp.rp-busy .rp-transport { opacity: .6; }
+.rp.rp-busy .rp-scrub { cursor: default; }
+.rp-play:disabled, .rp-mini:disabled { cursor: default; }
+@media (max-width: 900px) { .rp .rp-paper { padding: 28px 22px; } }
+/* Each source's colour, for the glow on new text and the legend */
+.rp { --c: var(--rp-typed); }
+.rp .src-typed { --c: var(--rp-typed); }
+.rp .src-pasted-research { --c: var(--rp-research); }
+.rp .src-pasted-outside { --c: var(--rp-outside); }
+.rp .src-pasted-internal { --c: var(--rp-internal); }
+.rp .src-cited { --c: var(--rp-cited); }
+.rp .src-template { --c: var(--rp-template); }
+.rp .src-other { --c: var(--rp-other); }
+.rp .src-image { --c: var(--rp-image); }
+.rp .rp-legend .src-key i { width: 10px; height: 10px; background: var(--c); border: 0; }
+/* Text that just arrived (format rpfresh: class rp-fresh, or rp-glow for a big paste) */
+.rp .rp-fresh { animation: rv-rp-fresh .6s ease-out; }
+.rp .rp-glow { animation: rv-rp-glow .65s ease-out; border-radius: 3px; }
+.rp .rp-fresh img, .rp .rp-glow img { animation: rv-rp-img .65s ease-out; }
+@keyframes rv-rp-fresh { from { background-color: color-mix(in srgb, var(--c) 45%, transparent); } to { background-color: transparent; } }
+@keyframes rv-rp-glow { from { background-color: color-mix(in srgb, var(--c) 55%, transparent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--c) 85%, transparent); } to { background-color: color-mix(in srgb, var(--c) 10%, transparent); box-shadow: 0 0 0 2px transparent; } }
+@keyframes rv-rp-img { from { box-shadow: 0 0 0 5px color-mix(in srgb, var(--c) 60%, transparent); } to { box-shadow: 0 0 0 5px transparent; } }
+/* The caret at the last edit */
+.rp-cursor { position: absolute; left: 0; top: 0; width: 2px; background: var(--blue-deep); border-radius: 1px; pointer-events: none; z-index: 2; animation: rv-rp-blink 1.05s steps(2, start) infinite; }
+.rp-cursor[hidden] { display: none; }
+@keyframes rv-rp-blink { to { visibility: hidden; } }
+@media (prefers-reduced-motion: reduce) {
+  .rp .rp-fresh, .rp .rp-glow { animation: none; background-color: color-mix(in srgb, var(--c) 25%, transparent); }
+  .rp .rp-fresh img, .rp .rp-glow img, .rp-cursor { animation: none; }
+}
+
+/* ---------- print / save as PDF (rvPrint) ---------- */
+.print-area { display: none; }
+/* The page size and margins (letter, 1 in) are added by rvPrint for its own
+   print only, so other prints keep the browser's paper size and margins */
+@media print {
+  body.printing { background: #fff !important; }
+  body.printing #appView > .topbar, body.printing #appView > .shell, body.printing #routeView > .page, body.printing #modalRoot, body.printing #toastRoot, body.printing #authView { display: none !important; }
+  body.printing #routeView { min-height: 0; padding: 0; margin: 0; }
+  body.printing .print-area { display: block !important; }
+  /* Highlights, text colours, table borders and the source patterns print as they look */
+  body.printing .print-area, body.printing .print-area * { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+  .rv-print-essay { color: #000; }
+  .rv-print-essay.doc-style-mla { font-family: 'Times New Roman', Tinos, Times, serif; font-size: 12pt; line-height: 2; }
+  .rv-print-essay.doc-style-docs { font-family: Arial, Arimo, Helvetica, sans-serif; font-size: 11pt; line-height: 1.15; }
+  .rv-print-essay .rv-print-body.ql-editor { padding: 0; height: auto; overflow: visible; color: #000; white-space: pre-wrap; }
+  /* The heading block: name, class, assignment, date (MLA: double-spaced, plain) */
+  .rv-print-head { margin: 0; }
+  .doc-style-docs .rv-print-head { margin-bottom: 14pt; }
+  .doc-style-docs .rv-print-name { font-weight: 700; }
+  .rv-print-essay img { break-inside: avoid; }
+  .rv-print-essay .rv-works { break-before: page; margin: 0; padding: 0; }
+  .rv-print-summary { break-before: page; font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; font-size: 11pt; line-height: 1.5; color: #000; }
+  .rv-print-summary h1 { font-size: 16pt; margin: 0 0 8pt; }
+  .rv-print-summary h2 { font-size: 12.5pt; margin: 14pt 0 4pt; }
+  .rv-print-foot { margin-top: 18pt; color: #444; font-size: 9.5pt; }
+}

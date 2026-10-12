@@ -9,8 +9,8 @@
 
 'use strict';
 
-const SRC_LABEL = { typed: 'Typed', 'pasted-research': 'Pasted: copied from a page during a session', 'pasted-outside': 'Pasted from outside Visor’s view', 'pasted-internal': 'Moved or copied within the essay', cited: 'Citation', template: 'Teacher’s starter text', other: 'No keyboard or paste event' };
-const SRC_ORDER = ['typed', 'pasted-research', 'pasted-outside', 'pasted-internal', 'cited', 'template', 'other'];
+const SRC_LABEL = { typed: 'Typed', 'pasted-research': 'Pasted: copied from a page during a session', 'pasted-outside': 'Pasted from outside Visor’s view', 'pasted-internal': 'Moved or copied within the essay', cited: 'Citation', template: 'Teacher’s starter text', other: 'No keyboard or paste event', image: 'Image' };
+const SRC_ORDER = ['typed', 'pasted-research', 'pasted-outside', 'pasted-internal', 'cited', 'template', 'other', 'image'];
 let rv = null;
 
 VisorRouter.add('/review/:docId', async (el, { docId }, query) => {
@@ -47,48 +47,112 @@ function rvRender() {
   </div>
   <div id="printArea" class="print-area" aria-hidden="true"></div>`;
   const body = $('rvBody');
-  if (rv.tab === 'replay') { mountReplay(body, { docId: doc.id, sessions: rv.data.sessions, research: report.research.events }).then(stop => { rv.stop = stop; }); return; }
+  if (rv.tab === 'replay') {
+    const mine = rv, ticket = rv.replayTicket = (rv.replayTicket || 0) + 1;
+    // The report knows each paste's kind, including copies matched after the paste was saved
+    const pasteKinds = {};
+    for (const p of report.pastes || []) pasteKinds[p.n] = p.kind;
+    mountReplay(body, { docId: doc.id, sessions: rv.data.sessions, research: report.research.events, docStyle: a.writing?.docStyle, imageToken: rv.data.imageToken, pasteKinds })
+      .then(stop => { if (rv === mine && rv.tab === 'replay' && rv.replayTicket === ticket) rv.stop = stop; else stop(); });
+    return;
+  }
   if (rv.tab === 'process') return rvProcess(body);
   if (rv.tab === 'research') return rvResearch(body);
   if (rv.tab === 'feedback') return rvFeedback(body);
   rvDocument(body);
 }
 
-/* ---------- Document ---------- */
+/* ---------- Document ----------
+   The essay as the student sees it: the same document model (doc-format.js),
+   formats, tables and pictures, on a letter page in the assignment's document
+   style. "Color by source" is the same page with each character's source as
+   a class (Quill's "srccat" format). */
+const rvStyleClass = () => VisorDocFormat.styleClass(rv?.data?.assignment?.writing?.docStyle);
+// Stored text as plain words: a picture's placeholder reads "[image]"
+const rvPlainText = s => String(s ?? '').replace(/\uFFFC/g, '[image]');
+// A picture's address: the review's image token, or the teacher's sign-in cookie
+function rvImageSrc(id) {
+  if (!id) return VisorDocFormat.TRANSPARENT_GIF;
+  const t = rv?.data?.imageToken;
+  return `/api/images/${id}${t ? `?t=${encodeURIComponent(t)}` : ''}`;
+}
 function rvDelta(doc) {
   const Delta = Quill.import('delta');
-  let d = new Delta().insert(doc.text + '\n');
-  for (const r of doc.formats || []) d = d.compose(new Delta().retain(r.at).retain(r.len, r.attrs));
+  return new Delta(VisorDocFormat.docToDelta(doc.text || '', doc.formats || [], { imageSrc: rvImageSrc }));
+}
+// Where each character came from, as a delta of retains to compose on top of
+// the document: survival runs [{at, len, c}] over the final text. Line breaks
+// carry no inline class, so they're skipped.
+function rvSourceDelta(text, runs) {
+  const Delta = Quill.import('delta');
+  const d = new Delta();
+  let pos = 0;
+  for (const r of runs || []) {
+    const start = Math.max(pos, r.at), end = Math.min(text.length, r.at + r.len);
+    if (end <= start) continue;
+    if (start > pos) d.retain(start - pos);
+    const c = VisorDocFormat.SRC_CATEGORIES.includes(r.c) ? r.c : 'typed';
+    let i = start;
+    while (i < end) {
+      let j = i;
+      if (text.charCodeAt(i) === 10) { while (j < end && text.charCodeAt(j) === 10) j++; d.retain(j - i); }
+      else { while (j < end && text.charCodeAt(j) !== 10) j++; d.retain(j - i, { srccat: c }); }
+      i = j;
+    }
+    pos = end;
+  }
   return d;
 }
+// A read-only Quill that knows every format the documents use
+function rvReadOnlyQuill(el, extra = []) {
+  VisorDocFormat.registerQuill(Quill);
+  return new Quill(el, { theme: 'snow', readOnly: true, formats: VisorDocFormat.QUILL_FORMATS.concat(extra), modules: { toolbar: false } });
+}
+// The essay's HTML for printing (a detached Quill, so it matches the page)
 function rvEssayHtml(doc) {
   const div = document.createElement('div');
-  const q = new Quill(div, { readOnly: true, formats: ['bold', 'italic', 'underline', 'header', 'list'], modules: { toolbar: false } });
+  VisorDocFormat.registerQuill(Quill);
+  const q = new Quill(div, { readOnly: true, formats: VisorDocFormat.QUILL_FORMATS, modules: { toolbar: false } });
   q.setContents(rvDelta(doc), 'silent');
   return q.root.innerHTML;
 }
-function rvBibHtml() {
+function rvBibHtml({ print = false } = {}) {
   const { doc, assignment: a } = rv.data;
   const bib = VisorCiteFormat.bibliography(doc.sources || [], a.writing?.citationStyle || 'mla');
-  return bib.items.length ? `<section class="wr-works"><h2>${esc(bib.heading)}</h2><ol class="wr-bib">${bib.items.map(i => `<li><span class="wr-bib-text">${i.html}</span>${i.source.check?.length ? `<span class="chip-check" title="The student should check this source">Check: ${esc(i.source.check.join(', '))}</span>` : ''}</li>`).join('')}</ol></section>` : '';
+  if (!bib.items.length) return '';
+  const items = bib.items.map(i => `<li><span class="rv-bib-text">${i.html}</span>${!print && i.source.check?.length ? `<span class="rv-check" title="The student should check this source">Check: ${esc(i.source.check.join(', '))}</span>` : ''}</li>`).join('');
+  return `<section class="rv-works ${print ? '' : `rv-page ${rvStyleClass()}`}" aria-label="${esc(bib.heading)}"><h2>${esc(bib.heading)}</h2><ol class="rv-bib">${items}</ol></section>`;
+}
+// The legend: each source's share of the text, and pictures as a count
+function rvLegend(surv) {
+  const keys = SRC_ORDER.filter(k => k !== 'image' && surv.chars?.[k]).map(k => `<span class="src-key src-${k}"><i></i>${esc(SRC_LABEL[k])} · ${surv.pct?.[k] ?? 0}%</span>`);
+  if (surv.images) keys.push(`<span class="src-key src-image" title="${esc(vcPlural(surv.images, 'image'))} in the essay"><i></i>${esc(SRC_LABEL.image)} · ${surv.images}</span>`);
+  return `<div class="src-legend" aria-label="Legend">${keys.join('')}</div>`;
 }
 function rvDocument(body) {
   const { doc, report } = rv.data;
+  const surv = report.survival || {};
   body.innerHTML = `<div class="rv-doc-tools">
       <button class="btn btn-ghost btn-sm" aria-pressed="${rv.colored}" onclick="rv.colored=!rv.colored;rvDocument($('rvBody'))">${rv.colored ? 'Hide sources' : 'Color by source'}</button>
-      ${rv.colored ? `<div class="src-legend" aria-label="Legend">${SRC_ORDER.filter(k => report.survival.chars[k]).map(k => `<span class="src-key src-${k}"><i></i>${esc(SRC_LABEL[k])} · ${report.survival.pct[k]}%</span>`).join('')}</div>` : ''}
+      ${rv.colored ? rvLegend(surv) : ''}
     </div>
-    <div class="wr-paper rv-paper">${rv.colored ? `<div class="src-view">${rvSourceSpans(doc.text, report.survival.runs)}</div>` : '<div id="rvQuill"></div>'}</div>
-    ${rvBibHtml()}`;
-  if (!rv.colored) {
-    const q = new Quill('#rvQuill', { theme: 'snow', readOnly: true, formats: ['bold', 'italic', 'underline', 'header', 'list'], modules: { toolbar: false } });
-    q.setContents(rvDelta(doc), 'silent');
-  }
+    <div class="rv-canvas">
+      <div class="rv-page rv-essay ${rvStyleClass()}${rv.colored ? ' rv-colored' : ''}"><div id="rvQuill"></div></div>
+      ${rvBibHtml()}
+    </div>`;
+  const q = rvReadOnlyQuill($('rvQuill'), rv.colored ? ['srccat'] : []);
+  let d = rvDelta(doc);
+  if (rv.colored) d = d.compose(rvSourceDelta(doc.text || '', surv.runs));
+  q.setContents(d, 'silent');
+  rv.quill = q;
+  // Color isn't the only signal: a pattern for each source, and its name on hover
+  if (rv.colored) q.root.addEventListener('mouseover', rvSourceTitle);
 }
-// Each run of the final text marked with where it came from: color plus a
-// pattern (underline style) and a tooltip, so color isn't the only signal.
-function rvSourceSpans(text, runs) {
-  return runs.map(r => `<span class="src-${r.c}" title="${esc(SRC_LABEL[r.c])}">${esc(text.slice(r.at, r.at + r.len))}</span>`).join('').replace(/\n/g, '<br>');
+function rvSourceTitle(e) {
+  const el = e.target.closest?.('[class*="src-"]');
+  if (!el || el.title || !this.contains(el)) return;
+  const c = [...el.classList].find(n => n.startsWith('src-') && n !== 'src-cat');
+  if (c && SRC_LABEL[c.slice(4)]) el.title = SRC_LABEL[c.slice(4)];
 }
 
 /* ---------- Process ---------- */
@@ -96,6 +160,8 @@ function rvProcess(body) {
   const { report } = rv.data;
   const t = report.totals, ty = report.typing;
   const surv = report.survival;
+  // Pictures aren't text, so they're a count, not a share of the characters
+  const imagesRow = surv.images ? `<tr><td><span class="src-key src-image"><i></i>${esc(SRC_LABEL.image)}</span></td><td class="mono">—</td><td class="mono muted">${esc(vcPlural(surv.images, 'image'))}</td></tr>` : '';
   const bar = SRC_ORDER.filter(k => surv.chars[k]).map(k => `<i class="src-bar-${k}" style="width:${(100 * surv.chars[k] / Math.max(1, surv.total)).toFixed(2)}%" title="${esc(SRC_LABEL[k])}: ${surv.pct[k]}%"></i>`).join('');
   body.innerHTML = `
     <div class="card card-pad rv-notes">
@@ -108,8 +174,8 @@ function rvProcess(body) {
     </div>
     <h3 class="section-title rv-h">How the final text arrived</h3>
     <div class="card card-pad"><div class="src-bar" role="img" aria-label="${esc(SRC_ORDER.filter(k => surv.chars[k]).map(k => `${SRC_LABEL[k]} ${surv.pct[k]}%`).join(', '))}">${bar}</div>
-      <table class="rv-table"><tbody>${SRC_ORDER.map(k => `<tr><td><span class="src-key src-${k}"><i></i>${esc(SRC_LABEL[k])}</span></td><td class="mono">${surv.pct[k]}%</td><td class="mono muted">${(surv.chars[k] || 0).toLocaleString()} characters</td></tr>`).join('')}</tbody></table>
-      <div class="tiny muted">Characters still in the final essay, not counting spaces.</div></div>
+      <table class="rv-table"><tbody>${SRC_ORDER.filter(k => k !== 'image').map(k => `<tr><td><span class="src-key src-${k}"><i></i>${esc(SRC_LABEL[k])}</span></td><td class="mono">${surv.pct[k] ?? 0}%</td><td class="mono muted">${(surv.chars[k] || 0).toLocaleString()} characters</td></tr>`).join('')}${imagesRow}</tbody></table>
+      <div class="tiny muted">Characters still in the final essay, not counting spaces${surv.images ? ' or pictures' : ''}.</div></div>
     <h3 class="section-title rv-h">Sessions</h3>
     <div class="card"><table class="roster"><thead><tr><th>#</th><th>Started</th><th>Length</th><th>Active</th><th>Away</th><th>Side panel research</th><th>Typing</th><th>Ended</th></tr></thead><tbody>
       ${report.sessions.map(s => `<tr><td>${s.n}</td><td class="small">${esc(vcDateTime(s.startedAt))}</td><td class="mono">${vcDur(s.durationMs)}</td><td class="mono">${vcDur(s.activeMs)}</td>
@@ -123,7 +189,7 @@ function rvProcess(body) {
         <span class="mono small">${p.len.toLocaleString()} characters</span><span class="tiny muted">${esc(vcDateTime(new Date(p.t).toISOString()))}</span>
         <span class="tiny muted">${p.survivedChars ? `${Math.round(100 * p.survivedChars / p.len)}% still in the essay` : 'since deleted'}</span></div>
       ${p.origin ? `<div class="small">From <a href="${esc(p.origin.url)}" target="_blank" rel="noopener noreferrer">${esc(p.origin.title || p.origin.url)}</a>, copied ${esc(vcTime(p.origin.copiedAt))}</div>` : ''}
-      <blockquote class="rv-quote">${esc(p.preview)}${p.len > 140 ? '…' : ''}</blockquote></div>`).join('')}</div>` : '<div class="muted small">No pastes.</div>'}
+      <blockquote class="rv-quote">${esc(rvPlainText(p.preview).replace(/^\s*\n|\n\s*$/g, ''))}${p.len > 140 ? '…' : ''}</blockquote></div>`).join('')}</div>` : '<div class="muted small">No pastes.</div>'}
     <h3 class="section-title rv-h">Typing</h3>
     <div class="card card-pad small">Overall ${ty.wpm ? `<b>${ty.wpm} wpm</b>` : 'not enough typing to measure'}${ty.perSession.filter(s => s.wpm).length > 1 ? ` · by session: ${ty.perSession.filter(s => s.wpm).map(s => `${s.n}: ${s.wpm}`).join(', ')}` : ''} ·
       ${ty.bursts.count} stretches of continuous typing (typical ${Math.round(ty.bursts.medianChars || 0)} characters, longest ${ty.bursts.longestChars.toLocaleString()}) ·
@@ -196,25 +262,63 @@ function rvPrintDialog() {
   openModal({ title: 'Print or save as PDF', sub: 'Uses your browser’s print dialog. Choose “Save as PDF” there for a file.', body: `<label class="check-row"><input id="prSummary" type="checkbox" checked /> <span>Add a process summary page (notes for the teacher, sessions, how the text arrived)</span></label>`,
     footer: `<button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="rvPrint($('prSummary').checked)">Print</button>` });
 }
-function rvPrint(withSummary) {
+// The essay on letter pages with 1 in margins, in its document style
+// (review-doc.css), then Works Cited on a new page, then the optional summary.
+let rvPrinting = false;
+async function rvPrint(withSummary) {
+  if (!rv || rvPrinting) return;
+  const mine = rv;
   const { doc, student, assignment: a, class: cls, report } = rv.data;
   closeModal();
   const t = report.totals, surv = report.survival;
-  $('printArea').innerHTML = `<article class="print-essay">
-      <header><div class="print-name">${esc(student.name)}</div><div>${esc(cls.name)}</div><div>${esc(a.title)}</div><div>${doc.submittedAt ? esc(new Date(doc.submittedAt).toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' })) : ''}</div></header>
-      <div class="ql-editor print-body">${rvEssayHtml(doc)}</div>
-      ${rvBibHtml()}
+  const area = $('printArea');
+  if (!area) return;
+  area.innerHTML = `<article class="rv-print-essay ${rvStyleClass()}">
+      <header class="rv-print-head"><div class="rv-print-name">${esc(student.name)}</div><div>${esc(cls.name)}</div><div>${esc(a.title)}</div><div>${doc.submittedAt ? esc(new Date(doc.submittedAt).toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' })) : ''}</div></header>
+      <div class="ql-editor rv-print-body">${rvEssayHtml(doc)}</div>
+      ${rvBibHtml({ print: true })}
     </article>
-    ${withSummary ? `<article class="print-summary">
+    ${withSummary ? `<article class="rv-print-summary">
       <h1>Writing process summary</h1>
       <p>${esc(student.name)} · ${esc(a.title)} · ${t.studentWords.toLocaleString()} words · ${t.sessions} session${t.sessions === 1 ? '' : 's'} · ${fmtMins(t.activeMs / 60000)} active · ${vcDur(t.awayMs)} away · ${t.pastes} paste${t.pastes === 1 ? '' : 's'}</p>
       <h2>Notes for the teacher</h2>${report.notes.length ? `<ul>${report.notes.map(n => `<li>${esc(n.text)}</li>`).join('')}</ul>` : '<p>Nothing stood out.</p>'}
-      <h2>How the final text arrived</h2><ul>${SRC_ORDER.filter(k => surv.chars[k]).map(k => `<li>${esc(SRC_LABEL[k])}: ${surv.pct[k]}%</li>`).join('')}</ul>
+      <h2>How the final text arrived</h2><ul>${SRC_ORDER.filter(k => k !== 'image' && surv.chars[k]).map(k => `<li>${esc(SRC_LABEL[k])}: ${surv.pct[k]}%</li>`).join('')}${surv.images ? `<li>${esc(vcPlural(surv.images, 'image'))}</li>` : ''}</ul>
       <h2>Sessions</h2><ul>${report.sessions.map(s => `<li>${esc(vcDateTime(s.startedAt))}: ${vcDur(s.durationMs)}, ${vcDur(s.activeMs)} active, ${vcDur(s.awayMs)} away${s.wpm ? `, ${s.wpm} wpm` : ''}</li>`).join('')}</ul>
-      <p class="print-foot">Measured by Visor from the essay’s edit log and writing sessions. These are measurements to discuss, not a judgment.</p>
+      <p class="rv-print-foot">Measured by Visor from the essay’s edit log and writing sessions. These are measurements to discuss, not a judgment.</p>
     </article>` : ''}`;
+  rvPrinting = true;
+  try {
+    // Pictures must be loaded before the print dialog takes its snapshot
+    await rvImagesReady(area, 10000);
+  } catch (e) { /* print what there is */ }
+  if (rv !== mine || !area.isConnected) { rvPrinting = false; return; }
+  // Letter pages with 1 in margins, only for this print (a page rule can't be
+  // scoped to body.printing, so it's added now and taken out afterwards).
+  // MLA: "Lastname 1" in the top right corner of every page of the essay.
+  let pageRules = '@page { size: letter; margin: 1in; }';
+  if (rvStyleClass() === 'doc-style-mla') {
+    const last = String(student.lastName || String(student.name || '').trim().split(/\s+/).pop() || '').replace(/[\\"]/g, '\\$&').replace(/[\u0000-\u001f\u007f]/g, ' ');
+    pageRules += ` @page rvessay { @top-right { content: "${last} " counter(page); font-family: 'Times New Roman', Tinos, Times, serif; font-size: 12pt; } } body.printing .rv-print-essay.doc-style-mla { page: rvessay; }`;
+  }
+  const pageStyle = document.createElement('style');
+  pageStyle.textContent = `@media print { ${pageRules} }`;
+  document.head.appendChild(pageStyle);
   // Only this print shows the print layout; Cmd+P on its own prints the page as it is
   document.body.classList.add('printing');
-  window.addEventListener('afterprint', () => document.body.classList.remove('printing'), { once: true });
-  setTimeout(() => window.print(), 50);
+  const done = () => { document.body.classList.remove('printing'); pageStyle.remove(); };
+  window.addEventListener('afterprint', done, { once: true });
+  try { window.print(); } catch (e) { done(); }
+  rvPrinting = false;
+}
+// Every <img> in el loaded and decoded (broken ones are skipped), or the time is up
+function rvImagesReady(el, ms) {
+  const imgs = [...el.querySelectorAll('img')];
+  if (!imgs.length) return Promise.resolve();
+  const each = imgs.map(img => (img.decode ? img.decode() : Promise.resolve()).catch(() => new Promise(res => {
+    // decode() can reject before the bytes arrive; wait for load or error then
+    if (img.complete) return res();
+    img.addEventListener('load', res, { once: true });
+    img.addEventListener('error', res, { once: true });
+  })));
+  return Promise.race([Promise.all(each), new Promise(res => setTimeout(res, ms))]);
 }
