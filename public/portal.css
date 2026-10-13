@@ -175,7 +175,7 @@ a.side-stat:hover { background: var(--surface-2); }
 .course-bar-id:hover .course-bar-name { color: var(--cc-ink); }
 .course-bar .course-tabs { margin: 0; box-shadow: none; background: var(--surface-2); padding: 4px; }
 .course-bar .course-tabs a { padding: 6px 13px; font-size: 13.5px; }
-.course-bar .course-tabs a.active { background: #fff; box-shadow: 0 1px 3px rgba(18,48,59,0.10); }
+.course-bar .course-tabs a.active { background: #fff; box-shadow: 0 1px 3px rgba(18,48,59,0.14), 0 0 0 1px rgba(18,48,59,0.05); }
 
 .info-row { display: flex; gap: 6px; padding: 2px 0; }
 .info-row span:first-child { color: var(--ink-2); }
@@ -183,7 +183,7 @@ a.side-stat:hover { background: var(--surface-2); }
 .people-h .muted { font-size: 13px; font-weight: 600; }
 /* Add people from your school: the picker */
 .sp-top { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-.sp-tabs button[aria-selected="true"] { background: #fff; color: var(--ink); box-shadow: 0 1px 3px rgba(18,48,59,0.10); }
+.sp-tabs button[aria-selected="true"] { background: #fff; color: var(--ink); box-shadow: 0 1px 3px rgba(18,48,59,0.14), 0 0 0 1px rgba(18,48,59,0.05); }
 .sp-q { flex: 1; min-width: 200px; }
 .sp-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 14px 2px 6px; flex-wrap: wrap; }
 .sp-all { display: inline-flex; align-items: center; gap: 8px; font-size: 13.5px; font-weight: 600; cursor: pointer; }
@@ -406,6 +406,7 @@ a.mat-title:hover { color: var(--brand); }
   .topnav .courses-menu { position: fixed; top: 76px; left: 10px; right: 10px; width: auto; }
   .topbar .school, .user-btn > span:not(.avatar) { display: none; }
   .topnav > a, .topnav-btn { padding: 0 10px; font-size: 13.5px; }
+  .course-tabs { flex-wrap: wrap; width: auto; border-radius: 20px; }
   .course-tabs a { padding: 7px 12px; }
   .course-tabs a svg { display: none; }
   .mat-row { gap: 10px; padding: 10px 10px 10px 10px; }

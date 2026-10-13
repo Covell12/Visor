@@ -1039,11 +1039,11 @@ function membersHtml() {
           { label: 'Remove from class', icon: I.x, onclick: `removeClassStudent('${s.id}')` },
           { label: 'Delete their work in this class', icon: I.trash, onclick: `deleteStudentData('${s.id}')`, danger: true }] })}</td>
       </tr>`).join('')}</tbody></table></div>`
-    : `<div class="mat-list"><div class="mat-empty"><b>No students yet</b>${school ? `Add them from ${esc(school.name)} with <button type="button" class="linklike" onclick="openAddFromSchool('${c.id}')">Add people</button>, or give anyone else the class code <b class="mono" style="display:inline;">${esc(c.joinCode)}</b>.` : `Give students the class code <b class="mono" style="display:inline;">${esc(c.joinCode)}</b>, or use Add people to add them by email.`}</div></div>`;
+    : `<div class="mat-list"><div class="mat-empty"><b>No students yet</b>${c.archived ? 'This class is archived. Restore it in Settings to add students.' : school ? `Add them from ${esc(school.name)} with <button type="button" class="linklike" onclick="openAddFromSchool('${c.id}')">Add people</button>, or give anyone else the class code <b class="mono" style="display:inline;">${esc(c.joinCode)}</b>.` : `Give students the class code <b class="mono" style="display:inline;">${esc(c.joinCode)}</b>, or use Add people to add them by email.`}</div></div>`;
   const invites = (c.pendingInvites || []).length ? `<h2 class="section-title people-h">Invited, not signed up yet</h2>
     <div class="card list-card">${c.pendingInvites.map(i => `<div class="list-row"><span class="grow mono small">${esc(i.email)}</span><span class="tiny muted">invited ${esc(timeAgo(i.invitedAt))}</span><button class="btn-icon" aria-label="Cancel invite for ${esc(i.email)}" data-email="${esc(i.email)}" onclick="removeInvite(this.dataset.email)">${I.x}</button></div>`).join('')}</div>
     <div class="tiny muted" style="margin-top:6px;">They join this class automatically when they create their Visor account with that email.</div>` : '';
-  const codeLine = `class code <b class="mono">${esc(c.joinCode)}</b> · ${c.joinOpen ? 'joining with the code is open' : 'joining with the code is closed (students you add still join)'}`;
+  const codeLine = `class code <b class="mono">${esc(c.joinCode)}</b> · ${c.archived ? 'the class is archived, so the code doesn’t work' : c.joinOpen ? 'joining with the code is open' : 'joining with the code is closed (students you add still join)'}`;
   return `${courseHead(c, 'People', { actions, sub: school ? `Add people from ${esc(school.name)}. For anyone else: ${codeLine}` : codeLine.replace(/^c/, 'C') })}
     <h2 class="section-title people-h" style="margin-top:0;">Teachers <span class="muted">${teachers.length}</span></h2>
     ${teacherRows}

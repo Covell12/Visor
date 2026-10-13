@@ -144,7 +144,7 @@
 .as-win { display: grid; grid-template-columns: auto minmax(0, 210px); gap: 6px 10px; align-items: center; font-size: 13px; color: var(--ink-2); }
 .as-sum { font-size: 13.5px; color: var(--ink); min-width: 0; overflow-wrap: anywhere; }
 .as-edit { font-size: 13px; }
-.as-seg button[aria-checked="true"] { background: #fff; color: var(--ink); box-shadow: 0 1px 3px rgba(18,48,59,0.10); }
+.as-seg button[aria-checked="true"] { background: var(--brand); color: #fff; box-shadow: 0 1px 2px rgba(14,106,136,0.25); }
 .as-card .switch { cursor: pointer; }
 .as-card .switch:disabled { cursor: not-allowed; opacity: .55; }
 .as-card .switch:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }

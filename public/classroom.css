@@ -262,7 +262,7 @@ html:has(body.writing), body.writing { scroll-padding-top: calc(var(--dx-sticky-
 .wr-works-add { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
 /* The source dialog: from a link, the details, or written */
 .src-tabs { margin-bottom: 16px; }
-.src-tabs button[aria-selected="true"] { background: #fff; color: var(--ink); box-shadow: 0 1px 3px rgba(18,48,59,0.10); }
+.src-tabs button[aria-selected="true"] { background: #fff; color: var(--ink); box-shadow: 0 1px 3px rgba(18,48,59,0.14), 0 0 0 1px rgba(18,48,59,0.05); }
 .src-pane { display: none; }
 .src-pane.on { display: block; animation: vxPaneIn .2s var(--ease, ease); }
 @keyframes vxPaneIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
@@ -386,7 +386,7 @@ html:has(body.writing), body.writing { scroll-padding-top: calc(var(--dx-sticky-
 .seg { display: inline-flex; flex-wrap: wrap; gap: 2px; background: #E3ECF0; border: 0; border-radius: var(--r-pill); padding: 3px; }
 .seg button { border: 0; background: transparent; border-radius: var(--r-pill); padding: 6px 14px; font-size: 13px; font-weight: 600; color: var(--ink-2); transition: background-color .15s, color .15s, box-shadow .15s; }
 .seg button:hover { color: var(--ink); }
-.seg button[aria-pressed="true"] { background: #fff; color: var(--ink); box-shadow: 0 1px 3px rgba(18,48,59,0.10); }
+.seg button[aria-pressed="true"] { background: #fff; color: var(--ink); box-shadow: 0 1px 3px rgba(18,48,59,0.14), 0 0 0 1px rgba(18,48,59,0.05); }
 
 /* ---------- live board ---------- */
 .live-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }

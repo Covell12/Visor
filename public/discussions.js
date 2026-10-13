@@ -215,7 +215,7 @@ function discAnalysisHtml(an, d) {
   const max = Math.max(1, ...m.students.map(s => s.talkSec));
   const nameOf = k => m.follows.people.find(p => p.key === k)?.name || k;
   const keys = m.follows.people.map(p => p.key);
-  const matrix = keys.length > 1 ? `<div class="hb-wrap"><table class="hb follows"><thead><tr><th>Spoke…</th>${keys.map(k => `<th>then ${esc(nameOf(k).split(' ')[0])}</th>`).join('')}</tr></thead>
+  const matrix = keys.length > 1 ? `<div class="hb-wrap"><table class="hb follows"><thead><tr><th>Spoke…</th>${keys.map(k => `<th>Then ${esc(nameOf(k).split(' ')[0])}</th>`).join('')}</tr></thead>
     <tbody>${keys.map(a => `<tr><th scope="row">${esc(nameOf(a))}</th>${keys.map(b => `<td class="mono">${a === b ? '—' : (m.follows.counts[a]?.[b] || '')}</td>`).join('')}</tr>`).join('')}</tbody></table></div>` : '';
   const ai = an.ai;
   return `<div class="card card-pad rise" style="margin:14px 0;">
