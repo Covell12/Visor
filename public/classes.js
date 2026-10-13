@@ -181,7 +181,16 @@ function courseInitials(name) {
 // payloads only have `teacher`
 const teachersOf = c => (c?.teachers?.length ? c.teachers : c?.teacher ? [{ ...c.teacher, owner: true }] : []);
 const teacherNames = c => teachersOf(c).map(t => (t.id === me?.id ? 'You' : t.name)).join(', ');
-const courseArt = (c, extra = '', tag = 'div', attrs = '') => `<${tag} class="course-art cc-${courseColor(c)} pat-${coursePattern(c)} ${extra}" ${attrs}><span class="course-initials" aria-hidden="true">${esc(courseInitials(c?.name))}</span></${tag}>`;
+// The banner: the class colour with its lens art, or a background the
+// teachers chose (one of Visor's designs, or their own picture, centred at
+// pos% down; the colour stays underneath while the picture loads)
+const BG_NAME = { sunrise: 'Sunrise', ocean: 'Ocean', meadow: 'Meadow', night: 'Night sky', chalkboard: 'Chalkboard', blueprint: 'Blueprint', library: 'Library', aurora: 'Aurora' };
+const courseArt = (c, extra = '', tag = 'div', attrs = '') => {
+  const b = c?.background;
+  const bg = b?.kind === 'preset' && BG_NAME[b.preset] ? ` has-bg bg-${b.preset}` : b?.kind === 'upload' && b.url ? ' has-bg bg-photo' : '';
+  const style = bg === ' has-bg bg-photo' ? ` style="--bg-img:url('${esc(b.url)}');--bg-pos:${Math.min(100, Math.max(0, Number(b.pos) || 0))}%"` : '';
+  return `<${tag} class="course-art cc-${courseColor(c)} pat-${coursePattern(c)}${bg} ${extra}"${style} ${attrs}><span class="course-initials" aria-hidden="true">${esc(courseInitials(c?.name))}</span></${tag}>`;
+};
 
 /* ---- signing out ----
    Every page keeps what it loaded (the class page draws a class it has seen
@@ -441,7 +450,7 @@ function courseSideHtml(c, active) {
   const link = (key, href, icon, label, count) => `<a href="${href}" data-link class="${active === key ? 'active' : ''}" ${active === key ? 'aria-current="page"' : ''}>${icon}<span>${label}</span>${count != null ? `<span class="count">${count}</span>` : ''}</a>`;
   const teachers = teachersOf(c);
   return `<div class="course-pic-wrap">${courseArt(c, 'course-pic', 'a', `href="/class/${c.id}" data-link aria-label="${esc(c.name)}: assignments"`)}
-      ${c.isTeacher ? `<button class="course-pic-edit" onclick="openCourseColor('${c.id}')" aria-label="Change the class colour" title="Change the class colour">${I.edit}</button>` : ''}</div>
+      ${c.isTeacher ? `<button class="course-pic-edit" onclick="openClassBanner('${c.id}')" aria-label="Change the banner" title="Change the banner">${I.edit}</button>` : ''}</div>
     <div class="side-name">${esc(c.name)}${c.archived ? ' <span class="pill pill-gray">Archived</span>' : ''}</div>
     <div class="side-sub">${c.isTeacher ? vcPlural(c.studentCount ?? c.students?.length ?? 0, 'student') : esc(teacherNames(c))}</div>
     <nav class="course-nav" aria-label="Class pages">
@@ -451,7 +460,10 @@ function courseSideHtml(c, active) {
       ${c.archived ? '' : link('calendar', `/calendar?class=${c.id}`, PI.cal, 'Calendar')}
       ${c.isTeacher ? link('settings', `/class/${c.id}?tab=settings`, I.gear, 'Settings') : ''}
     </nav>
-    ${c.isTeacher && c.joinCode ? `<div class="course-box"><div class="course-box-h">Class code</div>
+    ${c.isTeacher && me?.org && !c.archived ? `<div class="course-box"><div class="course-box-h">${esc(me.org.name)}</div>
+      <button type="button" class="btn btn-ghost btn-sm course-box-btn" onclick="openAddFromSchool('${c.id}')">${I.users}Add people from your school</button>
+      <div class="muted">Or share the class code, under People.</div></div>`
+    : c.isTeacher && c.joinCode ? `<div class="course-box"><div class="course-box-h">Class code</div>
       <div class="access-code"><span class="mono">${esc(c.joinCode)}</span><button class="btn-icon" onclick="copyText('${esc(c.joinCode)}','Class code copied')" aria-label="Copy the class code" title="Copy">${I.copy}</button></div>
       <div class="muted">${c.archived ? 'The class is archived, so the code doesn’t work' : c.joinOpen === false ? 'Joining is closed' : 'Students join with this code'}</div></div>` : ''}
     <div class="course-box"><div class="course-box-h">${teachers.length > 1 ? 'Teachers' : 'Teacher'}</div>
@@ -459,23 +471,118 @@ function courseSideHtml(c, active) {
     </div>`;
 }
 
-// The sidebar's pencil (and Settings): pick the course colour
-function openCourseColor(classId) {
+// The sidebar's pencil (and Settings): the class's banner. A background (the
+// class colour, one of Visor's designs, or a picture) and the colour, which
+// also marks the class's calendar events and stays under any picture.
+let bn = null; // { classId, c, color, bg: { kind: 'none'|'preset'|'upload'|'file', preset, pos, url, blob } }
+function openClassBanner(classId) {
   const c = cp?.cls?.id === classId ? cp.cls : ap?.data?.class?.id === classId ? ap.data.class : null;
   if (!c) return;
-  let picked = courseColor(c);
-  const preview = () => courseArt({ ...c, color: picked });
-  openModal({ title: 'Class colour', sub: 'Used for the class banner, its tile on Home and its events on the calendar. Everyone in the class sees it.',
-    body: `${swatchesHtml('ccPick', picked, false)}<div class="color-preview" id="ccPreview">${preview()}<span class="muted small">${esc(c.name)}</span></div>`,
-    footer: `<button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="ccSave">Save</button>` });
-  wireSwatches('ccPick', v => { picked = v; $('ccPreview').firstElementChild.outerHTML = preview(); });
-  $('ccSave').onclick = () => modalBusy(async () => {
-    try {
-      await api(`/api/classes/${classId}`, { method: 'PATCH', body: { color: picked } });
-      closeModal(); forgetCourses(); toast('Class colour saved');
-      VisorRouter.render();
-    } catch (e) { toast(e.message, 'err'); }
+  const b = c.background;
+  bn = { classId, c, color: courseColor(c), bg: b?.kind === 'preset' ? { kind: 'preset', preset: b.preset } : b?.kind === 'upload' ? { kind: 'upload', url: b.url, pos: b.pos ?? 50 } : { kind: 'none' } };
+  bn.was = JSON.stringify([bn.color, bn.bg]);
+  const tile = (key, label, art) => `<button type="button" role="radio" class="bn-tile" data-bg="${key}" aria-checked="false" aria-label="${esc(label)}">${art}<span class="bn-name">${esc(label)}</span></button>`;
+  openModal({ title: 'Class banner', sub: 'Everyone in the class sees it: on the class page, its tile on Home and the Classes menu.', wide: true,
+    body: `<div class="bn-preview" id="bnPreview"></div>
+      <div class="bn-k" id="bnBgLabel">Background</div>
+      <div class="bn-grid" role="radiogroup" aria-labelledby="bnBgLabel" id="bnGrid">
+        ${tile('none', 'Class colour', courseArt({ ...c, background: null, color: bn.color }, 'bn-art'))}
+        ${Object.entries(BG_NAME).map(([k, l]) => tile(k, l, courseArt({ ...c, background: { kind: 'preset', preset: k } }, 'bn-art'))).join('')}
+        <span id="bnPhotoTile"></span>
+        <button type="button" class="bn-tile bn-upload" id="bnUpload">${I.upload}<span class="bn-name">Upload a picture</span></button>
+        <input type="file" id="bnFile" accept="image/png,image/jpeg,image/webp" hidden />
+      </div>
+      <div class="bn-pos" id="bnPosWrap"><div class="bn-pos-in"><div class="bn-pos-pad">
+        <label for="bnPos" class="bn-k" style="margin:0;">Picture position</label>
+        <div class="bn-pos-row"><span class="tiny muted">Top</span><input type="range" id="bnPos" min="0" max="100" step="1" /><span class="tiny muted">Bottom</span></div>
+        <div class="hint">Choose which part of the picture shows. Wide pictures (about 3 to 1) fit best.</div>
+      </div></div></div>
+      <div class="bn-k" id="bnColorLabel">Colour <span class="label-note">also marks the class on the calendar</span></div>
+      ${swatchesHtml('bnColor', bn.color, false)}
+      <div id="bnErr" class="form-error hidden"></div>`,
+    footer: `<button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="bnSave">Save</button>` });
+  wireSwatches('bnColor', v => { bn.color = v; bnPaint(); });
+  $('bnGrid').addEventListener('click', e => {
+    const t = e.target.closest('[data-bg]'); if (!t) return;
+    const k = t.dataset.bg;
+    bn.bg = k === 'none' ? { kind: 'none' } : k === 'photo' ? bn.photo : { kind: 'preset', preset: k };
+    bnPaint();
   });
+  // Arrow keys move through the backgrounds, as in any radio group
+  $('bnGrid').addEventListener('keydown', e => {
+    if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key) || !e.target.matches('[data-bg]')) return;
+    e.preventDefault();
+    const all = [...$('bnGrid').querySelectorAll('[data-bg]')], i = all.indexOf(e.target);
+    const n = all[(i + (['ArrowRight', 'ArrowDown'].includes(e.key) ? 1 : -1) + all.length) % all.length];
+    n.click(); n.focus();
+  });
+  $('bnUpload').onclick = () => $('bnFile').click();
+  $('bnFile').onchange = () => { const f = $('bnFile').files[0]; $('bnFile').value = ''; if (f) bnPickFile(f); };
+  $('bnPos').addEventListener('input', e => { if (bn.bg.kind === 'upload' || bn.bg.kind === 'file') { bn.bg.pos = Number(e.target.value); bnPaint(true); } });
+  $('bnSave').onclick = () => modalBusy(bnSave);
+  // A picture already there gets its own tile
+  if (bn.bg.kind === 'upload') bn.photo = bn.bg;
+  bnPaint();
+}
+// Redraw the preview and the choices (light: just the picture's position, while dragging)
+function bnPaint(light) {
+  const b = bn.bg;
+  const shown = { ...bn.c, color: bn.color, background: b.kind === 'none' ? null : b.kind === 'preset' ? b : { kind: 'upload', url: b.url, pos: b.pos } };
+  if (light) { [$('bnPreview').firstElementChild, $('bnGrid').querySelector('[data-bg="photo"] .course-art')].forEach(art => art?.style.setProperty('--bg-pos', `${b.pos}%`)); return; }
+  $('bnPreview').innerHTML = courseArt(shown, 'bn-big') + `<div class="bn-cap"><b>${esc(bn.c.name)}</b><span>${esc(b.kind === 'none' ? 'Class colour' : b.kind === 'preset' ? BG_NAME[b.preset] : 'Your picture')}</span></div>`;
+  $('bnPhotoTile').outerHTML = bn.photo ? `<button type="button" role="radio" class="bn-tile" data-bg="photo" id="bnPhotoTile" aria-checked="false" aria-label="Your picture">${courseArt({ ...bn.c, background: { kind: 'upload', url: bn.photo.url, pos: bn.photo.pos } }, 'bn-art')}<span class="bn-name">Your picture</span></button>` : '<span id="bnPhotoTile"></span>';
+  // The colour tile follows the colour picked
+  const none = $('bnGrid').querySelector('[data-bg="none"] .course-art');
+  if (none) none.outerHTML = courseArt({ ...bn.c, background: null, color: bn.color }, 'bn-art');
+  const key = b.kind === 'none' ? 'none' : b.kind === 'preset' ? b.preset : 'photo';
+  $('bnGrid').querySelectorAll('[data-bg]').forEach(t => { const on = t.dataset.bg === key; t.setAttribute('aria-checked', String(on)); t.tabIndex = on ? 0 : -1; });
+  const photo = b.kind === 'upload' || b.kind === 'file';
+  $('bnPosWrap').classList.toggle('open', photo);
+  $('bnPosWrap').querySelector('.bn-pos-in').toggleAttribute('inert', !photo);
+  if (photo) $('bnPos').value = b.pos ?? 50;
+}
+// A picture from the computer: checked and shrunk here (at most 2000 pixels
+// wide, as a JPEG), and only uploaded on Save
+async function bnPickFile(file) {
+  formError('bnErr', '');
+  if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) return formError('bnErr', 'Use a PNG, JPEG or WebP picture.');
+  if (file.size > 30 * 1024 * 1024) return formError('bnErr', 'That picture is too large. Use one under 30 MB.');
+  try {
+    const bmp = await createImageBitmap(file);
+    const scale = Math.min(1, 2000 / bmp.width, 1400 / bmp.height);
+    const cv = document.createElement('canvas');
+    cv.width = Math.max(1, Math.round(bmp.width * scale)); cv.height = Math.max(1, Math.round(bmp.height * scale));
+    const g = cv.getContext('2d');
+    g.fillStyle = '#fff'; g.fillRect(0, 0, cv.width, cv.height); // (transparent PNGs on white)
+    g.drawImage(bmp, 0, 0, cv.width, cv.height);
+    bmp.close?.();
+    const blob = await new Promise(r => cv.toBlob(r, 'image/jpeg', 0.86));
+    if (!blob) throw new Error('shrink failed');
+    if (bn.photo?.kind === 'file') URL.revokeObjectURL(bn.photo.url);
+    bn.photo = { kind: 'file', blob, url: URL.createObjectURL(blob), pos: 50 };
+    bn.bg = bn.photo;
+    bnPaint();
+  } catch { formError('bnErr', 'Visor couldn’t read that picture. Try another one.'); }
+}
+async function bnSave() {
+  const { classId, c, bg } = bn;
+  if (JSON.stringify([bn.color, bg]) === bn.was) { closeModal(); return; }
+  const before = c.background;
+  try {
+    if (bn.color !== courseColor(c)) await api(`/api/classes/${classId}`, { method: 'PATCH', body: { color: bn.color } });
+    if (bg.kind === 'none' && before) await api(`/api/classes/${classId}/background`, { method: 'DELETE' });
+    if (bg.kind === 'preset' && !(before?.kind === 'preset' && before.preset === bg.preset)) await api(`/api/classes/${classId}/background`, { method: 'PUT', body: { preset: bg.preset } });
+    if (bg.kind === 'file') {
+      const r = await fetch(`/api/classes/${classId}/background`, { method: 'POST', headers: { 'Content-Type': 'image/jpeg' }, body: bg.blob });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || `Upload failed (${r.status})`);
+      if (bg.pos !== 50) await api(`/api/classes/${classId}/background`, { method: 'PUT', body: { pos: bg.pos } });
+    }
+    if (bg.kind === 'upload' && before?.kind === 'upload' && bg.pos !== before.pos) await api(`/api/classes/${classId}/background`, { method: 'PUT', body: { pos: bg.pos } });
+    if (bn.photo?.kind === 'file') URL.revokeObjectURL(bn.photo.url);
+    closeModal(); forgetCourses(); toast('Banner saved');
+    VisorRouter.render();
+  } catch (e) { formError('bnErr', e.message); }
 }
 // A row of colour buttons (radio group). withNone adds "no colour" first.
 function swatchesHtml(id, current, withNone) {
@@ -880,7 +987,10 @@ function membersHtml() {
   const acc = c.accommodations || {};
   const gcOk = !!CFG.classroomImport;
   const teachers = teachersOf(c);
+  const school = me?.org;
   const actions = ddHtml({ id: 'addMem', btnClass: 'btn btn-primary btn-sm', btn: `${I.plusSm}Add people ${PI.down}`, right: true, items: [
+    school ? { label: `From ${school.name}…`, icon: I.school, onclick: `openAddFromSchool('${c.id}')` }
+      : { label: 'From your school…', icon: I.school, disabled: true, note: 'choose your school in Profile settings' },
     { label: 'Add students by email…', icon: I.users, onclick: 'openAddMembers()' },
     { label: 'Add a teacher…', icon: I.school, onclick: 'openAddTeacher()' },
     { label: 'Import students from Google Classroom', icon: I.school, onclick: 'importFromClassroom()', disabled: !gcOk, note: gcOk ? '' : 'not set up' },
@@ -909,11 +1019,12 @@ function membersHtml() {
           { label: 'Remove from class', icon: I.x, onclick: `removeClassStudent('${s.id}')` },
           { label: 'Delete their work in this class', icon: I.trash, onclick: `deleteStudentData('${s.id}')`, danger: true }] })}</td>
       </tr>`).join('')}</tbody></table></div>`
-    : `<div class="mat-list"><div class="mat-empty"><b>No students yet</b>Give students the class code <b class="mono" style="display:inline;">${esc(c.joinCode)}</b>, or use Add people to add them by email.</div></div>`;
+    : `<div class="mat-list"><div class="mat-empty"><b>No students yet</b>${school ? `Add them from ${esc(school.name)} with <button type="button" class="linklike" onclick="openAddFromSchool('${c.id}')">Add people</button>, or give anyone else the class code <b class="mono" style="display:inline;">${esc(c.joinCode)}</b>.` : `Give students the class code <b class="mono" style="display:inline;">${esc(c.joinCode)}</b>, or use Add people to add them by email.`}</div></div>`;
   const invites = (c.pendingInvites || []).length ? `<h2 class="section-title people-h">Invited, not signed up yet</h2>
     <div class="card list-card">${c.pendingInvites.map(i => `<div class="list-row"><span class="grow mono small">${esc(i.email)}</span><span class="tiny muted">invited ${esc(timeAgo(i.invitedAt))}</span><button class="btn-icon" aria-label="Cancel invite for ${esc(i.email)}" data-email="${esc(i.email)}" onclick="removeInvite(this.dataset.email)">${I.x}</button></div>`).join('')}</div>
     <div class="tiny muted" style="margin-top:6px;">They join this class automatically when they create their Visor account with that email.</div>` : '';
-  return `${courseHead(c, 'People', { actions, sub: `Class code <b class="mono">${esc(c.joinCode)}</b> · ${c.joinOpen ? 'joining with the code is open' : 'joining with the code is closed (students you add by email still join)'}` })}
+  const codeLine = `class code <b class="mono">${esc(c.joinCode)}</b> · ${c.joinOpen ? 'joining with the code is open' : 'joining with the code is closed (students you add still join)'}`;
+  return `${courseHead(c, 'People', { actions, sub: school ? `Add people from ${esc(school.name)}. For anyone else: ${codeLine}` : codeLine.replace(/^c/, 'C') })}
     <h2 class="section-title people-h" style="margin-top:0;">Teachers <span class="muted">${teachers.length}</span></h2>
     ${teacherRows}
     <div class="tiny muted" style="margin-top:6px;">Co-teachers can do everything you can in this class, except delete it${c.isOwner ? '' : ' or remove other teachers'}.</div>
@@ -938,6 +1049,87 @@ function openAddTeacher() {
   $('atEmail').addEventListener('keydown', e => { if (e.key === 'Enter') go(); });
   setTimeout(() => $('atEmail')?.focus(), 50);
 }
+/* ---- Add people from your school ----
+   Everyone at the teacher's school (as each person chose it), students and
+   teachers on two tabs, with a search. Picks are kept across tabs and
+   searches; students join the class, teachers become co-teachers. */
+let sp = null; // { classId, role, q, picked: Map(id -> role), seq }
+function openAddFromSchool(classId) {
+  if (!me?.org) return toast('Choose your school in Profile settings first.', 'err');
+  const cls = cp?.cls?.id === classId ? cp.cls : ap?.data?.class?.id === classId ? ap.data.class : null;
+  sp = { classId, role: 'student', q: '', picked: new Map(), seq: 0, timer: 0 };
+  const tab = (k, label) => `<button type="button" role="tab" data-role="${k}" aria-selected="${k === 'student'}" tabindex="${k === 'student' ? 0 : -1}">${label}</button>`;
+  openModal({ title: `Add people from ${esc(me.org.name)}`, sub: `Students join ${cls ? esc(cls.name) : 'the class'} right away; teachers become co-teachers. Only people who chose ${esc(me.org.name)} as their school are listed.`, wide: true,
+    body: `<div class="sp-top"><div class="seg sp-tabs" role="tablist" aria-label="Who to show">${tab('student', 'Students')}${tab('teacher', 'Teachers')}</div>
+        <input id="spQ" class="input sp-q" type="search" placeholder="Search by name or email" aria-label="Search people at ${esc(me.org.name)}" autocomplete="off" /></div>
+      <div class="sp-bar"><label class="sp-all"><input type="checkbox" id="spAll" /> <span>Select everyone shown</span></label><span id="spShown" class="tiny muted" aria-live="polite"></span></div>
+      <div id="spList" class="sp-list" role="group" aria-label="People"><div class="sp-empty"><span class="spinner spinner-sm"></span></div></div>
+      <div id="spErr" class="form-error hidden"></div>`,
+    footer: `<button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="spGo" disabled>Add</button>` });
+  const body = $('modalBody');
+  const tabs = [...body.querySelectorAll('.sp-tabs [data-role]')];
+  const show = k => {
+    sp.role = k;
+    tabs.forEach(b => { const on = b.dataset.role === k; b.setAttribute('aria-selected', String(on)); b.tabIndex = on ? 0 : -1; });
+    spLoad();
+  };
+  tabs.forEach(b => b.addEventListener('click', () => show(b.dataset.role)));
+  body.querySelector('.sp-tabs').addEventListener('keydown', e => {
+    if (!['ArrowLeft', 'ArrowRight'].includes(e.key)) return;
+    e.preventDefault(); const n = tabs.find(b => b.dataset.role !== sp.role); show(n.dataset.role); n.focus();
+  });
+  $('spQ').addEventListener('input', () => { clearTimeout(sp.timer); sp.timer = setTimeout(() => { sp.q = $('spQ').value.trim(); spLoad(); }, 220); });
+  $('spQ').addEventListener('keydown', e => { if (e.key === 'Enter') e.preventDefault(); });
+  $('spAll').addEventListener('change', e => {
+    $('spList').querySelectorAll('input[type=checkbox]:not(:disabled)').forEach(cb => { cb.checked = e.target.checked; spPick(cb); });
+  });
+  $('spList').addEventListener('change', e => { if (e.target.matches('input[type=checkbox]')) { spPick(e.target); spSyncAll(); } });
+  $('spGo').onclick = () => modalBusy(spAdd);
+  spLoad();
+  setTimeout(() => $('spQ')?.focus(), 60);
+}
+async function spLoad() {
+  const seq = ++sp.seq, { classId, role, q } = sp;
+  formError('spErr', '');
+  try {
+    const r = await api(`/api/classes/${classId}/school-people?role=${role}&q=${encodeURIComponent(q)}`);
+    if (!sp || seq !== sp.seq || !$('spList')) return;
+    const who = role === 'teacher' ? 'teachers' : 'students';
+    const school = esc(r.school?.name || me.org.name);
+    $('spList').innerHTML = r.people.length ? r.people.map(p => `<label class="sp-row${p.inClass ? ' in' : ''}">
+        <input type="checkbox" value="${esc(p.id)}" data-role="${esc(p.role)}" ${p.inClass ? 'checked disabled' : sp.picked.has(p.id) ? 'checked' : ''} aria-label="${esc(p.name)}${p.inClass ? ', already in this class' : ''}" />
+        ${avatarHtml(p, 'avatar-sm')}<span class="sp-who"><b>${esc(p.name)}</b><span class="tiny muted">${esc(p.email)}</span></span>
+        ${p.inClass ? '<span class="pill pill-gray">In this class</span>' : ''}</label>`).join('')
+      : `<div class="sp-empty">${q ? `No ${who} at ${school} match “${esc(q)}”.` : role === 'teacher' ? `No other teachers at ${school} are on Visor yet.` : `No students at ${school} are on Visor yet. Students choose their school when they sign up; give them the class code instead.`}</div>`;
+    $('spShown').textContent = r.more ? `Showing the first ${r.people.length} of ${r.total.toLocaleString()}. Search to find others.` : r.total ? `${vcPlural(r.total, role === 'teacher' ? 'teacher' : 'student')}` : '';
+    spSyncAll();
+  } catch (e) { if (sp && seq === sp.seq) { $('spList').innerHTML = ''; formError('spErr', e.message); } }
+}
+function spPick(cb) {
+  if (cb.disabled) return;
+  if (cb.checked) sp.picked.set(cb.value, cb.dataset.role); else sp.picked.delete(cb.value);
+  const n = [...sp.picked.values()], st = n.filter(r => r === 'student').length, te = n.length - st;
+  const label = [st ? vcPlural(st, 'student') : '', te ? vcPlural(te, 'teacher') : ''].filter(Boolean).join(' and ');
+  $('spGo').disabled = !n.length;
+  $('spGo').textContent = n.length ? `Add ${label}` : 'Add';
+}
+function spSyncAll() {
+  const boxes = [...$('spList').querySelectorAll('input[type=checkbox]:not(:disabled)')], all = $('spAll');
+  all.disabled = !boxes.length;
+  all.checked = boxes.length > 0 && boxes.every(b => b.checked);
+  all.indeterminate = !all.checked && boxes.some(b => b.checked);
+}
+async function spAdd() {
+  const classId = sp.classId;
+  try {
+    const r = await api(`/api/classes/${classId}/school-people`, { method: 'POST', body: { userIds: [...sp.picked.keys()] } });
+    closeModal(); forgetCourses();
+    if (cp?.cls?.id === classId) { cp.cls = { ...cp.cls, ...r.class }; renderClassPage(); }
+    const parts = [r.students ? `${vcPlural(r.students, 'student')} added` : '', r.teachers ? `${vcPlural(r.teachers, 'co-teacher')} added` : '', r.skipped.length ? `${r.skipped.length} skipped (${[...new Set(r.skipped.map(x => x.why))].join(', ')})` : ''].filter(Boolean);
+    toast(parts.join(' · ') || 'Nobody new to add', r.students || r.teachers ? '' : 'err');
+  } catch (e) { formError('spErr', e.message); }
+}
+
 async function removeTeacher(id) {
   const t = teachersOf(cp.cls).find(x => x.id === id);
   if (!await confirmModal('Remove this teacher?', `${t?.name || 'They'} will no longer see ${cp.cls.name} or anything in it. Their announcements stay.`, { okLabel: 'Remove', danger: true })) return;
@@ -995,18 +1187,17 @@ async function saveAccommodation(id) {
 }
 
 /* ====================== settings (teacher) ====================== */
-let csColor = null;
 function classSettingsHtml() {
   const c = cp.cls;
-  csColor = courseColor(c);
-  setTimeout(() => wireSwatches('csColor', v => { csColor = v; const p = $('csPreview'); if (p) p.outerHTML = courseArt({ ...c, color: v }, '', 'div', 'id="csPreview"'); }), 0);
   return `${courseHead(c, 'Settings')}
   <div class="stack" style="max-width:680px;">
     <section class="card card-pad">
       <h2 class="section-title" style="font-size:16px;margin-bottom:14px;">Class details</h2>
       <div class="field"><label for="csName">Class name</label><input id="csName" class="input" value="${esc(c.name)}" maxlength="120" /></div>
-      <div class="field"><label>Colour</label>${swatchesHtml('csColor', csColor, false)}
-        <div class="color-preview">${courseArt(c, '', 'div', 'id="csPreview"')}<span class="hint">The class banner, its tile on Home and its calendar events.</span></div></div>
+      <div class="field"><label>Banner</label>
+        <div class="color-preview cs-banner">${courseArt(c, '', 'div', 'id="csPreview"')}<div><div class="small">${esc(c.background?.kind === 'preset' ? BG_NAME[c.background.preset] : c.background?.kind === 'upload' ? 'Your picture' : 'Class colour')} · ${esc(COLOR_NAME[courseColor(c)] || '')}</div>
+          <button type="button" class="btn btn-ghost btn-sm" style="margin-top:6px;" onclick="openClassBanner('${c.id}')">${I.edit}Change background and colour</button>
+          <div class="hint">On the class page, its tile on Home and the Classes menu. The colour also marks its calendar events.</div></div></div></div>
       <div class="field"><label for="csRetention">Keep research records for</label>
         <div style="display:flex;gap:8px;align-items:center;"><input id="csRetention" class="input" type="number" min="1" max="3650" value="${c.researchRetentionDays || 180}" style="max-width:120px;" /><span class="muted small">days</span></div>
         <div class="hint">Searches, pages and copies the extension recorded during writing sessions are deleted after this. Essays and their writing history are kept.</div></div>
@@ -1029,7 +1220,7 @@ function classSettingsHtml() {
     </section>`}
   </div>`;
 }
-function saveClassSettings() { classPatch({ name: $('csName').value, color: csColor, researchRetentionDays: Number($('csRetention').value) }, 'Saved'); }
+function saveClassSettings() { classPatch({ name: $('csName').value, researchRetentionDays: Number($('csRetention').value) }, 'Saved'); }
 async function deleteClass() {
   const confirmName = $('csConfirm').value.trim();
   if (confirmName !== cp.cls.name) return toast('Type the class name exactly to delete it.', 'err');

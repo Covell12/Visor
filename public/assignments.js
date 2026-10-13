@@ -485,33 +485,200 @@ function assignmentRightHtml() {
 function renderAssignmentOverview(body) {
   const { assignment: a } = ap.data;
   let settings = '';
-  if (a.type === 'writing') {
-    const w = a.writing;
-    const rows = [
-      ['Session', w.mode === 'locked' ? 'Locked (in class): Visor extension required, students kept to allowed sites' : 'Open (homework): recorded, not locked'],
-      ['Time limit', w.timeLimitMin ? `${w.timeLimitMin} minutes per student, across all their sessions (plus any extra time)` : 'None'],
-      ['Session window', w.windowStart || w.windowEnd ? `${w.windowStart ? vcDateTime(w.windowStart) : 'any time'} → ${w.windowEnd ? vcDateTime(w.windowEnd) : 'no end'}` : 'Any time'],
-      ['Pasting', { allow: 'Allowed, every paste recorded', 'internal-only': 'Only text copied from the same essay', block: 'Off' }[w.allowPaste]],
-      ['Research', w.researchTracking ? 'Recorded during sessions' : 'Not recorded'],
-      ['AI sites', `${w.blockAiSites ? 'Blocked' : 'Recorded, not blocked'} (${w.blockedSites.length} sites)`],
-      ['Allowed sites', w.mode === 'locked' ? (w.allowedSites.length ? w.allowedSites.join(', ') : 'Any site that isn’t blocked') : 'Not limited (open session)'],
-      ...(w.mode === 'locked' ? [['Side panel', w.panelBrowsing !== false ? 'Students can switch to it to research (blocked and AI sites stay blocked)' : 'Off: locked sessions stay in full screen']] : []),
-      // (with Works Cited off there are no citation tools, one-click or not)
-      ['Citations', `${STYLE_NAME[w.citationStyle]}${w.oneClickCite === false && w.worksCited !== 'off' ? ' · one-click citing off' : ''}`],
-      ['Works Cited', { panel: 'A side panel next to the essay (no Works Cited page)', off: 'Off: students write their own (no citation tools)' }[w.worksCited] || 'A page after the essay, built from the sources students cite'],
-      ['Document style', w.docStyle === 'docs' ? 'Docs default' : 'MLA essay'],
-      ['Length', w.minWords || w.maxWords ? `${w.minWords || 0}–${w.maxWords || '∞'} words` : 'Any'],
-      ['Starter text', w.templateText ? `${w.templateText.length.toLocaleString()} characters` : 'None'],
-      ['Time up', w.autoSubmitOnTimeUp ? 'Submits automatically' : 'Session ends; student submits'],
-      ['Pause grace', w.pauseGraceSec ? `${w.pauseGraceSec} seconds` : 'None: every time away is recorded']
-    ];
-    settings = `<h2 class="section-title" style="font-size:16px;margin:20px 0 10px;">Session settings</h2><div class="card settings-table">${rows.map(([k, v]) => `<div class="st-row"><div class="st-k">${k}</div><div class="st-v">${esc(v)}</div></div>`).join('')}</div>`;
-  }
+  if (a.type === 'writing') settings = asCardHtml(a.writing);
   if (a.type === 'discussion') settings = `<div class="card card-pad"><div class="kicker">Discussion</div><div>${a.discussion.date ? esc(vcDateTime(a.discussion.date)) : 'No date set'}</div><div class="small muted" style="margin-top:6px;">${a.discussion.shareOwnStats ? 'Students can see their own talk time and turns.' : 'Only you see the results.'}</div></div>`;
   body.innerHTML = `${!a.publishedAt ? `<div class="callout amber" style="margin-bottom:14px;">This assignment isn’t published. Students can’t see it until you publish it.</div>` : ''}
     ${instructionsHtml(a) || `<div class="card card-pad muted small">No instructions. ${a.type === 'discussion' ? 'Add a prompt' : 'Add some'} with Options → Edit.</div>`}
-    ${a.type === 'writing' ? `<p class="muted small" style="margin:12px 0 0;">${esc(ap.data.describe)}</p>` : ''}
+    ${a.type === 'writing' ? `<p class="muted small" id="asDescribe" style="margin:12px 0 0;">${esc(ap.data.describe)}</p>` : ''}
     ${settings}`;
+  if (a.type === 'writing') asWire();
+}
+
+/* ---- Session settings, edited in place ----
+   Each setting is a control that saves as soon as it changes: a PATCH with
+   just that setting (the server checks it and keeps the rest). Saves run one
+   at a time, in order. The server's answer is the truth: every control is set
+   from it afterwards, so a refused value goes back to what was saved. The
+   editor and the extension read these when a session starts (and the editor
+   when it loads), so students writing right now may not see a change until
+   their next session. */
+let asQueue = Promise.resolve();
+const AS_PASTE = { allow: 'Allowed (every paste is recorded)', 'internal-only': 'Only text copied from this same essay', block: 'Off' };
+const AS_WORKS = { page: 'A page after the essay', panel: 'A side panel next to the essay', off: 'Off: students write their own' };
+const AS_DOC = { mla: 'MLA essay (Times New Roman 12, double-spaced)', docs: 'Docs default (Arial 11, 1.15 spacing)' };
+const asLines = v => v.split(/[\n,]+/).map(x => x.trim()).filter(Boolean);
+
+function asCardHtml(w) {
+  const opts = (map, cur) => Object.entries(map).map(([v, l]) => `<option value="${v}" ${v === cur ? 'selected' : ''}>${esc(l)}</option>`).join('');
+  const sw = key => `<button type="button" class="switch" role="switch" aria-checked="false" data-key="${key}" aria-labelledby="asl-${key}"></button>`;
+  const num = (key, unit, attrs) => `<span class="as-num"><input class="input input-sm" type="number" data-key="${key}" aria-labelledby="asl-${key}" ${attrs} /><span>${unit}</span></span>`;
+  const row = (key, label, hint, control, more = '') => `<div class="as-row" data-row="${key}">
+      <div class="as-k"><div class="as-l" id="asl-${key}">${label}</div>${hint ? `<div class="as-h" data-hint="${key}">${hint}</div>` : ''}</div>
+      <div class="as-c">${control}<span class="as-status" aria-live="polite"></span></div>${more}</div>`;
+  const editor = (key, label, placeholder, extra = '') => `<div class="as-more" data-more="${key}"><div class="as-more-in"><div class="as-more-pad">
+      <textarea class="input ${key === 'templateText' ? '' : 'mono small'}" data-text="${key}" aria-label="${esc(label)}" placeholder="${esc(placeholder)}" ${key === 'templateText' ? 'maxlength="20000"' : ''}></textarea>
+      <div class="as-more-acts"><button type="button" class="btn btn-primary btn-sm" data-save="${key}">Save</button><button type="button" class="btn btn-ghost btn-sm" data-cancel="${key}">Cancel</button>${extra}</div></div></div></div>`;
+  const inProgress = (ap.data.submissions || []).some(s => s.status === 'in-progress');
+  const sec = t => `<div class="as-sec">${t}</div>`;
+  return `<section class="as-card card" id="asCard" aria-labelledby="asTitle">
+    <div class="as-top"><h2 class="section-title" id="asTitle">Session settings</h2><span class="as-saves">Changes save as you make them</span></div>
+    ${inProgress ? '<div class="as-note">Students already writing may not see a change until their next session.</div>' : ''}
+    ${sec('Session')}
+    ${row('mode', 'Session type', '', `<div class="seg as-seg" role="radiogroup" aria-labelledby="asl-mode"><button type="button" role="radio" data-v="locked">Locked</button><button type="button" role="radio" data-v="open">Open</button></div>`)}
+    ${row('timeLimitMin', 'Time limit', 'Per student, across all their sessions. Extra time from People is added.', num('timeLimitMin', 'minutes', 'min="1" max="600" placeholder="No limit"'))}
+    ${row('window', 'Session window', 'Optional. Sessions still running when it closes end automatically.', `<span class="as-win"><span>From</span><input class="input input-sm" type="datetime-local" data-key="windowStart" aria-label="Sessions can start from" /><span>Until</span><input class="input input-sm" type="datetime-local" data-key="windowEnd" aria-label="Sessions can run until" /></span>`)}
+    ${row('autoSubmitOnTimeUp', 'Time up', 'Submit automatically when a student’s time runs out.', sw('autoSubmitOnTimeUp'))}
+    ${row('pauseGraceSec', 'Pause grace', '0 records every time a student leaves the tab. Writing is always off while they’re away.', num('pauseGraceSec', 'seconds', 'min="0" max="600"'))}
+    ${sec('Integrity')}
+    ${row('allowPaste', 'Pasting', '', `<select class="input input-sm" data-key="allowPaste" aria-labelledby="asl-allowPaste">${opts(AS_PASTE, w.allowPaste)}</select>`)}
+    ${row('researchTracking', 'Research', 'Record searches, pages visited and text copied, only while a session runs.', sw('researchTracking'))}
+    ${row('blockAiSites', 'AI sites', 'Blocked through the Visor extension. Visits are recorded either way.', `${sw('blockAiSites')}<button type="button" class="linklike as-edit" data-edit="blockedSites" aria-expanded="false"></button>`,
+      editor('blockedSites', 'AI and answer sites, one per line', 'One site per line', '<button type="button" class="linklike" data-reset="blockedSites">Reset to Visor’s list</button>'))}
+    ${row('allowedSites', 'Allowed sites', '', `<span class="as-sum" data-sum="allowedSites"></span><button type="button" class="linklike as-edit" data-edit="allowedSites" aria-expanded="false">Edit</button>`,
+      editor('allowedSites', 'Allowed sites in locked sessions, one per line', 'One per line, e.g. en.wikipedia.org. Leave empty to allow any site that isn’t blocked.'))}
+    ${row('requireExtension', 'Visor extension', '', sw('requireExtension'))}
+    ${row('panelBrowsing', 'Side panel', 'Students can switch to it to research. Blocked and AI sites stay blocked.', sw('panelBrowsing'))}
+    ${sec('Writing and sources')}
+    ${row('citationStyle', 'Citation style', '', `<select class="input input-sm" data-key="citationStyle" aria-labelledby="asl-citationStyle">${opts(STYLE_NAME, w.citationStyle)}</select>`)}
+    ${row('worksCited', 'Works Cited', '', `<select class="input input-sm" data-key="worksCited" aria-labelledby="asl-worksCited">${opts(AS_WORKS, w.worksCited || 'page')}</select>`)}
+    ${row('oneClickCite', 'One-click citing', '', sw('oneClickCite'))}
+    ${row('docStyle', 'Document style', 'The font and spacing every essay starts with.', `<select class="input input-sm" data-key="docStyle" aria-labelledby="asl-docStyle">${opts(AS_DOC, w.docStyle === 'docs' ? 'docs' : 'mla')}</select>`)}
+    ${row('length', 'Length', 'Optional. Checked when a student submits.', `<span class="as-pair"><input class="input input-sm" type="number" min="1" data-key="minWords" aria-label="Minimum words" placeholder="Min" /><span>to</span><input class="input input-sm" type="number" min="1" data-key="maxWords" aria-label="Maximum words" placeholder="Max" /><span>words</span></span>`)}
+    ${row('templateText', 'Starter text', 'Copied into every essay at the start, marked as yours.', `<span class="as-sum" data-sum="templateText"></span><button type="button" class="linklike as-edit" data-edit="templateText" aria-expanded="false">Edit</button>`,
+      editor('templateText', 'Starter text', 'e.g. headings for students to fill in'))}
+  </section>`;
+}
+
+// Set every control from the saved settings. The text box being typed in is
+// left alone (unless it's the one that was just saved).
+function asSync(savedKey) {
+  const card = $('asCard'); if (!card || !ap?.data) return;
+  const w = ap.data.assignment.writing, locked = w.mode === 'locked', wcOff = w.worksCited === 'off';
+  const active = document.activeElement;
+  card.querySelectorAll('[data-key]').forEach(el => {
+    const k = el.dataset.key;
+    if (el.classList.contains('switch')) return;
+    if (el === active && el.tagName === 'INPUT' && k !== savedKey) return;
+    // (older assignments may lack Works Cited and the document style: a page, MLA)
+    el.value = el.type === 'datetime-local' ? toLocalInput(w[k]) : k === 'worksCited' ? w.worksCited || 'page' : k === 'docStyle' ? (w.docStyle === 'docs' ? 'docs' : 'mla') : w[k] ?? (k === 'pauseGraceSec' ? 0 : '');
+  });
+  const on = { researchTracking: w.researchTracking, blockAiSites: w.blockAiSites, autoSubmitOnTimeUp: w.autoSubmitOnTimeUp, requireExtension: locked || w.requireExtension,
+    panelBrowsing: locked && w.panelBrowsing !== false, oneClickCite: !wcOff && w.oneClickCite !== false };
+  const off = { requireExtension: locked, panelBrowsing: !locked, oneClickCite: wcOff };
+  card.querySelectorAll('.switch[data-key]').forEach(b => {
+    const k = b.dataset.key;
+    b.classList.toggle('on', !!on[k]); b.setAttribute('aria-checked', String(!!on[k]));
+    b.disabled = !!off[k];
+  });
+  card.querySelectorAll('.as-seg [data-v]').forEach(b => { const sel = b.dataset.v === w.mode; b.setAttribute('aria-checked', String(sel)); b.tabIndex = sel ? 0 : -1; });
+  const hint = (k, t) => { const el = card.querySelector(`[data-hint="${k}"]`); if (el) el.textContent = t; else card.querySelector(`[data-row="${k}"] .as-k`)?.insertAdjacentHTML('beforeend', `<div class="as-h" data-hint="${k}">${esc(t)}</div>`); };
+  hint('mode', locked ? 'In class: needs the Visor extension and keeps students on allowed sites, in full screen.' : 'Homework: everything is recorded; nothing is locked.');
+  hint('requireExtension', locked ? 'Always on for locked sessions.' : 'Students can’t start a session without it.');
+  hint('oneClickCite', wcOff ? 'Off with Works Cited off: there are no citation tools.' : 'Cite this page, right-click or Alt+Shift+C in the extension. Sources added by hand always work.');
+  hint('allowedSites', locked ? 'Only these, in locked sessions.' : 'Open sessions aren’t limited.');
+  hint('panelBrowsing', locked ? 'Students can switch to it to research. Blocked and AI sites stay blocked.' : 'Open sessions can always use it.');
+  card.querySelector('[data-row="panelBrowsing"]').classList.toggle('dim', !locked);
+  card.querySelector('[data-row="allowedSites"]').classList.toggle('dim', !locked);
+  card.querySelector('[data-row="oneClickCite"]').classList.toggle('dim', wcOff);
+  card.querySelector('[data-edit="allowedSites"]').disabled = !locked;
+  card.querySelector('[data-edit="blockedSites"]').textContent = `${(w.blockedSites || []).length} sites · Edit`;
+  card.querySelector('[data-sum="allowedSites"]').textContent = !locked ? 'Not limited' : w.allowedSites.length ? w.allowedSites.join(', ') : 'Any site that isn’t blocked';
+  card.querySelector('[data-sum="templateText"]').textContent = w.templateText ? `${w.templateText.length.toLocaleString()} characters` : 'None';
+  if (!locked) asCloseMore('allowedSites');
+  // The line above the card and the Details box on the right follow
+  const d = $('asDescribe'); if (d) d.textContent = ap.data.describe;
+  const right = document.querySelector('.course-right'); if (right && ap.tab === 'overview') right.innerHTML = assignmentRightHtml();
+}
+
+function asStatus(key, state, msg) {
+  const el = document.querySelector(`#asCard [data-row="${key}"] .as-status`); if (!el) return;
+  clearTimeout(el._t);
+  el.className = `as-status ${state}`;
+  el.innerHTML = state === 'saving' ? '<span class="spinner spinner-sm"></span><span class="sr-only">Saving</span>' : state === 'saved' ? `${I.check}<span>Saved</span>` : esc(msg || '');
+  if (state === 'saved') el._t = setTimeout(() => { el.className = 'as-status'; el.innerHTML = ''; }, 1800);
+}
+
+// Save one or more settings; row is the row that shows how it went
+function asSave(patch, row) {
+  const id = ap.data.assignment.id;
+  asStatus(row, 'saving');
+  asQueue = asQueue.then(async () => {
+    try {
+      const r = await api(`/api/assignments/${id}`, { method: 'PATCH', body: { writing: patch } });
+      if (ap?.data?.assignment?.id !== id) return;
+      ap.data.assignment = r.assignment;
+      ap.data.describe = window.VisorAssignmentText ? VisorAssignmentText.describeWriting(r.assignment.writing) : ap.data.describe;
+      asSync(Object.keys(patch)[0]);
+      asStatus(row, 'saved');
+      return true;
+    } catch (e) {
+      if (ap?.data?.assignment?.id !== id) return;
+      asSync(Object.keys(patch)[0]);
+      asStatus(row, 'error', e.message);
+      return false;
+    }
+  });
+  return asQueue;
+}
+
+// The site lists and the starter text open in a box under their row
+function asOpenMore(key) {
+  const card = $('asCard'), box = card.querySelector(`[data-more="${key}"]`), w = ap.data.assignment.writing;
+  const ta = box.querySelector('textarea');
+  ta.value = key === 'templateText' ? w.templateText || '' : (w[key] || []).join('\n');
+  box.classList.add('open');
+  card.querySelector(`[data-edit="${key}"]`)?.setAttribute('aria-expanded', 'true');
+  setTimeout(() => ta.focus({ preventScroll: true }), 60);
+}
+function asCloseMore(key, focusBack) {
+  const card = $('asCard'), box = card?.querySelector(`[data-more="${key}"]`); if (!box) return;
+  box.classList.remove('open');
+  const btn = card.querySelector(`[data-edit="${key}"]`);
+  btn?.setAttribute('aria-expanded', 'false');
+  if (focusBack) btn?.focus();
+}
+
+function asWire() {
+  const card = $('asCard'); if (!card) return;
+  asSync();
+  // Text and numbers save when the box is left (or Enter); lists and switches straight away
+  card.addEventListener('change', e => {
+    const el = e.target, k = el.dataset?.key;
+    if (!k || el.classList.contains('switch')) return;
+    const v = el.type === 'datetime-local' ? (el.value ? fromLocalInput(el.value) : null) : el.type === 'number' ? (el.value === '' ? (k === 'pauseGraceSec' ? 0 : null) : el.value) : el.value;
+    const row = el.closest('[data-row]').dataset.row;
+    if (String(v ?? '') === String(ap.data.assignment.writing[k] ?? '')) return;
+    asSave({ [k]: v }, row);
+  });
+  card.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && e.target.matches('input[data-key]')) { e.preventDefault(); e.target.blur(); }
+    if (e.key === 'Escape' && e.target.matches('[data-text]')) { e.preventDefault(); asCloseMore(e.target.dataset.text, true); }
+    // Session type: arrows move between Locked and Open
+    if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key) && e.target.closest('.as-seg')) {
+      e.preventDefault();
+      const next = ap.data.assignment.writing.mode === 'locked' ? 'open' : 'locked';
+      asSave({ mode: next }, 'mode').then(() => card.querySelector(`.as-seg [data-v="${ap.data.assignment.writing.mode}"]`)?.focus());
+    }
+  });
+  card.addEventListener('click', async e => {
+    const t = e.target.closest('button'); if (!t || t.disabled) return;
+    if (t.classList.contains('switch')) {
+      const k = t.dataset.key, now = t.getAttribute('aria-checked') === 'true';
+      t.classList.toggle('on', !now); t.setAttribute('aria-checked', String(!now)); // at once; the answer confirms it
+      return asSave({ [k]: !now }, t.closest('[data-row]').dataset.row);
+    }
+    if (t.dataset.v) { if (t.dataset.v !== ap.data.assignment.writing.mode) asSave({ mode: t.dataset.v }, 'mode'); return; }
+    if (t.dataset.edit) { const box = card.querySelector(`[data-more="${t.dataset.edit}"]`); return box.classList.contains('open') ? asCloseMore(t.dataset.edit) : asOpenMore(t.dataset.edit); }
+    if (t.dataset.cancel) return asCloseMore(t.dataset.cancel, true);
+    if (t.dataset.reset) { card.querySelector(`[data-text="${t.dataset.reset}"]`).value = CFG.defaultAiSites.join('\n'); return; }
+    if (t.dataset.save) {
+      const k = t.dataset.save, raw = card.querySelector(`[data-text="${k}"]`).value;
+      t.disabled = true;
+      const ok = await asSave({ [k]: k === 'templateText' ? raw : asLines(raw) }, k === 'blockedSites' ? 'blockAiSites' : k);
+      t.disabled = false;
+      if (ok) asCloseMore(k, true);
+    }
+  });
 }
 
 function renderSubmissions(body) {

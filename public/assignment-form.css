@@ -120,3 +120,55 @@
 .rv-sources-card .rv-bib li:first-child { border-top: 0; }
 .rv-sources-card .rv-bib-text { padding-left: 1.5em; text-indent: -1.5em; }
 .rv-sources-card .rv-check { margin-left: 1.5em; }
+
+/* ---------- the assignment page: Session settings, edited in place ----------
+   (assignments.js: asCardHtml, asSync, asWire). Label and hint on the left,
+   the control on the right; the site lists and starter text open underneath. */
+.as-card { margin-top: 20px; padding: 6px 0 4px; overflow: hidden; }
+.as-top { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 12px 18px 4px; }
+.as-top .section-title { font-size: 16px; margin: 0; }
+.as-saves { font-size: 12.5px; color: var(--ink-3); }
+.as-note { margin: 6px 18px 2px; padding: 8px 12px; border-radius: 8px; background: var(--amber-soft); color: #8A5A10; font-size: 13px; }
+.as-sec { padding: 16px 18px 6px; font-size: 11.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); }
+.as-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); gap: 6px 20px; align-items: center; padding: 11px 18px; border-top: 1px solid var(--line); transition: opacity .2s; }
+.as-sec + .as-row { border-top: 0; }
+.as-row.dim { opacity: 1; }
+.as-row.dim .as-c > :not(.as-status) { opacity: .5; }
+.as-l { font-weight: 600; font-size: 14px; }
+.as-h { font-size: 12.5px; color: var(--ink-2); line-height: 1.45; margin-top: 2px; }
+.as-c { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-width: 0; }
+.as-c select.input { max-width: 330px; flex: 1 1 220px; }
+.as-num, .as-pair { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; color: var(--ink-2); }
+.as-num input { width: 92px; }
+.as-pair input[type="number"] { width: 84px; }
+.as-win { display: grid; grid-template-columns: auto minmax(0, 210px); gap: 6px 10px; align-items: center; font-size: 13px; color: var(--ink-2); }
+.as-sum { font-size: 13.5px; color: var(--ink); min-width: 0; overflow-wrap: anywhere; }
+.as-edit { font-size: 13px; }
+.as-seg button[aria-checked="true"] { background: var(--brand-soft); color: var(--brand); }
+.as-card .switch { cursor: pointer; }
+.as-card .switch:disabled { cursor: not-allowed; opacity: .55; }
+.as-card .switch:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+/* How a save went, after the control */
+.as-status { display: inline-flex; align-items: center; gap: 4px; font-size: 12.5px; min-height: 18px; color: var(--ink-3); transition: opacity .3s; }
+.as-status:empty { display: none; }
+.as-status.saved { color: var(--green-deep); font-weight: 600; animation: asIn .2s var(--ease, ease); }
+.as-status.saved svg { width: 14px; height: 14px; }
+.as-status.error { color: var(--red, #B42318); font-weight: 600; flex-basis: 100%; }
+@keyframes asIn { from { opacity: 0; transform: translateY(2px); } to { opacity: 1; transform: none; } }
+/* The box under a row: opens smoothly (grid rows 0fr -> 1fr) */
+.as-more { grid-column: 1 / -1; display: grid; grid-template-rows: 0fr; transition: grid-template-rows .3s var(--ease, ease); }
+.as-more.open { grid-template-rows: 1fr; }
+.as-more-in { overflow: hidden; min-height: 0; visibility: hidden; transition: visibility 0s .3s; }
+.as-more.open .as-more-in { visibility: visible; transition: visibility 0s; }
+.as-more-pad { padding: 8px 0 4px; }
+.as-more textarea { min-height: 110px; }
+.as-more-acts { display: flex; align-items: center; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+.as-more-acts .linklike { margin-left: auto; font-size: 13px; }
+@media (max-width: 720px) {
+  .as-row { grid-template-columns: minmax(0, 1fr); padding: 12px 14px; }
+  .as-top, .as-sec { padding-left: 14px; padding-right: 14px; }
+  .as-note { margin-left: 14px; margin-right: 14px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .as-more, .as-more-in, .as-status { transition: none; animation: none; }
+}

@@ -1312,7 +1312,7 @@ function publicTeachers(core, cls, withEmail = false) {
 function publicClass(core, cls, me) {
   const isTeacher = classes.isClassTeacher(cls, me.id);
   const base = {
-    id: cls.id, name: cls.name, color: classes.colorFor(cls), archived: !!cls.archived, createdAt: cls.createdAt,
+    id: cls.id, name: cls.name, color: classes.colorFor(cls), background: classes.publicBackground(cls), archived: !!cls.archived, createdAt: cls.createdAt,
     isTeacher, isOwner: cls.teacherId === me.id, teacher: isTeacher ? publicUser(core.users[cls.teacherId]) : nameOnly(core.users[cls.teacherId]), teachers: publicTeachers(core, cls, isTeacher),
     studentCount: cls.studentIds.length
   };
@@ -1413,6 +1413,98 @@ app.delete('/api/classes/:id/teachers/:userId', requireAuth, ah(async (req, res)
     return got.isOwner ? { class: publicClass(core, got.cls, got.me) } : { ok: true, left: true };
   });
   res.json(out);
+}));
+
+// ---- The banner's background ----
+// POST   the picture's bytes as the body (PNG, JPEG or WebP; the page shrinks it first)
+// PUT    { preset } one of Visor's designs, and/or { pos } where an uploaded picture sits
+// DELETE back to the class colour
+// GET    the uploaded picture, for the class's teachers and students only
+// Each answers { class } (the GET answers the picture). A replaced picture is deleted.
+const BG_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
+async function setBackground(req, fn) {
+  let old = null;
+  const out = await repo.withCore(core => {
+    const got = teacherClass(req, core);
+    old = got.cls.background || null;
+    fn(got.cls, old);
+    got.cls.background = got.cls.background || null;
+    return publicClass(core, got.cls, got.me);
+  });
+  return { out, old };
+}
+async function dropOldUpload(old, cls) {
+  if (old?.kind === 'upload' && old.id !== cls?.background?.id) await imageStorage.deleteImage(old.stored);
+}
+
+// (Teachers only, checked before the body is read. imageBody is defined with
+// the essay pictures, further down.)
+app.post('/api/classes/:id/background', requireAuth, ah(async (req, res, next) => { teacherClass(req, await repo.readCore()); next(); }), (req, res, next) => imageBody(req, res, next), ah(async (req, res) => {
+  const buf = Buffer.isBuffer(req.body) ? req.body : null;
+  if (buf && buf.length > imageStorage.MAX_IMAGE_BYTES) return res.status(413).json({ error: IMAGE_TOO_LARGE });
+  const mime = imageStorage.sniffImage(buf);
+  if (!BG_TYPES.includes(mime)) throw new HttpError(400, 'Use a PNG, JPEG or WebP picture.');
+  const id = crypto.randomBytes(16).toString('hex');
+  const stored = await imageStorage.putImage({ docId: `classbg-${req.params.id}`, id, mime, buf });
+  let result;
+  try {
+    result = await setBackground(req, (cls, old) => {
+      cls.background = { kind: 'upload', id, mime, stored, pos: old?.kind === 'upload' && Number.isFinite(old.pos) ? old.pos : 50, by: req.session.userId, updatedAt: now() };
+    });
+  } catch (err) { await imageStorage.deleteImage(stored); throw err; }
+  await dropOldUpload(result.old, { background: { id } });
+  res.json({ class: result.out });
+}));
+
+app.put('/api/classes/:id/background', requireAuth, ah(async (req, res) => {
+  const body = req.body || {};
+  const has = k => Object.prototype.hasOwnProperty.call(body, k);
+  if (!has('preset') && !has('pos')) throw new HttpError(400, 'Choose a background or a position.');
+  let kept = null;
+  const result = await setBackground(req, (cls, old) => {
+    if (has('preset')) cls.background = { kind: 'preset', preset: classes.backgroundPreset(body.preset), by: req.session.userId, updatedAt: now() };
+    else {
+      if (old?.kind !== 'upload') throw new HttpError(400, 'Only an uploaded picture has a position.');
+      cls.background = { ...old, pos: classes.backgroundPos(body.pos) };
+    }
+    kept = cls.background;
+  });
+  await dropOldUpload(result.old, { background: kept });
+  res.json({ class: result.out });
+}));
+
+app.delete('/api/classes/:id/background', requireAuth, ah(async (req, res) => {
+  const result = await setBackground(req, cls => { cls.background = null; });
+  await dropOldUpload(result.old, null);
+  res.json({ class: result.out });
+}));
+
+app.get('/api/classes/:id/background', requireAuth, ah(async (req, res) => {
+  const core = await repo.readCore();
+  let got;
+  try { got = classFor(req, core); } catch { return res.status(404).json({ error: 'not found' }); }
+  const b = got.cls.background;
+  if (b?.kind !== 'upload' || !b.stored) return res.status(404).json({ error: 'not found' });
+  await imageStorage.streamImage(b.stored, b.mime, res);
+}));
+
+// ---- Adding people from the teacher's school ----
+// GET ?role=student|teacher&q=… -> { school, people: [{ id, name, email, role, avatarColor, inClass }], total, more }
+// POST { userIds } -> { class, students, teachers, skipped }: students join, teachers become co-teachers
+app.get('/api/classes/:id/school-people', requireAuth, ah(async (req, res) => {
+  const core = await repo.readCore();
+  const got = teacherClass(req, core);
+  const out = classes.schoolPeople(core, got.cls, got.me, { role: String(req.query.role || 'student'), q: String(req.query.q || '').slice(0, 120) });
+  res.json({ school: publicOrg(core.orgs[got.me.orgId]), people: out.people.map(({ user: u, inClass }) => ({ id: u.id, name: `${u.firstName} ${u.lastName}`.trim(), email: u.email, role: u.role, avatarColor: u.avatarColor || null, inClass })), total: out.total, more: out.more });
+}));
+
+app.post('/api/classes/:id/school-people', requireAuth, ah(async (req, res) => {
+  const out = await repo.withCore(core => {
+    const got = teacherClass(req, core);
+    const result = classes.addFromSchool(core, got.cls, got.me, req.body?.userIds);
+    return { result, cls: publicClass(core, got.cls, got.me) };
+  });
+  res.json({ class: out.cls, ...out.result });
 }));
 
 // A class's folders and assignments as the class page places them
@@ -1551,7 +1643,9 @@ app.delete('/api/classes/:id', requireAuth, ah(async (req, res) => {
   if (!got.isOwner) throw new HttpError(403, 'Only the class owner can delete it.');
   if (String(req.body?.confirmName || '').trim() !== got.cls.name) throw new HttpError(400, 'Type the class name exactly to delete it.');
   await deleteClassRecords(core, got.cls);
-  await repo.withCore(c => { delete c.classes[got.cls.id]; });
+  let bg = null;
+  await repo.withCore(c => { bg = own(c.classes, got.cls.id)?.background; delete c.classes[got.cls.id]; });
+  if (bg?.kind === 'upload') await imageStorage.deleteImage(bg.stored);
   res.json({ ok: true });
 }));
 
@@ -1609,7 +1703,7 @@ app.get('/api/assignments/:id', requireAuth, ah(async (req, res) => {
   const { a, cls } = got;
   // teacher: the owner; teachers: every teacher, owner first (no emails here)
   const classInfo = {
-    id: cls.id, name: cls.name, color: classes.colorFor(cls), archived: !!cls.archived,
+    id: cls.id, name: cls.name, color: classes.colorFor(cls), background: classes.publicBackground(cls), archived: !!cls.archived,
     teacher: { id: cls.teacherId, name: fullName(core.users[cls.teacherId]) }, teachers: publicTeachers(core, cls), isOwner: got.isOwner,
     studentCount: cls.studentIds.length
   };
