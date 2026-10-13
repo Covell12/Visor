@@ -313,8 +313,8 @@ function courseTile(c) {
   const stats = c.isTeacher
     ? [c.activeSessions ? `<span class="live-dot-text"><i class="live-dot"></i>${c.activeSessions} writing now</span>` : '', c.toReview ? `<span><b>${c.toReview}</b> to review</span>` : '', `<span>${vcPlural(c.assignmentCount || 0, 'assignment')}</span>`]
     : [c.upcoming?.[0] ? `<span>Next: <b>${esc(c.upcoming[0].title)}</b> · ${esc(vcDate(c.upcoming[0].dueAt))}</span>` : `<span>${vcPlural(c.assignmentCount || 0, 'assignment')}</span>`];
-  return `<a class="course-tile ${c.archived ? 'archived' : ''}" href="/class/${c.id}" data-link>
-    ${courseArt(c)}
+  return `<a class="course-tile cc-${courseColor(c)} ${c.archived ? 'archived' : ''}" href="/class/${c.id}" data-link>
+    ${courseArt(c)}${courseMono(c)}
     ${c.archived ? '<span class="pill pill-gray ct-flag">Archived</span>' : ''}
     <span class="ct-body"><span class="ct-name">${esc(c.name)}</span><span class="ct-sub">${c.isTeacher ? vcPlural(c.studentCount, 'student') + (teachersOf(c).length > 1 ? ` · ${vcPlural(teachersOf(c).length, 'teacher')}` : '') : esc(teacherNames(c))}</span>
       <span class="ct-stats">${stats.filter(Boolean).join('')}</span></span>
@@ -436,40 +436,60 @@ async function joinClass() {
 }
 
 /* ====================== the course frame ======================
-   A sidebar (the class banner and name, its pages, the class code and who
-   teaches it), the page in the middle, and optionally a right-hand column.
-   The class page and the assignment page both use it. */
-function courseFrame(c, { active = '', main = '', right = '' }) {
-  return `<div class="course cc-${courseColor(c)} ${right ? '' : 'no-right'}">
-    <aside class="course-side" aria-label="${esc(c.name)}">${courseSideHtml(c, active)}</aside>
-    <div class="course-main">${main}</div>
-    ${right ? `<aside class="course-right">${right}</aside>` : ''}
+   Visor's "lens" layout: the class's cover (its banner, with a frosted panel
+   holding its monogram, name and teachers), pill tabs for its pages, then the
+   page with an optional right-hand column. The assignment page uses the
+   compact form: one bar with the monogram, the class name and the tabs. */
+function courseFrame(c, { active = '', main = '', right = '', compact = false }) {
+  return `<div class="course cc-${courseColor(c)} ${right ? '' : 'no-right'}${compact ? ' compact' : ''}">
+    ${compact ? courseBarHtml(c, active) : courseHeroHtml(c, active)}
+    <div class="course-body">
+      <div class="course-main">${main}</div>
+      ${right ? `<aside class="course-right">${right}</aside>` : ''}
+    </div>
   </div>`;
 }
-function courseSideHtml(c, active) {
-  const link = (key, href, icon, label, count) => `<a href="${href}" data-link class="${active === key ? 'active' : ''}" ${active === key ? 'aria-current="page"' : ''}>${icon}<span>${label}</span>${count != null ? `<span class="count">${count}</span>` : ''}</a>`;
+// The class's pages, as pill tabs
+function courseTabsHtml(c, active) {
   const teachers = teachersOf(c);
-  return `<div class="course-pic-wrap">${courseArt(c, 'course-pic', 'a', `href="/class/${c.id}" data-link aria-label="${esc(c.name)}: assignments"`)}
-      ${c.isTeacher ? `<button class="course-pic-edit" onclick="openClassBanner('${c.id}')" aria-label="Change the banner" title="Change the banner">${I.edit}</button>` : ''}</div>
-    <div class="side-name">${esc(c.name)}${c.archived ? ' <span class="pill pill-gray">Archived</span>' : ''}</div>
-    <div class="side-sub">${c.isTeacher ? vcPlural(c.studentCount ?? c.students?.length ?? 0, 'student') : esc(teacherNames(c))}</div>
-    <nav class="course-nav" aria-label="Class pages">
+  const link = (key, href, icon, label, count) => `<a href="${href}" data-link class="${active === key ? 'active' : ''}" ${active === key ? 'aria-current="page"' : ''}>${icon}<span>${label}</span>${count != null ? `<span class="count">${count}</span>` : ''}</a>`;
+  return `<nav class="course-tabs" aria-label="Class pages">
       ${link('materials', `/class/${c.id}`, PI.list, 'Assignments')}
       ${link('updates', `/class/${c.id}?tab=announcements`, PI.megaphone, 'Announcements')}
       ${c.isTeacher ? link('members', `/class/${c.id}?tab=people`, I.users, 'People', (c.studentCount ?? c.students?.length ?? 0) + teachers.length) : ''}
       ${c.archived ? '' : link('calendar', `/calendar?class=${c.id}`, PI.cal, 'Calendar')}
       ${c.isTeacher ? link('settings', `/class/${c.id}?tab=settings`, I.gear, 'Settings') : ''}
-    </nav>
-    ${c.isTeacher && me?.org && !c.archived ? `<div class="course-box"><div class="course-box-h">${esc(me.org.name)}</div>
-      <button type="button" class="btn btn-ghost btn-sm course-box-btn" onclick="openAddFromSchool('${c.id}')">${I.users}Add people from your school</button>
-      <div class="muted">Or share the class code, under People.</div></div>`
-    : c.isTeacher && c.joinCode ? `<div class="course-box"><div class="course-box-h">Class code</div>
-      <div class="access-code"><span class="mono">${esc(c.joinCode)}</span><button class="btn-icon" onclick="copyText('${esc(c.joinCode)}','Class code copied')" aria-label="Copy the class code" title="Copy">${I.copy}</button></div>
-      <div class="muted">${c.archived ? 'The class is archived, so the code doesn’t work' : c.joinOpen === false ? 'Joining is closed' : 'Students join with this code'}</div></div>` : ''}
-    <div class="course-box"><div class="course-box-h">${teachers.length > 1 ? 'Teachers' : 'Teacher'}</div>
-      ${teachers.map(t => `<div class="side-teacher">${avatarHtml(t, 'avatar-sm')}<span>${t.id === me?.id ? 'You' : esc(t.name)}</span></div>`).join('')}
-    </div>`;
+    </nav>`;
 }
+// The monogram: the class's initials in a ring of its colour (the lens)
+const courseMono = (c, size = '') => `<span class="course-mono ${size}" aria-hidden="true">${esc(courseInitials(c?.name))}</span>`;
+function courseHeroHtml(c, active) {
+  const teachers = teachersOf(c);
+  const who = c.isTeacher
+    ? `${vcPlural(c.studentCount ?? c.students?.length ?? 0, 'student')} · ${teachers.length > 1 ? 'Teachers' : 'Teacher'}: ${esc(teacherNames(c))}`
+    : `${teachers.length > 1 ? 'Teachers' : 'Teacher'}: ${esc(teacherNames(c))}`;
+  // A teacher's way to bring people in: their school's list, or the class code
+  const invite = !c.isTeacher || c.archived ? ''
+    : me?.org ? `<button type="button" class="glass-btn" onclick="openAddFromSchool('${c.id}')">${I.users}<span>Add people</span></button>`
+      : c.joinCode ? `<button type="button" class="glass-btn code" onclick="copyText('${esc(c.joinCode)}','Class code copied')" title="${c.joinOpen === false ? 'Joining with the code is closed' : 'Students join with this code. Click to copy it.'}"><span class="glass-k">Class code</span><span class="mono">${esc(c.joinCode)}</span>${I.copy}</button>` : '';
+  return `<header class="course-hero">
+      ${courseArt(c, 'course-cover')}
+      <div class="course-hero-tools">${invite}${c.isTeacher ? `<button type="button" class="glass-btn icon" onclick="openClassBanner('${c.id}')" aria-label="Change the banner" title="Change the banner">${I.edit}</button>` : ''}</div>
+      <div class="course-glass">
+        ${courseMono(c, 'lg')}
+        <div class="course-glass-text"><div class="course-name">${esc(c.name)}${c.archived ? ' <span class="pill pill-gray">Archived</span>' : ''}</div>
+          <div class="course-who">${avatarStack(teachers)}<span>${who}</span></div></div>
+      </div>
+    </header>
+    ${courseTabsHtml(c, active)}`;
+}
+function courseBarHtml(c, active) {
+  return `<header class="course-bar">
+      <a class="course-bar-id" href="/class/${c.id}" data-link>${courseMono(c)}<span class="course-bar-name">${esc(c.name)}</span></a>
+      ${courseTabsHtml(c, active)}
+    </header>`;
+}
+const avatarStack = list => `<span class="avatar-stack" aria-hidden="true">${list.slice(0, 4).map(t => avatarHtml(t, 'avatar-xs')).join('')}</span>`;
 
 // The sidebar's pencil (and Settings): the class's banner. A background (the
 // class colour, one of Visor's designs, or a picture) and the colour, which
@@ -664,7 +684,7 @@ function renderClassPage() {
 // The heading at the top of a course page: the course (or a folder in it)
 function courseHead(c, title, { trail = [], actions = '', sub = '' } = {}) {
   return `<header class="course-head"><div style="min-width:0;flex:1;">
-      ${crumbs([[c.name, `/class/${c.id}`], ...trail, [title]])}
+      ${trail.length ? crumbs([...trail, [title]]) : ''}
       <h1>${esc(title)}</h1>${sub ? `<div class="course-sub">${sub}</div>` : ''}</div>
     ${actions ? `<div class="head-actions">${actions}</div>` : ''}</header>`;
 }
@@ -737,10 +757,10 @@ function materialsHtml() {
     { label: 'Folder', icon: PI.folderPlus, onclick: 'openFolderForm()', disabled: folderDepth(fid) >= 3, note: folderDepth(fid) >= 3 ? '3 deep at most' : '' }
   ] }) : '';
   const head = folder
-    ? `<header class="course-head"><div style="min-width:0;flex:1;">${crumbsDrop([[c.name, `/class/${c.id}`, ''], ...trail.slice(0, -1).map(f => [f.name, `/class/${c.id}?folder=${f.id}`, f.id]), [folder.name]])}
+    ? `<header class="course-head"><div style="min-width:0;flex:1;">${crumbsDrop([['Assignments', `/class/${c.id}`, ''], ...trail.slice(0, -1).map(f => [f.name, `/class/${c.id}?folder=${f.id}`, f.id]), [folder.name]])}
         <h1><span class="mat-ic t-folder ${folder.color ? 'fc-' + folder.color : ''}" style="width:auto;height:auto;vertical-align:-5px;margin-right:6px;" aria-hidden="true">${PI.folder}</span>${esc(folder.name)}</h1></div>
         <div class="head-actions">${c.isTeacher ? folderMenuHtml(folder, 'Head') : ''}${addMenu}</div></header>`
-    : `<header class="course-head"><div style="min-width:0;flex:1;"><h1>${esc(c.name)}</h1><div class="course-sub">${c.isTeacher ? `${vcPlural(c.studentCount || 0, 'student')} · ${vcPlural(cp.assignments.length, 'assignment')}${cp.assignments.some(a => !a.publishedAt) ? ` (${cp.assignments.filter(a => !a.publishedAt).length} unpublished)` : ''}` : `${teachersOf(c).length > 1 ? 'Teachers' : 'Teacher'}: ${esc(teacherNames(c))}`}</div></div>
+    : `<header class="course-head"><div style="min-width:0;flex:1;"><h1>Assignments</h1><div class="course-sub">${vcPlural(cp.assignments.filter(a => c.isTeacher || a.publishedAt).length, 'assignment')}${c.isTeacher && cp.assignments.some(a => !a.publishedAt) ? ` (${cp.assignments.filter(a => !a.publishedAt).length} unpublished)` : ''}</div></div>
         ${addMenu ? `<div class="head-actions">${addMenu}</div>` : ''}</header>`;
   const desc = folder?.description ? `<div class="folder-desc">${esc(folder.description).replace(/\n/g, '<br>')}</div>` : '';
   const archived = c.archived ? `<div class="callout amber" style="margin-bottom:12px;">This class is archived. ${c.isTeacher ? 'Restore it in Settings to post announcements again.' : ''}</div>` : '';

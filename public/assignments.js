@@ -420,7 +420,7 @@ function renderAssignmentPage() {
     'sep',
     { label: 'Delete', icon: I.trash, onclick: 'deleteAssignment()', danger: true }
   ] }) : '';
-  const trail = [[cls.name, `/class/${cls.id}`], ...(ap.data.folderPath || []).map(f => [f.name, `/class/${cls.id}?folder=${f.id}`]), [a.title]];
+  const trail = [['Assignments', `/class/${cls.id}`], ...(ap.data.folderPath || []).map(f => [f.name, `/class/${cls.id}?folder=${f.id}`]), [a.title]];
   const main = `<header class="course-head"><div style="min-width:0;flex:1;">
       ${crumbs(trail)}
       <div class="asg-head">${typeIcon(a.type)}<div class="asg-title"><h1>${esc(a.title)}</h1><div class="asg-meta">${meta}</div></div>
@@ -429,7 +429,7 @@ function renderAssignmentPage() {
     ${tabs.length ? pageTabs(tabs, ap.tab, 'assignmentTab') : ''}
     <div id="aBody"></div>`;
   const right = ap.tab === 'overview' ? assignmentRightHtml() : '';
-  $('routeView').innerHTML = courseFrame(course, { active: 'materials', main, right });
+  $('routeView').innerHTML = courseFrame(course, { active: 'materials', main, right, compact: true });
   const body = $('aBody');
   if (!isTeacher) return renderStudentAssignment(body);
   if (ap.tab === 'live' && window.renderLiveBoard) { ap.stop = renderLiveBoard(body, ap.data); return; }
