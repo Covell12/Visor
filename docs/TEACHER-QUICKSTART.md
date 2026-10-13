@@ -5,14 +5,14 @@ One page to get your first class writing in Visor.
 ## 1. Make a class (2 minutes)
 
 1. Sign in at your school's Visor address and choose **Create class** on Home ("English 10 – Period 3").
-2. Students join with the **class code** in the class's sidebar (put it on the board). Or open the class's **People** page and use **Add people → Add students by email…** to paste their email addresses. Anyone without an account yet gets an invite and joins as soon as they sign up with that email.
+2. **If you've set your school** (in **Profile settings**), click **Add people from your school** in the class's sidebar, tick your students (and any teachers to share the class with) in the list, and click **Add**. Only people who chose the same school are listed; schools aren't checked, so anyone who picks your school can see that list. Otherwise, or for anyone not on the list, students join with the **class code** (in the sidebar without a school, and always under **People → Add people**; put it on the board), or use **Add people → Add students by email…** to paste their email addresses. Anyone without an account yet gets an invite and joins as soon as they sign up with that email.
 3. On **People**, give extra time to students who need it (1.25×, 1.5×, 2×…). It's applied to every timed session automatically.
 
 When everyone's in, use **Add people → Close joining with the code** so the code stops working.
 
 **Co-teachers.** **Add people → Add a teacher…** shares the class with another teacher (they need a Visor teacher account). Co-teachers can do everything you can (assignments, announcements, people, live sessions, review) except delete the class; the class's owner (whoever made it) can remove them, and they can leave it themselves.
 
-Every class gets a colour and a picture, shown on its tile on Home, in the **Classes** menu and on the **Calendar**. Change the colour in the class's **Settings** (or with the pencil on its banner).
+Every class gets a colour and a banner, shown on its tile on Home, in the **Classes** menu and on the **Calendar**. Change them with the pencil on its banner (or **Settings → Change background and colour**): keep the colour, pick one of eight designs, or upload your own picture (PNG, JPEG or WebP) and choose which part shows. Everyone in the class sees it.
 
 ## 2. Make a writing assignment
 
@@ -23,7 +23,7 @@ On the class's **Assignments** page, **New → Writing assignment**, then pick a
 
 AI sites are blocked by default in both (untick **Block AI sites** to only record visits). Blocking works through the Visor extension, so in an open session a student without the extension isn't blocked; tick **Require the Visor extension** if every student must have it.
 
-Change anything you like (time limit, the window when sessions can start, allowed sites, citation style, document style, Works Cited, word limits, starter text); the **Preview** beside the form shows what students will see as you go. Then **Save and publish**. **Document style** sets how a new essay looks: an MLA essay (Times New Roman 12, double-spaced) or Docs default (Arial 11, 1.15 spacing). Students write in a Google-Docs-style editor with menus, a toolbar, pictures, tables, find and replace and an outline, and everything they do is recorded as before.
+Change anything you like (time limit, the window when sessions can start, allowed sites, citation style, document style, Works Cited, word limits, starter text); the **Preview** beside the form shows what students will see as you go. Then **Save and publish**. Later, change any setting straight from the assignment's page: each control in **Session settings** saves as soon as you change it (a session that's already running keeps its time limit and sites until it ends). **Document style** sets how a new essay looks: an MLA essay (Times New Roman 12, double-spaced) or Docs default (Arial 11, 1.15 spacing). Students write in a Google-Docs-style editor with menus, a toolbar, pictures, tables, find and replace and an outline, and everything they do is recorded as before.
 
 **Folders.** **New → Folder** makes a folder (a unit, a week) with a colour and an optional description; folders can hold folders, three deep. Drag rows to reorder them, drop a row onto a folder (or onto a folder name in the breadcrumb) to move it, or use a row's gear menu: **Move to…**, **Move up**, **Move down**. Deleting a folder never deletes what's in it: its contents move up a level. Students see a folder once something in it is published.
 
