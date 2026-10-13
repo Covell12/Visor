@@ -5,14 +5,14 @@ One page to get your first class writing in Visor.
 ## 1. Make a class (2 minutes)
 
 1. Sign in at your school's Visor address and choose **Create class** on Home ("English 10 – Period 3").
-2. **If you've set your school** (in **Profile settings**), click **Add people from your school** in the class's sidebar, tick your students (and any teachers to share the class with) in the list, and click **Add**. Only people who chose the same school are listed; schools aren't checked, so anyone who picks your school can see that list. Otherwise, or for anyone not on the list, students join with the **class code** (in the sidebar without a school, and always under **People → Add people**; put it on the board), or use **Add people → Add students by email…** to paste their email addresses. Anyone without an account yet gets an invite and joins as soon as they sign up with that email.
+2. **If you've set your school** (in **Profile settings**), click **Add people** at the top of the class's page, tick your students (and any teachers to share the class with) in the list, and click **Add**. Only people who chose the same school are listed; schools aren't checked, so anyone who picks your school can see that list. Otherwise, or for anyone not on the list, students join with the **class code** (at the top of the class's page if you haven't set a school, and always under **People → Add people**; put it on the board), or use **Add people → Add students by email…** to paste their email addresses. Anyone without an account yet gets an invite and joins as soon as they sign up with that email.
 3. On **People**, give extra time to students who need it (1.25×, 1.5×, 2×…). It's applied to every timed session automatically.
 
 When everyone's in, use **Add people → Close joining with the code** so the code stops working.
 
 **Co-teachers.** **Add people → Add a teacher…** shares the class with another teacher (they need a Visor teacher account). Co-teachers can do everything you can (assignments, announcements, people, live sessions, review) except delete the class; the class's owner (whoever made it) can remove them, and they can leave it themselves.
 
-Every class gets a colour and a banner, shown on its tile on Home, in the **Classes** menu and on the **Calendar**. Change them with the pencil on its banner (or **Settings → Change background and colour**): keep the colour, pick one of eight designs, or upload your own picture (PNG, JPEG or WebP) and choose which part shows. Everyone in the class sees it.
+Every class gets a colour and a banner, shown on its tile on Home, in the **Classes** menu and on the **Calendar**. Change them with the pencil at the top right of the class's page (or **Settings → Change background and colour**): keep the colour, pick one of eight designs, or upload your own picture (PNG, JPEG or WebP) and choose which part shows. Everyone in the class sees it.
 
 ## 2. Make a writing assignment
 
