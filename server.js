@@ -2092,6 +2092,9 @@ function liveRow(u, doc, s, a, t, all = null) {
     row.lastActivity = [s.lastBeat, doc?.updatedAt].filter(Boolean).sort().pop();
     row.lateBeat = t - Date.parse(s.lastBeat) > LATE_BEAT_MS;
     row.aiSite = (s.events || []).some(e => e.type === 'ai-site');
+    // Another extension's writing tool on the essay page; the side panel closed while writing in it
+    row.tools = [...new Set((s.events || []).filter(e => e.type === 'assistant-ext' && e.detail).map(e => e.detail))].slice(0, 4);
+    row.panelClosed = (s.events || []).filter(e => e.type === 'panel-closed').length;
     row.teacherPaused = !!s.teacherPaused;
     // Writing in the side panel (and researching on other tabs right now)?
     row.where = doc?.lease?.surf === 'panel' && doc.lease.sessionId === s.id ? 'panel' : 'tab';
@@ -2111,6 +2114,8 @@ function liveRow(u, doc, s, a, t, all = null) {
     (row.status === 'left' || row.status === 'offline') && row.pausedMs > 60000 ? 'away over a minute' : null,
     row.status !== 'submitted' && s && s.state !== 'ended' && s.mode === 'locked' && !row.ext ? 'extension missing' : null,
     row.aiSite ? 'AI site visited' : null,
+    row.tools?.length ? `writing tool on the page: ${row.tools.join(', ')}` : null,
+    row.panelClosed ? 'closed the side panel' : null,
     row.biggestPaste >= 200 && row.outsidePasteChars >= 200 ? 'large paste from outside' : null,
     row.lateBeat ? 'not heard from in 30 s' : null
   ].filter(Boolean);
@@ -3019,6 +3024,7 @@ app.post('/api/ext/research', extAuth, ah(async (req, res) => {
     for (const e of events) {
       if (e.type === 'ai-site') sessionsLib.addEvent(s, { t: e.t, type: 'ai-site', host: e.host, url: e.url, blocked: !!e.blocked });
       if (e.type === 'blocked') sessionsLib.addEvent(s, { t: e.t, type: 'lock-violation', host: e.host, url: e.url });
+      if (e.type === 'panel-closed') sessionsLib.addEvent(s, { t: e.t, type: 'panel-closed' });
     }
     t.put('session', s);
   });

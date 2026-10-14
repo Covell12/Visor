@@ -64,7 +64,7 @@ const writerSetPref = (key, value) => { try { localStorage.setItem(key, String(v
 
 /* ====================== the page ====================== */
 VisorRouter.add('/write/:id', async (el, { id }, query) => {
-  Object.assign(WR, { assignmentId: id, embed: query.get('embed') === 'panel', instrChoice: null, instrShown: false, sideOpen: false, srcTab: null, events: [], offline: null, offlinePause: null, queue: [], seq: 0, confirmedText: '', copied: new Set(), copiedHashes: new Set(), hashWaits: [], pendingSrc: null, lastBeforeInput: null, composing: false, saving: false, lastLock: undefined, banner: null, data: null, session: null, token: null, lease: null, panelCtx: null, researchSent: undefined,
+  Object.assign(WR, { assignmentId: id, embed: query.get('embed') === 'panel', instrChoice: null, instrShown: false, sideOpen: false, srcTab: null, panelClosed: false, toolsSeen: new Set(), events: [], offline: null, offlinePause: null, queue: [], seq: 0, confirmedText: '', copied: new Set(), copiedHashes: new Set(), hashWaits: [], pendingSrc: null, lastBeforeInput: null, composing: false, saving: false, lastLock: undefined, banner: null, data: null, session: null, token: null, lease: null, panelCtx: null, researchSent: undefined,
     imageIds: new Set(), imageToken: null, queueDetached: false, lastRange: null, textCache: null, find: null, findDirty: false, outline: null, outlineSig: '', outlineRev: 0, pages: 1, zoom: 1, loads: 0, docsUI: false, lastCanEdit: undefined, breaksSig: '', printing: false, pastePending: null, pasteConv: null, storedOwn: false, selSig: '', changeN: 0, fitW: 0, selWords: null });
   WR.surf = WR.embed ? 'panel' : 'tab';
   WR.surfaceId = wsSurfaceId(WR.embed);
@@ -300,6 +300,7 @@ function writerInstall() {
   on(window, 'resize', () => { writerApplyZoom(true); writerLayoutSoon(); });
   on(window, 'scroll', writerSyncToolbarEdge, { passive: true });
   on(window, 'afterprint', writerAfterPrint);
+  wsWatchTools();
   // A font that arrives late changes where lines (and pages) end
   if (document.fonts && document.fonts.addEventListener) on(document.fonts, 'loadingdone', () => writerLayoutSoon());
 }
@@ -315,6 +316,7 @@ function writerTeardown() {
   try { if (window.CSS && CSS.highlights) CSS.highlights.delete('dx-sel'); } catch {}
   WR.selSig = '';
   WR.pagesObserver?.disconnect(); WR.pagesObserver = null;
+  WR.toolsObserver?.disconnect(); WR.toolsObserver = null;
   writerAfterPrint();
   document.documentElement.style.removeProperty('--dx-sticky-h');
   document.body.classList.remove('writing-focus');
@@ -343,6 +345,13 @@ function writerSetupQuill() {
   root.setAttribute('autocomplete', 'off'); root.setAttribute('autocorrect', 'off'); root.setAttribute('autocapitalize', 'off');
   root.setAttribute('spellcheck', WR.spellcheck ? 'true' : 'false');
   root.setAttribute('aria-label', 'Your essay');
+  // Grammar and AI writing tools that other extensions add to text boxes, and
+  // the browser's own writing suggestions ("Help me write"), stay out of the
+  // essay when the assignment blocks AI sites: these are the switches those
+  // tools honour. wsWatchTools (writer-session.js) records any that come anyway.
+  if (WR.data.assignment.writing.blockAiSites !== false) {
+    for (const [k, v] of [['writingsuggestions', 'false'], ['data-gramm', 'false'], ['data-gramm_editor', 'false'], ['data-enable-grammarly', 'false'], ['data-lt-active', 'false']]) root.setAttribute(k, v);
+  }
 
   // Everything pasted (HTML or plain text) is checked once more as a whole. In
   // a table cell it becomes text in that one cell (cells are a single line).
@@ -2132,6 +2141,9 @@ function writerRefresh(force) {
   if (!WR.data || !$('wrStatus')) return;
   const a = WR.data.assignment, w = a.writing, doc = WR.doc;
   const active = wsActive();
+  // A session started (or was running when the page loaded): look for other
+  // extensions' writing tools already on the page, once per session
+  if (active && WR.toolsScannedFor !== WR.session.id) { WR.toolsScannedFor = WR.session.id; setTimeout(wsScanTools, 0); }
   const status = doc.status;
   const sig = JSON.stringify([active, status, doc.submittedAt, doc.reopened, !!doc.feedback, !!WR.session, WR.session?.state === 'ended', WR.extPresent, WR.extOther, WR.extInfo?.installed, WR.extInfo?.hasHostPermission, WR.data.timeLeftMs, WR.data.windowProblem, WR.startError, WR.starting, isLeaseHolder()]);
   if (!force && sig === WR.refreshSig) { writerSetSaved(WR.offline ? 'offline' : WR.queue.length ? 'unsaved' : 'saved'); writerUpdateCounts(); writerApplyLock(); return; }
@@ -2213,6 +2225,14 @@ function writerRenderIntro() {
   </div>`;
 }
 
+// The extension's side panel shows how writing stands (its state chip)
+const WR_PANEL_WHY = { 'left-tab': 'the panel is hidden', 'left-window': 'you left Chrome', 'exit-fullscreen': 'you left full screen', offline: 'offline', teacher: 'your teacher paused it', 'ext-missing': 'the extension is off', 'blocked-site': 'on a blocked site' };
+function writerPanelStatus(reason) {
+  if (!WR.embed || !WR.embedOrigin || window.parent === window) return;
+  const state = reason === null ? 'writing' : reason === 'mirror' ? 'elsewhere' : reason === 'not-started' ? 'waiting' : reason === 'ended' ? 'ended' : 'paused';
+  try { window.parent.postMessage({ source: 'visor-page', type: 'PANEL_STATUS', state, why: WR_PANEL_WHY[reason] || '' }, WR.embedOrigin); } catch {}
+}
+
 const LOCK_TEXT = {
   'left-tab': ['Session paused: you left the Visor tab.', 'Writing is turned off while you’re away.'],
   'left-window': ['Session paused: you left the Visor window.', 'Writing is turned off while you’re away.'],
@@ -2233,9 +2253,11 @@ function writerApplyLock() {
   $('wrPaper')?.classList.toggle('locked', !canWrite && wsActive());
   // The menus follow (editing items off while writing is locked)
   if (canWrite !== WR.lastCanEdit) { WR.lastCanEdit = canWrite; writerScheduleUi(); }
+  if (WR.lease?.surf !== 'panel') WR.panelClosed = false;
   if (reason === WR.lastLock) return;
   const prev = WR.lastLock;
   WR.lastLock = reason;
+  writerPanelStatus(reason);
   // (Not while the side panel's student is on another tab: that would pull them back)
   if (canWrite && prev && prev !== 'mirror' && prev !== 'not-started' && prev !== 'ended' && document.hasFocus()) setTimeout(() => WR.quill?.focus(), 0);
   if (!canWrite && prev === null) WR.awaySince = Date.now();
@@ -2246,7 +2268,11 @@ function writerApplyLock() {
     const w = WR.data.assignment.writing;
     const locked = w.mode === 'locked';
     if (locked && !WR.embed && WR.lease?.surf === 'panel') {
-      ov.innerHTML = `<div class="wr-card-pause" role="status"><b>Writing in the side panel</b><p>Sites you open are recorded. Blocked and AI sites stay blocked.</p><button class="btn btn-primary" onclick="wsBackToFullscreen()">Back to full screen</button></div>`;
+      // The extension says the panel was closed (or isn't open): its loosened rules are gone too
+      const gone = WR.panelClosed || WR.extInfo?.session?.panelOpen === false;
+      ov.innerHTML = gone
+        ? `<div class="wr-card-pause" role="alert"><b>The side panel was closed</b><p>Go back to full screen to keep writing. The session’s allowed sites apply again.</p><button class="btn btn-primary" onclick="wsBackToFullscreen()">Back to full screen</button></div>`
+        : `<div class="wr-card-pause" role="status"><b>Writing in the side panel</b><p>Sites you open are recorded. Blocked and AI sites stay blocked.</p><button class="btn btn-primary" onclick="wsBackToFullscreen()">Back to full screen</button></div>`;
       return;
     }
     if (locked && WR.embed && !wsPanelAllowed()) {
@@ -2372,6 +2398,17 @@ async function writerCite(meta) {
     if (r.source.check?.length && !r.existing) setTimeout(() => toast(`Check: ${r.source.check.join(', ')}. Fix it under Sources.`, 'err'), 2600);
   } catch (e) { toast(e.message, 'err'); }
 }
+
+// The extension closed research mode because the side panel was closed: this
+// tab is in front again, and offers full screen
+window.addEventListener('message', e => {
+  const m = e.data;
+  if (!m || m.source !== 'visor-ext' || m.type !== 'PANEL_CLOSED' || m.replyTo) return;
+  if (e.source !== window || e.origin !== location.origin || WR.embed || !WR.doc || m.docId !== WR.doc.id) return;
+  WR.panelClosed = true; WR.lastLock = undefined;
+  writerApplyLock();
+  toast('The side panel was closed. Go back to full screen to keep writing.');
+});
 
 // Messages carrying a citation: the bridge in this tab, or the side panel around the embed
 window.addEventListener('message', e => {
