@@ -387,6 +387,7 @@ canvas.wave { width: 100%; max-width: 460px; height: 64px; border-radius: 8px; b
 /* toast */
 .toast { position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%); background: var(--ink); color: #fff; padding: 11px 18px; border-radius: 14px; font-size: 14px; box-shadow: var(--shadow-md); z-index: 60; max-width: min(560px, calc(100vw - 32px)); width: max-content; animation: rise .2s ease; display: flex; gap: 10px; align-items: center; }
 .toast.err { background: #B23B37; }
+.toast.warn { background: #7A4E0C; }
 .toast svg { width: 16px; height: 16px; }
 
 /* audio player */

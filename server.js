@@ -3014,7 +3014,8 @@ app.post('/api/ext/research', extAuth, ah(async (req, res) => {
   // A late batch from a session that just ended is still kept; a stale one isn't
   if (s0.state === 'ended' && Date.now() - Date.parse(s0.endedAt) > 15 * 60 * 1000) throw new HttpError(410, 'That session ended.');
   if (!research.rateLimit(s0.id)) throw new HttpError(429, 'Too many research batches; try again in a minute.');
-  const events = research.cleanEvents(body.events);
+  // (a 'panel-closed' stamped after the session ended is just tidying up: not kept)
+  const events = research.cleanEvents(body.events).filter(e => !(e.type === 'panel-closed' && s0.endedAt && e.t > Date.parse(s0.endedAt)));
   if (!events.length) return res.json({ ok: true, stored: 0 });
   await repo.withRecords(async t => {
     const s = await t.get('session', s0.id);

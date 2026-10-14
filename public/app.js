@@ -75,9 +75,9 @@ const configReady = fetch('/api/config').then(r => r.json()).then(c => { CFG = {
 let toastTimer;
 function toast(msg, kind = '') {
   const root = $('toastRoot');
-  root.innerHTML = `<div class="toast ${kind}">${kind === 'err' ? I.alert : I.check}<span>${esc(msg)}</span></div>`;
+  root.innerHTML = `<div class="toast ${kind}">${kind === 'err' || kind === 'warn' ? I.alert : I.check}<span>${esc(msg)}</span></div>`;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { root.innerHTML = ''; }, kind === 'err' ? 5000 : 2600);
+  toastTimer = setTimeout(() => { root.innerHTML = ''; }, kind === 'err' || kind === 'warn' ? 5000 : 2600);
 }
 
 // Modal: openModal({ title, sub, body, footer, wide, onClose }) → returns close()

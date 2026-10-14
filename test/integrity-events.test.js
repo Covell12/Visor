@@ -91,7 +91,7 @@ test('a panel closed after the session ended is not recorded; AI modes go by the
   const H = { 'X-Visor-Session': (await kim.post(`/api/write/${doc.id}/sessions`, { surfaceId: 'tab-1', surf: 'tab', extPresent: true, fullscreen: false })).data.token };
   const X = { 'X-Visor-Token': (await kim.post('/api/ext/token')).data.token };
   // an AI mode visit, by name
-  let r = await kim.post('/api/ext/research', { sessionToken: H['X-Visor-Session'], docId: doc.id, events: [{ type: 'ai-site', t: Date.now(), url: 'https://www.google.com/search?q=x&udm=50', host: 'www.google.com', site: 'Google AI Mode', blocked: true }] }, X);
+  let r = await kim.post('/api/ext/research', { sessionToken: H['X-Visor-Session'], docId: doc.id, events: [{ type: 'ai-site', t: Date.now(), url: 'https://www.google.com/search?q=x&udm=50', host: 'www.google.com', site: 'Google AI Mode', blocked: true }, { type: 'ai-site', t: Date.now(), url: 'https://duckduckgo.com/?q=x&ia=chat', host: 'duckduckgo.com', site: 'Duck.ai', blocked: true }] }, X);
   assert.strictEqual(r.status, 200, JSON.stringify(r.data));
   // the session ends, then a late 'panel-closed' arrives stamped after it
   r = await kim.post(`/api/write/${doc.id}/end`, {}, H);
@@ -101,5 +101,7 @@ test('a panel closed after the session ended is not recorded; AI modes go by the
   r = await teacher.get(`/api/review/${doc.id}`);
   const notes = r.data.report.notes.map(n => n.text);
   assert.ok(notes.includes('Visited Google AI Mode during session 1 (blocked).'), JSON.stringify(notes));
+  assert.ok(notes.includes('Visited Duck.ai during session 1 (blocked).'), JSON.stringify(notes));
   assert.ok(!notes.some(t => /side panel/.test(t)), 'no closed-panel note after the session ended');
+  assert.ok(!r.data.report.research.events.some(e => e.type === 'panel-closed'), 'nor a Research-tab line');
 });

@@ -2407,7 +2407,7 @@ window.addEventListener('message', e => {
   if (e.source !== window || e.origin !== location.origin || WR.embed || !WR.doc || m.docId !== WR.doc.id) return;
   WR.panelClosed = true; WR.lastLock = undefined;
   writerApplyLock();
-  toast('The side panel was closed. Go back to full screen to keep writing.');
+  toast('The side panel was closed. Go back to full screen to keep writing.', 'warn');
 });
 // ...and opened again, with the writing still in it
 window.addEventListener('message', e => {
