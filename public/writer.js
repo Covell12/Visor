@@ -2409,6 +2409,16 @@ window.addEventListener('message', e => {
   writerApplyLock();
   toast('The side panel was closed. Go back to full screen to keep writing.');
 });
+// ...and opened again, with the writing still in it
+window.addEventListener('message', e => {
+  const m = e.data;
+  if (!m || m.source !== 'visor-ext' || m.type !== 'PANEL_OPENED' || m.replyTo) return;
+  if (e.source !== window || e.origin !== location.origin || WR.embed || !WR.doc || m.docId !== WR.doc.id) return;
+  WR.panelClosed = false;
+  if (WR.extInfo?.session) WR.extInfo.session.panelOpen = true;
+  WR.lastLock = undefined;
+  writerApplyLock();
+});
 
 // Messages carrying a citation: the bridge in this tab, or the side panel around the embed
 window.addEventListener('message', e => {

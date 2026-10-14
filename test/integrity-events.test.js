@@ -79,3 +79,27 @@ test('writing tools and a closed side panel reach the board and the notes', asyn
   // facts only: nothing calls the writing AI-generated
   assert.ok(!JSON.stringify(notes).match(/AI-generated|probability/i));
 });
+
+test('a panel closed after the session ended is not recorded; AI modes go by their name', async () => {
+  const teacher = client(), kim = client();
+  await teacher.post('/api/auth/signup', { email: 't2@int.test', password: 'secret12', firstName: 'Tess', lastName: 'Two', role: 'teacher' });
+  const cls = (await teacher.post('/api/classes', { name: 'English 11' })).data.class;
+  await kim.post('/api/auth/signup', { email: 'k@int.test', password: 'secret12', firstName: 'Kim', lastName: 'Lee', role: 'student', classCode: cls.joinCode, over13: true });
+  const a = (await teacher.post(`/api/classes/${cls.id}/assignments`, { type: 'writing', title: 'Essay', writing: { mode: 'open' } })).data.assignment;
+  await teacher.post(`/api/assignments/${a.id}/publish`, { published: true });
+  const doc = (await kim.get(`/api/write/${a.id}`)).data.doc;
+  const H = { 'X-Visor-Session': (await kim.post(`/api/write/${doc.id}/sessions`, { surfaceId: 'tab-1', surf: 'tab', extPresent: true, fullscreen: false })).data.token };
+  const X = { 'X-Visor-Token': (await kim.post('/api/ext/token')).data.token };
+  // an AI mode visit, by name
+  let r = await kim.post('/api/ext/research', { sessionToken: H['X-Visor-Session'], docId: doc.id, events: [{ type: 'ai-site', t: Date.now(), url: 'https://www.google.com/search?q=x&udm=50', host: 'www.google.com', site: 'Google AI Mode', blocked: true }] }, X);
+  assert.strictEqual(r.status, 200, JSON.stringify(r.data));
+  // the session ends, then a late 'panel-closed' arrives stamped after it
+  r = await kim.post(`/api/write/${doc.id}/end`, {}, H);
+  assert.strictEqual(r.status, 200, JSON.stringify(r.data));
+  r = await kim.post('/api/ext/research', { sessionToken: H['X-Visor-Session'], docId: doc.id, events: [{ type: 'panel-closed', t: Date.now() + 1000 }] }, X);
+  assert.strictEqual(r.status, 200, JSON.stringify(r.data));
+  r = await teacher.get(`/api/review/${doc.id}`);
+  const notes = r.data.report.notes.map(n => n.text);
+  assert.ok(notes.includes('Visited Google AI Mode during session 1 (blocked).'), JSON.stringify(notes));
+  assert.ok(!notes.some(t => /side panel/.test(t)), 'no closed-panel note after the session ended');
+});

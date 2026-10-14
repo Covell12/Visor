@@ -368,6 +368,9 @@ async function wsResearchMode() {
 // then the lease, then the extension's usual lockdown
 async function wsBackToFullscreen() {
   await document.documentElement.requestFullscreen().catch(() => {});
+  // Full screen hides the side panel: research mode ends now, not after the
+  // lease call (on slow Wi-Fi the extension would take that for the panel closing)
+  if (window.VisorExt) wsSendResearch(false);
   await wsTakeLease();
   if (isLeaseHolder() && window.VisorExt) wsSendResearch(false);
 }
@@ -439,30 +442,39 @@ function wsInstall() {
 }
 /* ---- other extensions' writing tools on the page ----
    Grammar checkers and AI writing helpers from other extensions show up on
-   the page as their own elements (Grammarly's <grammarly-extension>,
-   LanguageTool's <lt-toolbar>…). On an assignment that blocks AI sites, each
+   the page as their own elements. On an assignment that blocks AI sites, each
    one seen during a session is recorded once ('assistant-ext', with its name:
    the live board and the notes show it) and the student is asked to turn it
    off. Only names are matched, never content; a tool that isn't on this list
-   (a password manager, a translator) is never reported. */
+   (a password manager, a translator) is never reported.
+   Grammar checkers ('field' below) add something to every page they run on,
+   so they count only when they attach to the essay itself (their element
+   inside the page area); Grammarly's page-wide <grammarly-desktop-integration>
+   never counts. AI chat sidebars count wherever they are on the page. */
 const WS_TOOLS = [
-  ['Grammarly', /^grammarly(-|$)/i, /grammarly/i],
-  ['LanguageTool', /^lt-(toolbar|highlighter|mirror|span|div|card)/i, /languagetool/i],
-  ['QuillBot', /^quillbot/i, /^quillbot/i],
-  ['Wordtune', /^wordtune/i, /^wordtune/i],
-  ['Sider', /^sider-/i, /^sider[-_]/i],
-  ['Monica', /^monica-/i, /^monica[-_]/i],
-  ['MaxAI', /^(maxai|use-chat-gpt-ai)/i, /^(maxai|use_chat_gpt_ai)/i],
-  ['Merlin', /^merlin-/i, /^merlin[-_]/i],
-  ['HARPA AI', /^harpa-/i, /^harpa[-_]/i],
-  ['Compose AI', /^compose-ai/i, /^compose-?ai/i],
-  ['Text Blaze', /^text-?blaze/i, /^text-?blaze/i]
+  ['Grammarly', /^grammarly-(extension|card|mirror|ghost|btn|popups)/i, /grammarly/i, 'field'],
+  ['LanguageTool', /^lt-(toolbar|highlighter|mirror|span|div|card)/i, /languagetool/i, 'field'],
+  ['QuillBot', /^quillbot/i, /^quillbot/i, 'field'],
+  ['Wordtune', /^wordtune/i, /^wordtune/i, 'field'],
+  ['Compose AI', /^compose-ai/i, /^compose-?ai/i, 'field'],
+  ['Text Blaze', /^text-?blaze/i, /^text-?blaze/i, 'field'],
+  ['Sider', /^sider-/i, /^sider[-_]/i, 'page'],
+  ['Monica', /^monica-/i, /^monica[-_]/i, 'page'],
+  ['MaxAI', /^(maxai|use-chat-gpt-ai)/i, /^(maxai|use_chat_gpt_ai)/i, 'page'],
+  ['Merlin', /^merlin-/i, /^merlin[-_]/i, 'page'],
+  ['HARPA AI', /^harpa-/i, /^harpa[-_]/i, 'page']
 ];
+const WS_TOOL_IGNORE = /^grammarly-desktop-integration$/i;   // on every page Grammarly runs on, attached or not
+const wsInEssay = el => !!el.closest?.('#wrPaper, .dx-pages');
 function wsToolName(el) {
   if (!el || el.nodeType !== 1) return null;
   const tag = el.tagName, id = el.id || '';
-  if (el.hasAttribute('data-grammarly-shadow-root')) return 'Grammarly';
-  for (const [name, tagRe, idRe] of WS_TOOLS) if ((tag.includes('-') && tagRe.test(tag)) || (id && idRe.test(id))) return name;
+  if (WS_TOOL_IGNORE.test(tag)) return null;
+  for (const [name, tagRe, idRe, where] of WS_TOOLS) {
+    if (!((tag.includes('-') && tagRe.test(tag)) || (id && idRe.test(id)))) continue;
+    return where === 'page' || wsInEssay(el) ? name : null;
+  }
+  if (el.hasAttribute('data-grammarly-shadow-root') && wsInEssay(el)) return 'Grammarly';
   return null;
 }
 function wsToolSeen(name) {
@@ -475,20 +487,28 @@ function wsToolSeen(name) {
   const list = names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]} are` : `${names[0]} is`;
   writerBanner(`${list} running on this page. Writing tools from other extensions aren’t allowed in this assignment: turn ${names.length > 1 ? 'them' : 'it'} off for this site. Visor notes that ${names.length > 1 ? 'they were' : 'it was'} here.`, 'warn');
 }
-// Everything already on the page, then whatever is added later
-function wsScanTools() {
-  for (const el of document.querySelectorAll('[data-grammarly-shadow-root], [id]')) wsToolSeen(wsToolName(el));
-  const walk = document.createTreeWalker(document.documentElement, NodeFilter.SHOW_ELEMENT, { acceptNode: n => (n.tagName.includes('-') ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP) });
+// An element and everything inside it: custom elements and anything with an id
+function wsToolsIn(root) {
+  if (!root || root.nodeType !== 1) return;
+  wsToolSeen(wsToolName(root));
+  if (!root.firstElementChild) return;
+  const walk = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT, { acceptNode: n => (n.tagName.includes('-') || n.id || n.hasAttribute('data-grammarly-shadow-root') ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP) });
   while (walk.nextNode()) wsToolSeen(wsToolName(walk.currentNode));
 }
+// Everything already on the page (at a session's start)
+function wsScanTools() { wsToolsIn(document.documentElement); }
+// ...then whatever is added, or renamed, later
 function wsWatchTools() {
   WR.toolsObserver?.disconnect();
   if (!window.MutationObserver) return;
   WR.toolsObserver = new MutationObserver(list => {
     if (!wsActive()) return;
-    for (const m of list) for (const n of m.addedNodes) { if (n.nodeType === 1) wsToolSeen(wsToolName(n)); }
+    for (const m of list) {
+      if (m.type === 'attributes') { wsToolSeen(wsToolName(m.target)); continue; }
+      for (const n of m.addedNodes) wsToolsIn(n);
+    }
   });
-  WR.toolsObserver.observe(document.documentElement, { childList: true, subtree: true });
+  WR.toolsObserver.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['id'] });
 }
 
 function wsUninstall() {

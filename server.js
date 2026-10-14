@@ -2116,6 +2116,8 @@ function liveRow(u, doc, s, a, t, all = null) {
     row.aiSite ? 'AI site visited' : null,
     row.tools?.length ? `writing tool on the page: ${row.tools.join(', ')}` : null,
     row.panelClosed ? 'closed the side panel' : null,
+    // The extension can't see pages, so it can only block them outright and records no research
+    s && s.state !== 'ended' && s.mode === 'locked' && row.ext && s.extension?.hasHostPermission === false ? 'site access withheld from the extension' : null,
     row.biggestPaste >= 200 && row.outsidePasteChars >= 200 ? 'large paste from outside' : null,
     row.lateBeat ? 'not heard from in 30 s' : null
   ].filter(Boolean);
@@ -3022,9 +3024,10 @@ app.post('/api/ext/research', extAuth, ah(async (req, res) => {
     s.researchLast = chunks[chunks.length - 1].no;
     s.researchCount = (s.researchCount || 0) + events.length;
     for (const e of events) {
-      if (e.type === 'ai-site') sessionsLib.addEvent(s, { t: e.t, type: 'ai-site', host: e.host, url: e.url, blocked: !!e.blocked });
+      if (e.type === 'ai-site') sessionsLib.addEvent(s, { t: e.t, type: 'ai-site', host: e.host, url: e.url, blocked: !!e.blocked, ...(e.site ? { site: e.site } : {}) });
       if (e.type === 'blocked') sessionsLib.addEvent(s, { t: e.t, type: 'lock-violation', host: e.host, url: e.url });
-      if (e.type === 'panel-closed') sessionsLib.addEvent(s, { t: e.t, type: 'panel-closed' });
+      // (not one stamped after the session ended: the panel closing then is just tidying up)
+      if (e.type === 'panel-closed' && !(s.endedAt && e.t > Date.parse(s.endedAt))) sessionsLib.addEvent(s, { t: e.t, type: 'panel-closed' });
     }
     t.put('session', s);
   });

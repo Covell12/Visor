@@ -246,6 +246,7 @@ function rvResearch(body) {
     if (e.type === 'copy') return `<div class="rl">${time}<span class="rl-kind">Copied</span><span class="small">“${esc(e.copy?.preview || '')}${(e.copy?.len || 0) > 140 ? '…' : ''}”</span><span class="tiny muted">${(e.copy?.len || 0).toLocaleString()} ch from ${esc(e.host || '')}</span>${pastedFrom.has(new Date(e.t).toISOString()) ? '<span class="pill pill-blue">pasted into the essay</span>' : ''}</div>`;
     if (e.type === 'cite') return `<div class="rl">${time}<span class="rl-kind">Cited</span><span>${esc(e.title || e.url)}</span></div>`;
     if (e.type === 'ai-site') return `<div class="rl rl-ai">${time}<span class="rl-kind">AI site</span><b>${esc(e.host)}</b><span class="pill ${e.blocked ? 'pill-gray' : 'pill-amber'}">${e.blocked ? 'blocked' : 'visited'}</span></div>`;
+    if (e.type === 'panel-closed') return `<div class="rl">${time}<span class="rl-kind">Side panel</span><span>Closed while writing in it; the session went back to its allowed sites</span></div>`;
     if (e.type === 'lock-violation') return `<div class="rl">${time}<span class="rl-kind">Not allowed</span><span>${esc(e.host || e.url || '')}</span><span class="pill pill-gray">blocked</span></div>`;
     return '';
   };
