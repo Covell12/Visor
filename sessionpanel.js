@@ -62,7 +62,17 @@ function rulesHtml(st) {
   return `<b>Open session.</b> ${ai}`;
 }
 
+// Opened as an ordinary tab (its address typed in): this page belongs in the
+// side panel, so it loads no document there
+let inTab = null;
 async function render() {
+  if (inTab == null) inTab = !!(await chrome.tabs.getCurrent().catch(() => null));
+  if (inTab) {
+    $('sp-main').hidden = true; $('sp-foot').hidden = true; $('sp-none').hidden = false;
+    $('sp-none').querySelector('h2').textContent = 'This belongs in the side panel';
+    $('sp-none').querySelector('p').textContent = 'Click the Visor icon in Chrome’s toolbar to open your document next to your research.';
+    return;
+  }
   const next = await ask('VISOR_PANEL_STATE');
   const was = state;
   state = next && next.active ? next : null;
@@ -182,9 +192,12 @@ $('sp-back').addEventListener('click', async () => {
 });
 
 // ── Presence: tell the service worker whether this copy is on screen ───────
-let port = null, pingTimer = null;
+// (and in which window: hidden because its window is minimized or behind
+// another isn't the same as closed)
+let port = null, pingTimer = null, windowId = null, quickDrops = 0;
+chrome.windows.getCurrent().then((w) => { windowId = w && w.id; sendVisibility(); }).catch(() => {});
 function sendVisibility() {
-  try { port && port.postMessage({ type: 'visibility', visible: document.visibilityState === 'visible' }); } catch (_) {}
+  try { port && port.postMessage({ type: 'visibility', visible: document.visibilityState === 'visible', windowId }); } catch (_) {}
 }
 function presence(on) {
   if (!on) {
@@ -193,9 +206,15 @@ function presence(on) {
     return;
   }
   if (port) return;
+  const at = Date.now();
   try { port = chrome.runtime.connect({ name: 'visor-session-panel' }); } catch (_) { port = null; return; }
-  // The worker restarted (or was updated): connect again
-  port.onDisconnect.addListener(() => { port = null; void chrome.runtime.lastError; setTimeout(() => { if (state) presence(true); }, 800); });
+  // The worker restarted (or was updated): connect again. Refused straight
+  // away again and again: back off rather than knock every second.
+  port.onDisconnect.addListener(() => {
+    port = null; void chrome.runtime.lastError;
+    quickDrops = Date.now() - at < 1000 ? quickDrops + 1 : 0;
+    setTimeout(() => { if (state) presence(true); }, quickDrops > 3 ? 30000 : 800);
+  });
   sendVisibility();
   // A message every 20 s keeps the worker listening while the panel is open
   clearInterval(pingTimer);

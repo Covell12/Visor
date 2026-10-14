@@ -153,6 +153,8 @@ async function sessionStart(payload, sender) {
     // Writing in the side panel (locked sessions): kept across a re-send too,
     // or, if the extension lost its state (a browser restart), as the page says
     researchMode: prev && prev.docId === docId ? !!prev.researchMode : !!settings.research,
+    // A copy of the session panel has been on screen since research mode began
+    panelSeen: prev && prev.docId === docId ? !!prev.panelSeen : false,
     lockActive: false
   };
   await setState(state);
@@ -167,6 +169,9 @@ async function sessionStart(payload, sender) {
   if (state.settings.oneClickCite === false) removeCiteMenu();
   else addCiteMenu();
   chrome.alarms.create(FLUSH_ALARM, { periodInMinutes: 1 });
+  // Starting (or restarting) in research mode: the panel must show up, or the
+  // allowed list comes back
+  if (state.researchMode && state.settings.mode === 'locked' && !panelVisible()) checkPanelSoon(PANEL_OPEN_MS);
   await extBeat();
   return { ok: true, recording, lockActive: (await getState()).lockActive };
 }
@@ -181,10 +186,13 @@ async function sessionEnd(reason) {
     await flushResearch().catch(() => {});
   }
   await stopResearchCapture();
-  await lockChained(() => lockdownOff());
+  // The rules and the session go in one job on the rules queue, so a rebuild
+  // queued meanwhile (a beat, the panel, a research switch) finds no session
+  // and can't put the rules back
+  await lockChained(async () => { await clearRules(); await setState(null); });
+  clearTimeout(panelTimer); panelTimer = null; lastGone = null;
   await chrome.alarms.clear(FLUSH_ALARM).catch(() => {});
   removeCiteMenu();
-  await setState(null);
   await chrome.storage.local.remove(LIVE_FLAG);
   await setBadge(false);
   await restoreDocsPanelMode();
@@ -222,22 +230,29 @@ async function disconnectedByServer() {
 // The extension's beat: the server learns it's still here and whether the
 // lockdown is on; the extension learns whether the session is still running,
 // and which surface holds the editing lease (leaseSurf).
+// Answers what the server said (null if it couldn't be reached).
 async function extBeat() {
   const s = await getState();
-  if (!s || !s.active) return;
+  if (!s || !s.active) return null;
   try {
     const r = await visorApi('/api/ext/session/beat', { method: 'POST', body: { docId: s.docId, lockActive: !!s.lockActive, hasHostPermission: await hasHostPermission(), version: chrome.runtime.getManifest().version }, origin: s.origin });
-    if (!r.active) return sessionEnd('server');
+    if (!r.active) { await sessionEnd('server'); return r; }
     if (r.deadlineAt !== s.deadlineAt) await patchState((x) => { x.deadlineAt = r.deadlineAt; });
     // The tab drives research mode; this catches up if a message was missed.
-    // Not right after a switch: the tab moves the lease just after its message.
+    // Not right after the tab switched it (it moves the lease just after its
+    // message). On only while a copy of the panel is on screen.
     const settling = s.researchAt && Date.now() - s.researchAt < RESEARCH_SETTLE_MS;
     if (s.settings.mode === 'locked' && s.settings.panelBrowsing !== false && !settling) {
-      if (r.leaseSurf === 'panel' && !s.researchMode && panelVisible()) await setResearchMode(true);
-      else if (r.leaseSurf === 'tab' && s.researchMode) await setResearchMode(false);
+      if (r.leaseSurf === 'panel' && !s.researchMode && panelVisible()) {
+        await setResearchMode(true, 'beat');
+        // The Visor tab may still be saying the panel was closed
+        if (s.visorTabId != null) chrome.tabs.sendMessage(s.visorTabId, { channel: 'visor-to-page', type: 'PANEL_OPENED', docId: s.docId }).catch(() => {});
+      } else if (r.leaseSurf === 'tab' && s.researchMode) await setResearchMode(false, 'beat');
     }
+    return r;
   } catch (e) {
-    if (e.status === 401) return disconnectedByServer();
+    if (e.status === 401) await disconnectedByServer();
+    return null;
   }
 }
 
@@ -260,45 +275,66 @@ function relock() {
     if (cur && cur.active && (cur.settings.mode === 'locked' || cur.settings.blockAiSites)) await lockdownOn(cur);
   });
 }
-function setResearchMode(on) {
-  return lockChained(() => switchResearchMode(on));
+// by: 'tab' (the Visor page asked), 'beat' (catching up with the lease) or
+// 'panel' (the panel left the screen)
+function setResearchMode(on, by = 'tab') {
+  return lockChained(() => switchResearchMode(on, by));
 }
-async function switchResearchMode(on) {
+async function switchResearchMode(on, by = 'tab') {
   const s = await getState();
   if (!s || !s.active) return { ok: false, error: 'no session' };
   if (s.settings.mode === 'locked' && s.settings.panelBrowsing === false) return { ok: false, error: 'Side-panel mode is turned off for this assignment.' };
   // Open sessions have no allowed list: nothing to change
   if (s.settings.mode !== 'locked') return { ok: true, researchMode: !!s.researchMode };
+  // No copy of the panel on screen, and none being opened from the tab right
+  // now: the writing can't be in the panel, so the rules stay as they are
+  // (a reload of the tab says "on" again; the beat turns it on once a copy
+  // shows up)
+  const opening = panelAskedAt && Date.now() - panelAskedAt < PANEL_OPEN_MS;
+  if (on && !s.researchMode && !panelVisible() && !opening) return { ok: true, researchMode: false, waiting: true };
   // Already there (the tab says so once per page load): nothing to rebuild
-  if (!!s.researchMode === !!on) return { ok: true, researchMode: !!on };
-  // In the state chain, so a research event being written can't undo it
-  await withState((x) => { x.researchMode = !!on; x.researchAt = Date.now(); });
+  if (!!s.researchMode === !!on) {
+    if (on && !panelVisible()) checkPanelSoon(PANEL_OPEN_MS);
+    return { ok: true, researchMode: !!on };
+  }
+  // In the state chain, so a research event being written can't undo it. The
+  // settle time (when the beat leaves research mode alone) is only for the
+  // tab's own switches, which move the lease just after.
+  await withState((x) => { x.researchMode = !!on; x.researchAt = by === 'tab' ? Date.now() : 0; if (on) x.panelSeen = panelVisible(); });
   // The rules are rebuilt both ways. Tabs opened while researching stay as
   // they are: the teacher allowed that research, and back in full screen the
   // student can't look at them without a pause being recorded.
   const next = await getState();
   if (next && next.active) await lockdownOn(next, { sweep: false });
   // The panel has a few seconds to show up (opening it takes a click in the tab)
-  if (on) checkPanelSoon(PANEL_OPEN_MS);
+  if (on && !panelVisible()) checkPanelSoon(PANEL_OPEN_MS);
   return { ok: true, researchMode: !!on };
 }
 
 // ── Panel presence: is the session panel actually on screen? ───────────────
 // Each copy of the session panel (Chrome may keep one per tab) holds a port
-// and says whether it's visible. A locked session writing in the side panel
-// (research mode) has its allowed list set aside only while the panel is
-// there: once no copy has been on screen for PANEL_GONE_MS (the student
-// closed it, or put another panel such as Chrome's own Gemini or Lens in its
-// place), research mode ends at once. The allowed list is back, the Visor tab
-// comes to the front and says so, and the session records 'panel-closed'.
-// Opening the panel again resumes research mode (it still holds the lease).
-// The ports live in memory: a restarted worker learns them again within a
-// second, and never ends research mode on its own account meanwhile.
+// and says whether it's visible, and in which window. A locked session
+// writing in the side panel (research mode) keeps its allowed list set aside
+// only while a copy is on screen. Once none has been for PANEL_GONE_MS:
+//   • closed (the copy went away), or hidden while its own window is in front
+//     (another panel, such as Chrome's Gemini or Lens, took its place): the
+//     server is asked first; if the session still runs with the writing in the
+//     panel, research mode ends (the allowed list is back), the session
+//     records 'panel-closed', and the Visor tab comes to the front and says so;
+//   • hidden because the student is elsewhere (another app, the window
+//     minimized, another Chrome window in front): nothing yet. Writing pauses
+//     there anyway, and it's looked at again when focus comes back.
+// A panel that never showed up (opening it failed) ends research mode quietly.
+// Opening the panel again resumes research mode at once (the beat finds it
+// still holds the lease). The ports live in memory: a restarted worker learns
+// them again within a second and only acts after PANEL_OPEN_MS.
 const PANEL_PORT = 'visor-session-panel';
 const PANEL_GONE_MS = 3000;
 const PANEL_OPEN_MS = 8000;
-const panelPorts = new Map();   // port -> { visible }
+const panelPorts = new Map();   // port -> { visible, windowId }
 let panelTimer = null;
+let lastGone = null;            // { why: 'closed' | 'hidden', windowId } of the copy last on screen
+let panelAskedAt = 0;           // when the Visor tab last asked Chrome to open the panel
 const panelVisible = () => [...panelPorts.values()].some((p) => p.visible);
 
 chrome.runtime.onConnect.addListener((port) => {
@@ -307,25 +343,33 @@ chrome.runtime.onConnect.addListener((port) => {
   // could otherwise claim the panel is on screen and keep the rules loose)
   const from = port.sender || {};
   if (from.tab || !String(from.url || '').startsWith(chrome.runtime.getURL(SESSION_PANEL))) { try { port.disconnect(); } catch (_) {} return; }
-  panelPorts.set(port, { visible: false });
+  panelPorts.set(port, { visible: false, windowId: null });
   port.onMessage.addListener((m) => {
     if (!m || m.type !== 'visibility' || !panelPorts.has(port)) return;   // ('ping' only keeps the worker awake)
     const was = panelVisible();
-    panelPorts.get(port).visible = !!m.visible;
-    panelPresenceChanged(was);
+    const p = panelPorts.get(port);
+    if (Number.isInteger(m.windowId)) p.windowId = m.windowId;
+    const wasThis = p.visible;
+    p.visible = !!m.visible;
+    panelPresenceChanged(was, wasThis && !p.visible ? { why: 'hidden', windowId: p.windowId } : null);
   });
   port.onDisconnect.addListener(() => {
     const was = panelVisible();
+    const p = panelPorts.get(port);
     panelPorts.delete(port);
-    panelPresenceChanged(was);
+    panelPresenceChanged(was, p && p.visible ? { why: 'closed', windowId: p.windowId } : null);
   });
 });
 
-function panelPresenceChanged(was) {
+function panelPresenceChanged(was, gone) {
+  if (gone) lastGone = gone;
   if (panelVisible()) {
     clearTimeout(panelTimer); panelTimer = null;
-    // Back on screen: the beat says whether the panel still holds the lease
-    if (!was) extBeat().catch(() => {});
+    if (!was) {
+      // On screen (again): note it, and the beat says whether it holds the lease
+      withState((x) => { if (x.researchMode) x.panelSeen = true; }).catch(() => {});
+      extBeat().catch(() => {});
+    }
     return;
   }
   if (was) checkPanelSoon(PANEL_GONE_MS);
@@ -334,25 +378,59 @@ function checkPanelSoon(ms) {
   clearTimeout(panelTimer);
   panelTimer = setTimeout(() => { panelTimer = null; panelGone().catch(() => {}); }, ms);
 }
+// Coming back to a Chrome window: look again at a panel that went off screen
+chrome.windows.onFocusChanged.addListener((windowId) => {
+  if (windowId === chrome.windows.WINDOW_ID_NONE || panelVisible() || panelTimer) return;
+  getState().then((s) => { if (s && s.active && s.researchMode) checkPanelSoon(1500); }).catch(() => {});
+});
+
+// Is the student simply somewhere else (so the panel isn't really gone)?
+async function awayFromPanel() {
+  if (!lastGone || lastGone.why !== 'hidden') return false;
+  const focused = await chrome.windows.getLastFocused().catch(() => null);
+  if (!focused || !focused.focused) return true;                  // another app
+  if (lastGone.windowId == null) return false;
+  const win = await chrome.windows.get(lastGone.windowId).catch(() => null);
+  if (!win) return false;                                          // its window is gone
+  return win.state === 'minimized' || focused.id !== win.id;       // minimized, or another Chrome window in front
+}
 
 async function panelGone() {
   if (panelVisible()) return;
   const s = await getState();
   if (!s || !s.active || s.settings.mode !== 'locked' || !s.researchMode) return;
-  await withState((x) => { queueEvent(x, { type: 'panel-closed' }); });
-  await setResearchMode(false);
+  if (await awayFromPanel()) return;
+  // The server first: the session may have ended (submitted from the panel),
+  // or the tab may hold the writing already
+  const r = await extBeat();
+  if (r && !r.active) return;
+  if (panelVisible()) return;
+  const cur = await getState();
+  if (!cur || !cur.active || !cur.researchMode) return;
+  const wasThere = !!cur.panelSeen && (!r || r.leaseSurf === 'panel');
+  if (wasThere) await withState((x) => { queueEvent(x, { type: 'panel-closed' }); });
+  await setResearchMode(false, 'panel');
+  if (!wasThere) return;
   flushResearch().catch(() => {});
   // Back to the Visor tab (a new one if it's gone), which offers full screen again
-  let tab = s.visorTabId != null ? await chrome.tabs.get(s.visorTabId).catch(() => null) : null;
+  let tab = cur.visorTabId != null ? await chrome.tabs.get(cur.visorTabId).catch(() => null) : null;
   if (tab && !VisorConfig.isVisorOrigin(tab.url || '')) tab = null;
   if (!tab) {
-    tab = await chrome.tabs.create({ url: `${s.origin}/write/${encodeURIComponent(s.assignmentId)}` }).catch(() => null);
+    tab = await chrome.tabs.create({ url: `${cur.origin}/write/${encodeURIComponent(cur.assignmentId)}` }).catch(() => null);
     if (tab) await patchState((x) => { x.visorTabId = tab.id; x.visorWindowId = tab.windowId; });
     return;
   }
   await chrome.tabs.update(tab.id, { active: true }).catch(() => {});
   chrome.windows.update(tab.windowId, { focused: true }).catch(() => {});
-  chrome.tabs.sendMessage(tab.id, { channel: 'visor-to-page', type: 'PANEL_CLOSED', docId: s.docId }).catch(() => {});
+  chrome.tabs.sendMessage(tab.id, { channel: 'visor-to-page', type: 'PANEL_CLOSED', docId: cur.docId }).catch(() => {});
+}
+
+// Site access taken away (or given back) mid-session: rebuild the rules, which
+// block pages outright when they can't be redirected, and tell the server
+if (chrome.permissions && chrome.permissions.onRemoved) {
+  const accessChanged = () => getState().then((s) => { if (s && s.active) { relock(); extBeat().catch(() => {}); } }).catch(() => {});
+  chrome.permissions.onRemoved.addListener(accessChanged);
+  chrome.permissions.onAdded && chrome.permissions.onAdded.addListener(accessChanged);
 }
 
 // ── Messages from the Visor page (site-bridge.js) ─────────────────────────
@@ -392,7 +470,9 @@ async function handleBridge(msg, sender) {
       return { ok: true };
     }
     case 'OPEN_PANEL': {
-      // Needs the click that sent this message, so open() is called first thing
+      // Needs the click that sent this message, so open() is called first thing.
+      // Research mode may begin in the next few seconds (switchResearchMode).
+      panelAskedAt = Date.now();
       try {
         await chrome.sidePanel.open({ windowId: sender.tab.windowId });
         return { ok: true };
@@ -405,7 +485,7 @@ async function handleBridge(msg, sender) {
       // The tab moved the editing lease to the side panel, or took it back
       const s = await getState();
       if (!s || !s.active || !p.docId || p.docId !== s.docId) return { ok: false, error: 'no session' };
-      return setResearchMode(!!p.on);
+      return setResearchMode(!!p.on, 'tab');
     }
   }
   return { ok: false, error: 'unknown request' };
@@ -537,9 +617,28 @@ const topFrame = (d) => d.frameId === 0 || d.frameType === 'outermost_frame';
 
 async function navigated(details) {
   if (!topFrame(details) || details.documentLifecycle === 'prerender') return;
+  await aiModeNavigation(details.tabId, details.url);
   await recordSearch(details.url);
   const tab = await lookingAt();
   if (tab && tab.id === details.tabId) await focusChanged();
+}
+
+// A search engine's AI mode reached without a page load (the results page
+// switching mode in place) or by an address the rules can't read (encoded):
+// the tab goes to the blocked page, and the visit is recorded once
+async function aiModeNavigation(tabId, url) {
+  const name = VisorLockdown.searchAiMatch(url);
+  if (!name) return;
+  const go = await withState((s) => {
+    if (!s.settings.blockAiSites) return false;
+    const host = hostOf(url);
+    if (!(s.lastAi && s.lastAi.host === host && s.lastAi.url === capUrl(url) && Date.now() - s.lastAi.t < 3000)) {
+      queueEvent(s, { type: 'ai-site', url: capUrl(url), host, site: name, blocked: true });
+    }
+    s.lastAi = { host, url: capUrl(url), t: Date.now() };
+    return true;
+  });
+  if (go) chrome.tabs.update(tabId, { url: `${chrome.runtime.getURL('blocked.html')}?u=${url}` }).catch(() => {});
 }
 
 // One search, however many navigation events report it (deduplicated over 10 s)
@@ -567,10 +666,13 @@ async function beforeNavigate(details) {
   await withState(async (s) => {
     const hit = VisorResearch.siteMatch(details.url, s.settings.blockedSites) || VisorLockdown.searchAiMatch(details.url);
     if (!hit) return;
-    const blocked = !!s.settings.blockAiSites || (s.settings.mode === 'locked' && s.lockActive && !inResearch(s) && (s.settings.allowedSites || []).length > 0);
+    // Blocked: whether the session's rules stop this address right now
+    const ruled = s.lockActive || s.aiBlockActive;
+    const blocked = !!ruled && !!VisorLockdown.blockedReason(details.url, s.settings, s.origin, { research: inResearch(s) });
     const ev = { type: 'ai-site', url: capUrl(details.url), host: hostOf(details.url), site: hit, blocked };
     // Recorded with or without research tracking: it's part of the session
     queueEvent(s, ev);
+    s.lastAi = { host: ev.host, t: Date.now() };
   });
 }
 
@@ -630,8 +732,12 @@ chrome.webNavigation.onBeforeNavigate && chrome.webNavigation.onBeforeNavigate.a
 chrome.webNavigation.onHistoryStateUpdated && chrome.webNavigation.onHistoryStateUpdated.addListener((d) => { navigated(d).catch(() => {}); });
 // A prerendered page the student actually opens shows up as the tab's new address
 chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
-  if (!info.url || !tab || !tab.active) return;
-  getState().then((st) => { if (st && st.active && st.recording) navigated({ tabId, frameId: 0, url: info.url }).catch(() => {}); });
+  if (!info.url || !tab) return;
+  getState().then((st) => {
+    if (!st || !st.active) return;
+    if (st.recording && tab.active) navigated({ tabId, frameId: 0, url: info.url }).catch(() => {});
+    else aiModeNavigation(tabId, info.url).catch(() => {});
+  });
 });
 chrome.tabs.onActivated.addListener(() => { focusChanged().catch(() => {}); });
 chrome.windows.onFocusChanged.addListener(() => { focusChanged().catch(() => {}); });
@@ -779,7 +885,8 @@ function inResearch(s) {
 async function lockdownOn(state, { sweep = true } = {}) {
   await clearRules();
   const research = inResearch(state);
-  const rules = VisorLockdown.buildBlockRules(state.settings, { visorOrigin: state.origin, blockedPage: chrome.runtime.getURL('blocked.html'), research });
+  const canRedirect = await hasHostPermission();
+  const rules = VisorLockdown.buildBlockRules(state.settings, { visorOrigin: state.origin, blockedPage: chrome.runtime.getURL('blocked.html'), research, canRedirect });
   let ok = false;
   if (rules.length) {
     try { await chrome.declarativeNetRequest.updateDynamicRules({ addRules: rules }); ok = true; } catch (e) { console.warn('Visor lockdown rules failed:', e && e.message); }
@@ -839,6 +946,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     getState().then(async (s) => {
       const reason = s && s.active ? VisorLockdown.blockedReason(msg.url, s.settings, s.origin, { research: inResearch(s) }) : null;
       if (reason !== 'ai') await withState((x) => { queueEvent(x, { type: 'blocked', url: capUrl(msg.url), host: hostOf(msg.url) }); }).catch(() => {});
+      // An AI site reached through a redirect (a search result's link) was
+      // never seen before the redirect: record it now, once
+      else await withState((x) => {
+        const host = hostOf(msg.url);
+        if (x.lastAi && x.lastAi.host === host && Date.now() - x.lastAi.t < 10000) return;
+        queueEvent(x, { type: 'ai-site', url: capUrl(msg.url), host, site: VisorLockdown.searchAiMatch(msg.url) || VisorResearch.siteMatch(msg.url, x.settings.blockedSites) || host, blocked: true });
+        x.lastAi = { host, t: Date.now() };
+      }).catch(() => {});
       sendResponse({ reason });
     }).catch(() => sendResponse({ reason: null }));
     return true;

@@ -27,7 +27,14 @@
  *
  * Top-level pages (main_frame) are redirected to the blocked page, which reads
  * the original address from everything after "?u=" (it isn't re-encoded, so
- * the original's own "?" and "&" survive).
+ * the original's own "?" and "&" survive). Chrome only redirects pages the
+ * extension may see: without that access (canRedirect: false) the same pages
+ * are blocked outright instead, so the lock never silently stops.
+ *
+ * The search engines' AI modes can also be reached without a page load (the
+ * results page switching mode in place) or by an encoded address the regexes
+ * don't read; session-bg.js checks every navigation with searchAiMatch, which
+ * parses the address, and sends those tabs to the blocked page itself.
  * ==========================================================================*/
 
 'use strict';
@@ -37,17 +44,24 @@
   const MAIN = ['main_frame'];
   const SUB = ['sub_frame'];
 
-  // AI answer modes inside search engines (RE2 regexes, as Chrome runs them)
+  // AI answer modes inside search engines: RE2 regexes for the rules, as
+  // Chrome runs them on the address as typed
   const SEARCH_AI = [
-    { name: 'Google AI Mode', re: '^https?://(www\\.)?google\\.[a-z]{2,3}(\\.[a-z]{2})?/search\\?([^#]*&)?udm=50(&.*|#.*)?$' },
-    { name: 'Bing Copilot Search', re: '^https?://(www\\.)?bing\\.com/(chat|copilotsearch)([/?#].*)?$' },
-    { name: 'Duck.ai', re: '^https?://(www\\.)?duckduckgo\\.com/(aichat([/?#].*)?|\\?([^#]*&)?ia=chat(&.*|#.*)?)$' }
+    { name: 'Google AI Mode', res: ['^https?://([a-z0-9-]+\\.)*google\\.[a-z]{2,3}(\\.[a-z]{2})?/search\\?([^#]*&)?udm=50(&.*|#.*)?$'] },
+    { name: 'Bing Copilot Search', res: ['^https?://([a-z0-9-]+\\.)*bing\\.com/(chat|copilotsearch)([/?#].*)?$', '^https?://([a-z0-9-]+\\.)*bing\\.com/search\\?([^#]*&)?showconv=1(&.*|#.*)?$', '^https?://edgeservices\\.bing\\.com/edgesvc/chat([/?#].*)?$'] },
+    { name: 'Duck.ai', res: ['^https?://([a-z0-9-]+\\.)*duckduckgo\\.com/(aichat([/?#].*)?|\\?([^#]*&)?ia=chat(&.*|#.*)?)$'] }
   ];
-  // Which of them a URL is (its name), or null
+  // Which of them a URL is (its name), or null. Parses the address, so an
+  // encoded one ("udm=5%30") is read the way the search engine reads it.
   function searchAiMatch(url) {
-    const u = String(url || '');
-    const hit = SEARCH_AI.find((x) => new RegExp(x.re, 'i').test(u));
-    return hit ? hit.name : null;
+    let u;
+    try { u = new URL(String(url || '')); } catch (_) { return null; }
+    if (!/^https?:$/.test(u.protocol)) return null;
+    const h = u.hostname.toLowerCase(), p = u.pathname.toLowerCase(), q = u.searchParams;
+    if (/(^|\.)google\.[a-z]{2,3}(\.[a-z]{2})?$/.test(h) && p === '/search' && q.get('udm') === '50') return 'Google AI Mode';
+    if (/(^|\.)bing\.com$/.test(h) && (/^\/(chat|copilotsearch)(\/|$)/.test(p) || (p === '/search' && q.get('showconv') === '1') || (h === 'edgeservices.bing.com' && p.startsWith('/edgesvc/chat')))) return 'Bing Copilot Search';
+    if (/(^|\.)duckduckgo\.com$/.test(h) && (/^\/aichat(\/|$)/.test(p) || q.get('ia') === 'chat')) return 'Duck.ai';
+    return null;
   }
 
   // "example.com" -> { host: 'example.com' }; "huggingface.co/chat" -> { host, path: '/chat' }
@@ -75,7 +89,7 @@
       rules.push({ id: nextId(), priority, action: block, condition: { requestDomains: hosts, resourceTypes: SUB } });
     }
     const regexes = blocked.filter((x) => x.path).map((b) => `^https?://([a-z0-9-]+\\.)*${b.host.replace(/\./g, '\\.')}${b.path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([/?#].*)?$`)
-      .concat(SEARCH_AI.map((x) => x.re));
+      .concat(...SEARCH_AI.map((x) => x.res));
     for (const re of regexes) {
       rules.push({ id: nextId(), priority, action: redirect, condition: { regexFilter: re, isUrlFilterCaseSensitive: false, resourceTypes: MAIN } });
       rules.push({ id: nextId(), priority, action: block, condition: { regexFilter: re, isUrlFilterCaseSensitive: false, resourceTypes: SUB } });
@@ -83,7 +97,7 @@
     return rules;
   }
 
-  function buildBlockRules(settings, { visorOrigin, blockedPage, research }) {
+  function buildBlockRules(settings, { visorOrigin, blockedPage, research, canRedirect = true }) {
     const s = settings || {};
     const locked = s.mode === 'locked';
     const allowed = (s.allowedSites || []).map(splitEntry).filter(Boolean);
@@ -91,7 +105,8 @@
     const rules = [];
     let id = RULE_BASE;
     const nextId = () => id++;
-    const redirect = { type: 'redirect', redirect: { regexSubstitution: `${blockedPage}?u=\\0` } };
+    // (Without access to the pages, Chrome won't redirect them: block instead)
+    const redirect = canRedirect === false ? { type: 'block' } : { type: 'redirect', redirect: { regexSubstitution: `${blockedPage}?u=\\0` } };
     // Research mode (side panel): the allowed list is set aside
     const listed = locked && allowed.length > 0 && !research;
 

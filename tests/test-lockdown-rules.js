@@ -136,6 +136,12 @@ ck('locked, no list, "block AI sites" off: nothing is redirected', buildBlockRul
   ck('blockedReason sends an open AI Mode page away', blockedReason('https://www.google.com/search?q=a&udm=50', st, opts.visorOrigin), 'ai');
   ck('…only when AI sites are blocked', blockedReason('https://www.google.com/search?q=a&udm=50', { ...st, blockAiSites: false }, opts.visorOrigin), null);
   ck('"block AI sites" off: no frame rules either', buildBlockRules({ ...st, blockAiSites: false }, opts), []);
+  ck('encoded addresses are read as the search engine reads them', [searchAiMatch('https://www.google.com/search?q=a&udm=5%30'), searchAiMatch('https://www.google.com/search?q=a&ud%6D=50'), searchAiMatch('https://duckduckgo.com/?q=x&i%61=chat')], ['Google AI Mode', 'Google AI Mode', 'Duck.ai']);
+  ck('…but a search that only mentions it isn’t', searchAiMatch('https://www.google.com/search?q=udm%3D50'), null);
+  ck('Bing’s other Copilot addresses', [decide(rules, 'https://cn.bing.com/chat'), decide(rules, 'https://www.bing.com/search?q=x&showconv=1'), decide(rules, 'https://edgeservices.bing.com/edgesvc/chat?x=1')].map((x) => x.startsWith('chrome-extension://abc/blocked.html')), [true, true, true]);
+  ck('…named as such', [searchAiMatch('https://cn.bing.com/chat'), searchAiMatch('https://www.bing.com/search?q=x&showconv=1'), searchAiMatch('https://edgeservices.bing.com/edgesvc/chat')], ['Bing Copilot Search', 'Bing Copilot Search', 'Bing Copilot Search']);
+  const noAccess = buildBlockRules({ mode: 'locked', allowedSites: ['en.wikipedia.org'], blockedSites: AI, blockAiSites: true }, { ...opts, canRedirect: false });
+  ck('without site access pages are blocked outright, never left open', [decide(noAccess, 'https://www.reddit.com/'), decide(noAccess, 'https://chatgpt.com/'), decide(noAccess, 'https://en.wikipedia.org/wiki/X')], ['block', 'block', 'allow']);
   const locked = buildBlockRules({ mode: 'locked', allowedSites: ['google.com'], blockedSites: AI, blockAiSites: true }, opts);
   ck('locked, google.com allowed: AI Mode is still blocked', decide(locked, 'https://www.google.com/search?q=a&udm=50').startsWith('chrome-extension://abc/blocked.html'), true);
   ck('…while ordinary searches are allowed', decide(locked, 'https://www.google.com/search?q=a'), 'allow');

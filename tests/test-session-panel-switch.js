@@ -49,13 +49,14 @@ function makeChrome(seed = {}) {
     action: { setBadgeText: rec('setBadgeText'), setBadgeBackgroundColor: rec('setBadgeBackgroundColor'), setTitle: rec('setTitle'), setPopup: rec('setPopup') },
     tabs: { onUpdated: ev(), onActivated: ev(), onRemoved: ev(), query: async () => tabs, get: async (id) => tabs.find((t) => t.id === id), update: rec('tabs.update'), create: rec('tabs.create'), sendMessage: async (...args) => { await rec('tabs.sendMessage')(...args); return { ok: true }; } },
     // No Chrome window in focus: nothing is being looked at
-    windows: { onFocusChanged: ev(), create: rec('windows.create'), update: rec('windows.update'), getLastFocused: async () => ({ id: 1, focused: false, tabs }), WINDOW_ID_NONE: -1 },
+    windows: { onFocusChanged: ev(), create: rec('windows.create'), update: rec('windows.update'), getLastFocused: async () => ({ id: 1, focused: false, tabs }), get: async (id) => ({ id, state: 'normal', focused: false }), WINDOW_ID_NONE: -1 },
     storage: { local: store('local'), session: store('session'), onChanged },
     alarms: { create: rec('alarms.create'), clear: rec('alarms.clear'), onAlarm: ev() },
-    permissions: { contains: async () => false, request: async () => false },
+    // Site access: off unless the test says (locked sessions need it to redirect pages)
+    permissions: { contains: async () => !!seed.perm, request: async () => false, onRemoved: { addListener() {} }, onAdded: { addListener() {} } },
     // Records which tab, which files and which arguments (a toast's text)
     scripting: { registerContentScripts: rec('registerContentScripts'), unregisterContentScripts: rec('unregisterContentScripts'), getRegisteredContentScripts: async () => [], executeScript: async (o) => { calls.push(['executeScript', JSON.parse(JSON.stringify({ tabId: o.target && o.target.tabId, files: o.files, args: o.args }))]); return []; } },
-    webNavigation: { onCommitted: ev() },
+    webNavigation: { onCommitted: ev(), onBeforeNavigate: ev() },
     contextMenus: { create: rec('contextMenus.create'), removeAll: (cb) => { calls.push(['contextMenus.removeAll']); if (cb) cb(); }, update: rec('contextMenus.update'), onClicked: ev() },
     commands: { onCommand: ev() },
     // Like Chrome: each call takes a moment, and adding a rule whose id is already there fails
@@ -103,8 +104,8 @@ function openPanel(h, visible = true, sender = { url: 'chrome-extension://test/s
   const port = { name: 'visor-session-panel', sender, onMessage: ev(), onDisconnect: ev(), postMessage() {}, disconnect() {} };
   h.chrome.runtime.onConnect.fns.forEach((f) => f(port));
   const say = (m) => port.onMessage.fns.forEach((f) => f(m));
-  say({ type: 'visibility', visible });
-  return { show: (v) => say({ type: 'visibility', visible: v }), close: () => port.onDisconnect.fns.forEach((f) => f()) };
+  say({ type: 'visibility', visible, windowId: 1 });
+  return { show: (v) => say({ type: 'visibility', visible: v, windowId: 1 }), close: () => port.onDisconnect.fns.forEach((f) => f()) };
 }
 const settle = () => new Promise((r) => setTimeout(r, 20));
 const callsOf = (calls, name) => calls.filter((c) => c[0] === name).map((c) => c.slice(1));
@@ -198,7 +199,7 @@ const CITE_OFF = 'One-click citing is turned off for this assignment.';
   ck('a normal start (no flag, no rules) changes nothing', callsOf(r3.calls, 'setPopup').length, 0);
 
   // ── A locked session: one-click citing off, research mode (side panel) ────
-  const L = load();
+  const L = load({ perm: true });
   await settle();
   await L.send({ channel: 'visor-bridge', type: 'CONNECT', payload: { token: 'tok', user: { id: 'u1', name: 'Sam' } } }, visor);
   const locked = { mode: 'locked', researchTracking: true, title: 'Essay', allowedSites: ['en.wikipedia.org'], blockedSites: ['chatgpt.com'], blockAiSites: true, oneClickCite: false, panelBrowsing: true };
@@ -291,7 +292,7 @@ const CITE_OFF = 'One-click citing is turned off for this assignment.';
   // leaves the student's research tabs alone
   L.beat.leaseSurf = null;
   await L.send({ channel: 'visor-bridge', type: 'SESSION_END', payload: { docId: 'd3' } }, visor);
-  const R = load();
+  const R = load({ perm: true });
   await settle();
   await R.send({ channel: 'visor-bridge', type: 'CONNECT', payload: { token: 'tok', user: { id: 'u1', name: 'Sam' } } }, visor);
   R.calls.length = 0;
@@ -304,6 +305,7 @@ const CITE_OFF = 'One-click citing is turned off for this assignment.';
   await R.send({ channel: 'visor-bridge', type: 'SESSION_END', payload: { docId: 'd4' } }, visor);
   // (setting up the side panel on each tab takes a moment in a real browser;
   // the switch lands while the start is still doing that)
+  const rp = openPanel(R);   // the panel is on screen (research mode needs it)
   const setOptions = R.chrome.sidePanel.setOptions;
   R.chrome.sidePanel.setOptions = (...a) => new Promise((done) => setTimeout(() => done(setOptions(...a)), 8));
   const race = [
@@ -323,18 +325,30 @@ const CITE_OFF = 'One-click citing is turned off for this assignment.';
   await R.send({ channel: 'visor-bridge', type: 'RESEARCH_MODE', payload: { docId: 'd5', on: false } }, visor);
   switchedLongAgo(R);
   await settle();
+  // (Chrome reports the navigation before the rules redirect it: that records the AI site)
+  R.chrome.webNavigation.onBeforeNavigate.fns.forEach((f) => f({ tabId: 7, frameId: 0, url: 'https://chatgpt.com/' }));
+  await settle();
   const before = (await queued(R)).length;
   r = await R.send({ type: 'VISOR_BLOCKED', url: 'https://chatgpt.com/' }, { tab: { id: 7 } });
   ck('blocked page, AI site: says so, records nothing more', [r.reason, (await queued(R)).length - before], ['ai', 0]);
+  // Reached through a redirect (a search result's link), it never went past
+  // the navigation event: the blocked page records it, once
+  const beforeRedirect = (await queued(R)).length;
+  await new Promise((done) => setTimeout(done, 10));
+  R.chrome.storage.session.data.visorSession.lastAi = null;
+  await R.send({ type: 'VISOR_BLOCKED', url: 'https://chatgpt.com/c/123' }, { tab: { id: 7 } });
+  await R.send({ type: 'VISOR_BLOCKED', url: 'https://chatgpt.com/c/123' }, { tab: { id: 7 } });
+  ck('an AI site reached by a redirect is recorded once', (await queued(R)).slice(beforeRedirect), ['ai-site:chatgpt.com']);
+  const beforeOther = (await queued(R)).length;
   r = await R.send({ type: 'VISOR_BLOCKED', url: 'https://example.com/page' }, { tab: { id: 7 } });
-  ck('blocked page, a site off the locked list: recorded as blocked', [r.reason, (await queued(R)).slice(before)], ['not-allowed', ['blocked:example.com']]);
+  ck('blocked page, a site off the locked list: recorded as blocked', [r.reason, (await queued(R)).slice(beforeOther)], ['not-allowed', ['blocked:example.com']]);
 
   // ── Closing the side panel mid-research (panel presence) ────────────────
   // A locked session writing in the side panel keeps its looser rules only
   // while the panel is on screen. Closed (or replaced by another panel) for
   // 3 s: research mode ends, the allowed list is back, the session records
   // it, and the Visor tab comes to the front and is told.
-  const P = load();
+  const P = load({ perm: true });
   await settle();
   await P.send({ channel: 'visor-bridge', type: 'CONNECT', payload: { token: 'tok', user: { id: 'u1', name: 'Sam' } } }, visor);
   await P.send({ channel: 'visor-bridge', type: 'SESSION_START', payload: { docId: 'd9', assignmentId: 'a9', sessionToken: 'wsess9', settings: locked } }, visor);
@@ -345,6 +359,7 @@ const CITE_OFF = 'One-click citing is turned off for this assignment.';
   ck('ping tells the page about research mode and the panel', [r.session.researchMode, r.session.panelOpen], [true, true]);
   // A content script pretending to be the panel isn't counted
   const fake = openPanel(P, true, { url: 'https://example.com/', tab: { id: 2 } });
+  P.beat.leaseSurf = 'panel';   // the server: the writing is in the panel
   P.calls.length = 0;
   pp.close();
   await new Promise((done) => setTimeout(done, 1000));
@@ -361,14 +376,44 @@ const CITE_OFF = 'One-click citing is turned off for this assignment.';
   ck('  …and is told', callsOf(P.calls, 'tabs.sendMessage').some((c) => c[0] === 5 && c[1].type === 'PANEL_CLOSED' && c[1].docId === 'd9'), true);
   r = await P.send({ channel: 'visor-bridge', type: 'PING', payload: {} }, visor);
   ck('  ping says so', [r.session.researchMode, r.session.panelOpen], [false, false]);
-  // Open again: the next beat finds the panel still holds the lease
-  P.beat.leaseSurf = 'panel';
-  switchedLongAgo(P);
+  // Open again: at once, the beat finds the panel still holds the lease
   const again = openPanel(P);
   await settle(); await settle();
-  ck('panel open again: research mode resumes', (await sessionOf(P)).researchMode, true);
+  ck('panel open again: research mode resumes at once', (await sessionOf(P)).researchMode, true);
+  ck('  and the Visor tab is told', callsOf(P.calls, 'tabs.sendMessage').some((c) => c[0] === 5 && c[1].type === 'PANEL_OPENED'), true);
+  // Away rather than closed: the window minimized (or another app, or another
+  // window in front) leaves research mode alone; writing pauses there anyway
+  P.chrome.windows.getLastFocused = async () => ({ id: 1, focused: true, tabs: P.tabs });
+  P.chrome.windows.get = async (id) => ({ id, state: 'minimized', focused: false });
+  P.calls.length = 0;
+  again.show(false);
+  await new Promise((done) => setTimeout(done, 3300));
+  ck('window minimized: research mode stays, nothing recorded', [(await sessionOf(P)).researchMode, callsOf(P.calls, 'tabs.sendMessage').length], [true, 0]);
+  P.chrome.windows.get = async (id) => ({ id, state: 'normal', focused: true });
+  again.show(true);
+  await settle();
+  // The session ended (submitted from the panel) just before the panel closed:
+  // the server says so, and nothing is recorded
+  P.beat.active = false;
+  P.calls.length = 0;
+  const before9 = P.fetches.length;
+  again.close();
+  await new Promise((done) => setTimeout(done, 3300));
+  await settle();
+  ck('panel closed after the session ended: nothing recorded, no jump to the tab', [P.fetches.slice(before9).some(([url, , body]) => /\/api\/ext\/research$/.test(url) && body.events.some((e) => e.type === 'panel-closed')), callsOf(P.calls, 'tabs.sendMessage').some((c) => c[1].type === 'PANEL_CLOSED'), !!(await sessionOf(P))], [false, false, false]);
+  P.beat.active = true;
+  // Research mode needs the panel: asked for with no panel on screen and none
+  // being opened (a reload of the tab), it waits
+  await P.send({ channel: 'visor-bridge', type: 'SESSION_START', payload: { docId: 'd11', assignmentId: 'a9', sessionToken: 'wsess11', settings: locked } }, visor);
+  r = await P.send({ channel: 'visor-bridge', type: 'RESEARCH_MODE', payload: { docId: 'd11', on: true } }, visor);
+  ck('no panel on screen: research mode waits', [r.researchMode, r.waiting, (await sessionOf(P)).researchMode, catchAll(await P.chrome.declarativeNetRequest.getDynamicRules())], [false, true, false, true]);
+  // Ending the session while a rebuild is queued: nothing is left behind
+  await P.ctx.relock();
+  await Promise.all([P.send({ channel: 'visor-bridge', type: 'SESSION_END', payload: { docId: 'd11' } }, visor), P.ctx.relock(), P.ctx.relock()]);
+  await settle();
+  ck('session ended with rebuilds queued: no rules left', (await P.chrome.declarativeNetRequest.getDynamicRules()).length, 0);
   // An open session never had looser rules: closing its panel records nothing
-  again.close(); hidden.close();
+  hidden.close();
   await P.send({ channel: 'visor-bridge', type: 'SESSION_END', payload: { docId: 'd9' } }, visor);
   await P.send({ channel: 'visor-bridge', type: 'SESSION_START', payload: { docId: 'd10', assignmentId: 'a10', sessionToken: 'wsess10', settings: { mode: 'open', researchTracking: true, title: 'Essay', blockAiSites: true } } }, visor);
   const op = openPanel(P);
