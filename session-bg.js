@@ -672,7 +672,8 @@ async function beforeNavigate(details) {
     const ev = { type: 'ai-site', url: capUrl(details.url), host: hostOf(details.url), site: hit, blocked };
     // Recorded with or without research tracking: it's part of the session
     queueEvent(s, ev);
-    s.lastAi = { host: ev.host, t: Date.now() };
+    // (with its address, so the same visit isn't recorded again on commit)
+    s.lastAi = { host: ev.host, url: ev.url, t: Date.now() };
   });
 }
 
