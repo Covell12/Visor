@@ -1,36 +1,86 @@
-/* Visor — session side panel. The web app's colors: blue #4DBEDC → green #7BC288. */
-:root { --ink: #10303D; --ink-2: #4F6B78; --line: #DCEBF1; --surface: #F3F9FB; --red: #D9534F; --blue: #1E9BC4; --grad: linear-gradient(100deg, #7BC288 0%, #4DBEDC 100%); }
+/* Visor — session side panel, in the web app's "lens" look: a cool canvas,
+   white cards on a hairline ring, pill buttons, circles. */
+:root {
+  --ink: #12303B; --ink-2: #527280; --ink-3: #8BA3AD; --line: #E2EAEE; --canvas: #EEF4F6; --fill: #F6F9FA;
+  --brand: #127C9F; --brand-hover: #0E6A88; --brand-soft: #E0F0F5;
+  --red: #C8433E; --red-soft: #FBE7E6; --amber: #9A6212; --amber-soft: #FCF1DF; --green: #2F8A4B; --green-soft: #E5F4EA;
+  --ring: 0 0 0 1px rgba(18,48,59,0.06); --shadow: 0 1px 2px rgba(18,48,59,0.04), var(--ring);
+  --ease: cubic-bezier(.2, .7, .2, 1);
+}
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; }
-body { font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, Helvetica, Arial, sans-serif; color: var(--ink); background: var(--surface); display: flex; flex-direction: column; }
+body { font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, Helvetica, Arial, sans-serif; color: var(--ink); background: var(--canvas); display: flex; flex-direction: column; -webkit-font-smoothing: antialiased; }
 [hidden] { display: none !important; }
-.sp-head { display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: #fff; border-bottom: 1px solid var(--line); }
-.sp-mark { flex: none; }
-.sp-head-text { flex: 1; min-width: 0; }
-.sp-head-text strong { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 14px; }
-.sp-rec { display: flex; align-items: center; gap: 6px; color: var(--red); font-weight: 700; font-size: 12px; }
-.sp-rec i { width: 8px; height: 8px; border-radius: 50%; background: var(--red); display: inline-block; animation: pulse 1.6s infinite; }
-@keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(217,83,79,.5); } 70% { box-shadow: 0 0 0 6px rgba(217,83,79,0); } 100% { box-shadow: 0 0 0 0 rgba(217,83,79,0); } }
-@media (prefers-reduced-motion: reduce) { .sp-rec i { animation: none; } }
-.sp-timer { color: var(--ink); font-family: ui-monospace, Menlo, monospace; margin-left: auto; }
-.sp-link { background: none; border: 0; padding: 0; color: var(--blue); font: inherit; font-size: 12px; text-decoration: underline; cursor: pointer; }
+button { font: inherit; cursor: pointer; }
+button:focus-visible, a:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+
+/* The header: the mark in a circle, the assignment, and Doc history */
+.sp-head { display: flex; align-items: center; gap: 10px; padding: 10px 12px; margin: 8px 8px 0; background: #fff; border-radius: 16px; box-shadow: var(--shadow); }
+.sp-mark { flex: none; width: 34px; height: 34px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: var(--fill); box-shadow: inset 0 0 0 1px var(--line); }
+.sp-head-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.sp-head-text strong { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 14.5px; letter-spacing: -0.01em; }
+.sp-sub { font-size: 12px; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sp-pill-link { flex: none; border: 0; background: var(--fill); box-shadow: inset 0 0 0 1px var(--line); color: var(--ink-2); font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 999px; transition: background-color .15s, color .15s; }
+.sp-pill-link:hover { background: var(--brand-soft); color: var(--brand); }
+
 #sp-main { flex: 1; display: flex; flex-direction: column; min-height: 0; }
-.sp-cite-row { display: flex; flex-wrap: wrap; gap: 0 8px; padding: 8px 12px; background: #fff; border-bottom: 1px solid var(--line); }
-.sp-cite { width: 100%; display: inline-flex; align-items: center; justify-content: center; gap: 8px; border: 0; border-radius: 999px; padding: 9px 14px; background: var(--grad); color: #fff; font: inherit; font-weight: 700; cursor: pointer; box-shadow: 0 3px 10px rgba(77,190,220,.35); }
-.sp-cite:disabled { opacity: .6; cursor: default; }
-/* The row's buttons: Cite this page grows, Open Google is the smaller pill (alone when citing is off) */
-.sp-act-main { flex: 1 1 auto; width: auto; min-width: 0; }
-.sp-act-2 { flex: none; display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: 1.5px solid var(--line); border-radius: 999px; padding: 7px 12px; background: #fff; color: var(--ink); font: inherit; font-size: 13px; font-weight: 700; white-space: nowrap; cursor: pointer; }
-.sp-act-2:hover { border-color: var(--blue); }
-.sp-cite[hidden] + .sp-act-2 { flex: 1 1 auto; }
-.sp-cite-status { flex: 1 0 100%; font-size: 12px; color: var(--ink-2); margin-top: 6px; min-height: 0; }
+
+/* The session card: state and timer, the rules, the buttons */
+.sp-card { margin: 8px 8px 0; padding: 10px 12px 12px; background: #fff; border-radius: 16px; box-shadow: var(--shadow); }
+.sp-status-row { display: flex; align-items: center; gap: 8px; }
+.sp-state { display: inline-flex; align-items: center; gap: 7px; padding: 3px 10px 3px 8px; border-radius: 999px; font-size: 12.5px; font-weight: 700; transition: background-color .2s, color .2s; }
+.sp-state i { width: 8px; height: 8px; border-radius: 50%; background: currentColor; display: inline-block; }
+.sp-state.rec { background: var(--red-soft); color: var(--red); }
+.sp-state.rec i { animation: spPulse 1.6s infinite; }
+.sp-state.paused { background: var(--amber-soft); color: var(--amber); }
+.sp-state.idle { background: var(--fill); color: var(--ink-2); box-shadow: inset 0 0 0 1px var(--line); }
+@keyframes spPulse { 0% { box-shadow: 0 0 0 0 rgba(200,67,62,.45); } 70% { box-shadow: 0 0 0 6px rgba(200,67,62,0); } 100% { box-shadow: 0 0 0 0 rgba(200,67,62,0); } }
+.sp-timer { margin-left: auto; font: 600 13px ui-monospace, "SF Mono", Menlo, monospace; color: var(--ink); font-variant-numeric: tabular-nums; }
+.sp-timer.low { color: var(--red); }
+
+/* What the session allows: a short line, chips for the allowed sites */
+.sp-rules { margin-top: 8px; font-size: 12.5px; color: var(--ink-2); line-height: 1.5; }
+.sp-rules:empty { display: none; }
+.sp-rules b { color: var(--ink); font-weight: 650; }
+.sp-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.sp-chip { border: 0; padding: 2px 9px; border-radius: 999px; background: var(--fill); box-shadow: inset 0 0 0 1px var(--line); font-size: 12px; color: var(--ink); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+button.sp-chip:hover { background: var(--brand-soft); color: var(--brand); box-shadow: inset 0 0 0 1px #BFDDE8; }
+
+.sp-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.sp-actions:empty, .sp-actions:not(:has(button:not([hidden]))) { display: none; }
+.sp-btn { flex: 1 1 auto; display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 36px; padding: 0 14px; border: 0; border-radius: 999px; background: #fff; color: var(--ink); font-size: 13.5px; font-weight: 650; white-space: nowrap; box-shadow: inset 0 0 0 1px #D0DCE2; transition: background-color .15s, box-shadow .15s, transform .15s var(--ease); }
+.sp-btn:hover { background: var(--fill); box-shadow: inset 0 0 0 1px #B4C6CF; }
+.sp-btn:active { transform: scale(.98); }
+.sp-btn:disabled { opacity: .6; cursor: default; transform: none; }
+.sp-btn svg { flex: none; }
+.sp-btn.primary { background: var(--brand); color: #fff; box-shadow: 0 1px 2px rgba(14,106,136,.25); }
+.sp-btn.primary:hover { background: var(--brand-hover); }
+.sp-cite-status { font-size: 12px; color: var(--ink-2); margin-top: 8px; }
 .sp-cite-status:empty { display: none; }
-.sp-cite-status.warn { color: #B9771A; }
-.sp-frame { flex: 1; width: 100%; border: 0; background: #EEF4F6; }
-.sp-foot { padding: 8px 12px; font-size: 12px; color: var(--ink-2); background: #fff; border-top: 1px solid var(--line); }
-.sp-foot ul { margin: 6px 0 0; padding-left: 18px; }
-.sp-foot li { margin-bottom: 3px; }
-.sp-none { padding: 24px 16px; }
-.sp-none h2 { font-size: 16px; margin: 0 0 6px; }
-.sp-none p { color: var(--ink-2); }
-button:focus-visible, a:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+.sp-cite-status.warn { color: var(--amber); }
+.sp-cite-status.ok { color: var(--green); }
+
+/* The document: a white card that fills the rest */
+.sp-frame-wrap { flex: 1; min-height: 0; margin: 8px; border-radius: 16px; overflow: hidden; background: #fff; box-shadow: var(--shadow); }
+.sp-frame { display: block; width: 100%; height: 100%; border: 0; background: var(--canvas); }
+
+/* What's recorded */
+.sp-foot { margin: 0 8px 8px; padding: 8px 12px; font-size: 12px; color: var(--ink-2); background: #fff; border-radius: 14px; box-shadow: var(--shadow); }
+.sp-foot-row { display: flex; align-items: center; gap: 7px; }
+.sp-foot-row .sp-pill-link { margin-left: auto; }
+.sp-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--red); flex: none; }
+.sp-dot.off { background: var(--ink-3); }
+.sp-what { display: grid; grid-template-rows: 0fr; transition: grid-template-rows .3s var(--ease); }
+.sp-what.open { grid-template-rows: 1fr; }
+.sp-what-in { overflow: hidden; min-height: 0; }
+.sp-what ul { margin: 8px 0 2px; padding-left: 18px; }
+.sp-what li { margin-bottom: 3px; }
+
+/* No session */
+.sp-none { margin: 8px; padding: 26px 18px; text-align: center; background: #fff; border-radius: 18px; box-shadow: var(--shadow); }
+.sp-none-ic { width: 60px; height: 60px; margin: 0 auto 12px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: var(--fill); box-shadow: 0 0 0 4px #fff, 0 0 0 6px var(--brand-soft); }
+.sp-none h2 { font-size: 16px; margin: 0 0 6px; letter-spacing: -0.01em; }
+.sp-none p { color: var(--ink-2); margin: 0 0 14px; font-size: 13.5px; }
+.sp-none .sp-btn { width: auto; }
+
+@media (prefers-reduced-motion: reduce) { .sp-state.rec i { animation: none; } .sp-what, .sp-btn { transition: none; } }

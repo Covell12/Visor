@@ -41,6 +41,8 @@ The extension only talks to the Visor addresses listed in two places that must m
 | `DeveloperToolsAvailability` | `2` (never allowed) | Developer tools can change the page and its network requests. |
 | `ExtensionInstallForcelist` | Visor (above) | The student can't turn the extension off. If it is turned off anyway (an unmanaged machine), the Visor page notices within about 15 seconds, records it, pauses a locked session and tells the student to turn it back on. |
 | `BrowserGuestModeEnabled` / `BrowserAddPersonEnabled` | `false` | Guest windows and other profiles don't have the extension. |
+| `GenAiDefaultSettings` | `2` (do not allow) | Turns off Chrome's own generative AI features by default, such as Gemini in Chrome, Google Lens and AI Mode ([policy reference](https://chromeenterprise.google/policies/gen-ai-default-settings/)). Visor blocks AI *sites*; these features are part of the browser itself. Check the policy page for the current list, and set a feature's own policy where you want something different. |
+| `ExtensionInstallAllowlist` + `ExtensionInstallBlocklist` = `["*"]` | your approved extensions, Visor included | Students can't add other extensions. Grammar and AI writing helpers that come as extensions work inside web pages, so an allowlist is the only reliable way to keep them out of an essay. |
 | `AllowDinosaurEasterEgg`, `URLBlocklist`… | your usual | Visor's lockdown works alongside your existing filtering, not instead of it. |
 
 Optional, for high-stakes in-class writing:
@@ -52,7 +54,10 @@ Optional, for high-stakes in-class writing:
 
 - The Visor tab asks for full screen when the session starts. Leaving full screen, switching to another tab or window, or going offline turns writing off immediately; the server records each pause with its reason and length, and the student sees the same timer the teacher sees.
 - The extension installs declarativeNetRequest rules: Visor, Google sign-in and the allowed sites load; every other top-level page goes to `blocked.html`, which records the attempt ("lock-violation"). Tabs opening `chrome://extensions`, `chrome://settings` and similar browser pages are sent back to the Visor tab.
-- The teacher's live board shows, per student: whether the extension is present and whether its lockdown is on, time away, pastes, and any AI-site visits or blocked attempts.
+- With "Block AI sites" on (the default), the AI list also covers AI sites inside frames on other pages (a chat widget, a page that frames ChatGPT), and the AI answer modes of search engines that live at a search address rather than a site of their own: Google's AI Mode, Bing's Copilot search and DuckDuckGo's Duck.ai.
+- **The side panel.** A teacher can let students switch to Chrome's side panel to research during a locked session: their essay moves into the panel, the Visor tab leaves full screen, and other sites (never AI sites) open while they research. That only lasts while the panel is on screen. If the student closes it, or puts another panel in its place (Chrome's own Gemini or Lens, another extension's), research mode ends within about 3 seconds: the allowed list applies again, the Visor tab comes to the front and asks for full screen, and the session records that the panel was closed.
+- **Writing tools in the editor.** On assignments that block AI sites, Visor's editor sets the switches that grammar and writing tools honour (`writingsuggestions="false"` for the browser's own suggestions, and Grammarly's and LanguageTool's opt-outs), and records the name of any known writing tool that appears on the essay page anyway (Grammarly, LanguageTool, QuillBot, Wordtune and other AI helpers), asking the student to turn it off. It records names only, and never reports a tool it doesn't know (a password manager, a translator).
+- The teacher's live board shows, per student: whether the extension is present and whether its lockdown is on, time away, pastes, any AI-site visits or blocked attempts, a writing tool on the page, and a side panel closed mid-research.
 
 ## 4. What Visor can't stop (and what it records instead)
 
@@ -60,6 +65,7 @@ Visor is honest about this so teachers can plan around it:
 
 - **A second device.** A phone or another computer is outside Visor's view. Visor records how the essay was written (typing rhythm, pauses, pastes and where they came from), which makes text typed in from elsewhere visible as a pattern, but it can't see the other device.
 - **Unmanaged machines.** Without the policies above a student can open an incognito window, another profile, or another browser. Locked sessions refuse to start without the extension, and the page records when the extension disappears mid-session, but a determined student on an unmanaged computer has ways around any browser extension.
+- **Writing tools Visor doesn't know.** A grammar or AI helper extension that ignores the opt-outs and isn't on Visor's list isn't noticed. What it puts into the essay still shows in the replay and the edit history (text that arrived without typing or a paste is marked "no keyboard or paste event"). The extension allowlist above closes this door.
 - **Text pasted from outside Visor's view.** If a paste doesn't match anything the student copied during a session, Visor labels it "pasted from outside Visor's view" and shows it to the teacher, without guessing where it came from.
 - **What students type on other sites.** The extension never records keystrokes on other sites, or page contents beyond the citation details of a page the student chose to cite.
 

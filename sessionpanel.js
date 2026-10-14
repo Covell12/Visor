@@ -7,6 +7,14 @@
  * student's tokens by postMessage, checking the origin both ways. It also
  * tells that page what only the extension can see (PANEL_CONTEXT): whether
  * Chrome has focus, and whether the tab in front is Visor's blocked page.
+ *
+ * The page tells this panel how writing stands (PANEL_STATUS: recording,
+ * paused and why, or writing elsewhere), for the state chip at the top.
+ *
+ * Presence: while a session runs, each copy of this panel holds a port to the
+ * service worker and says whether it's on screen. A locked session writing
+ * here (research mode) only keeps its loosened rules while a copy is visible
+ * (session-bg.js, panel presence).
  * ==========================================================================*/
 
 'use strict';
@@ -34,8 +42,24 @@ function clock(ms) {
 function tick() {
   if (!state || !state.active) return;
   const el = $('sp-timer');
-  if (state.deadlineAt) el.textContent = `${clock(Date.parse(state.deadlineAt) - Date.now())} left`;
-  else if (state.startedAt) el.textContent = clock(Date.now() - Date.parse(state.startedAt));
+  if (state.deadlineAt) {
+    const left = Date.parse(state.deadlineAt) - Date.now();
+    el.textContent = `${clock(left)} left`;
+    el.classList.toggle('low', left < 5 * 60 * 1000);
+  } else if (state.startedAt) el.textContent = clock(Date.now() - Date.parse(state.startedAt));
+}
+
+const esc = (t) => String(t == null ? '' : t).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+// What this session lets the student open, in a line (and the allowed sites as chips)
+function rulesHtml(st) {
+  const ai = st.blockAiSites ? 'AI sites are blocked.' : 'AI sites are recorded, not blocked.';
+  if (st.mode === 'locked' && st.researchMode) return `<b>Research mode.</b> Open any site except AI sites; everything is recorded. Closing this panel takes you back to full screen and the session’s allowed sites.`;
+  if (st.mode === 'locked') {
+    const sites = st.allowedSites || [];
+    return sites.length ? `<b>Locked session.</b> Only these sites open. ${ai}<div class="sp-chips">${sites.map((x) => `<button type="button" class="sp-chip" data-site="${esc(x)}" title="Open ${esc(x)}">${esc(x)}</button>`).join('')}</div>`
+      : `<b>Locked session.</b> Any site that isn’t blocked opens. ${ai}`;
+  }
+  return `<b>Open session.</b> ${ai}`;
 }
 
 async function render() {
@@ -43,18 +67,24 @@ async function render() {
   const was = state;
   state = next && next.active ? next : null;
   const active = !!state;
-  $('sp-main').hidden = !active; $('sp-foot').hidden = !active; $('sp-rec').hidden = !active;
+  $('sp-main').hidden = !active; $('sp-foot').hidden = !active;
   $('sp-none').hidden = active;
   $('sp-title').textContent = active ? state.title : 'Visor';
-  if (!active) { frameOrigin = null; frameLoaded = false; $('sp-frame').removeAttribute('src'); return; }
+  presence(active);
+  if (!active) { frameOrigin = null; frameLoaded = false; $('sp-frame').removeAttribute('src'); $('sp-sub').textContent = 'Writing session'; return; }
+  const locked = state.mode === 'locked', research = locked && !!state.researchMode;
+  $('sp-sub').textContent = research ? 'Locked session · writing here' : locked ? 'Locked session' : 'Open session';
   $('sp-recording').textContent = state.recording ? 'Recording research' : 'Research isn’t being recorded';
+  $('sp-rec-dot').classList.toggle('off', !state.recording);
+  $('sp-rules').innerHTML = rulesHtml(state);
   // One-click citing can be off for the assignment. Open Google shows where
   // Google isn't blocked: open sessions, and locked ones in research mode.
+  // Back to full screen: a locked session writing here can go back any time.
   const cite = state.oneClickCite !== false;
-  const google = state.mode !== 'locked' || !!state.researchMode;
+  const google = !locked || research;
   $('sp-cite').hidden = !cite; $('sp-cite-status').hidden = !cite;
   $('sp-google').hidden = !google;
-  $('sp-cite-row').hidden = !cite && !google;
+  $('sp-back').hidden = !research;
   // (Re)load the editor only when the session changed
   if (!was || was.docId !== state.docId || $('sp-frame').getAttribute('src') == null) {
     frameOrigin = state.origin;
@@ -64,7 +94,9 @@ async function render() {
   tick();
 }
 
-// The embedded editor says it's ready: give it the tokens (to its origin only)
+// The embedded editor says it's ready: give it the tokens (to its origin only).
+// It also says how writing stands, for the state chip.
+const STATE_TEXT = { writing: 'Recording', paused: 'Paused', elsewhere: 'Writing in the Visor tab', waiting: 'Not started', ended: 'Session ended' };
 window.addEventListener('message', (e) => {
   if (!frameOrigin || e.origin !== frameOrigin || e.source !== $('sp-frame').contentWindow) return;
   const m = e.data;
@@ -72,6 +104,11 @@ window.addEventListener('message', (e) => {
     frameLoaded = true;
     e.source.postMessage({ source: 'visor-ext', type: 'EMBED_AUTH', sessionToken: state.sessionToken, extToken: state.extToken }, frameOrigin);
     updateContext(true);
+  }
+  if (m && m.source === 'visor-page' && m.type === 'PANEL_STATUS' && STATE_TEXT[m.state]) {
+    const chip = $('sp-state');
+    chip.className = `sp-state ${m.state === 'writing' ? 'rec' : m.state === 'paused' ? 'paused' : 'idle'}`;
+    $('sp-state-t').textContent = m.state === 'paused' && m.why ? `Paused: ${String(m.why).slice(0, 60)}` : STATE_TEXT[m.state];
   }
 });
 $('sp-frame').addEventListener('load', () => { frameLoaded = $('sp-frame').getAttribute('src') != null; });
@@ -113,7 +150,8 @@ setInterval(() => { updateContext(true); }, 5000);
 async function updateDocLink() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true }).catch(() => []);
   const onDoc = !!(tab && DOC_URL.test(tab.url || ''));
-  $('sp-dochist').hidden = !onDoc || !state;
+  // Not while a locked session writes here: leaving this panel ends research mode
+  $('sp-dochist').hidden = !onDoc || !state || (state.mode === 'locked' && !!state.researchMode);
   $('sp-none-dochist').hidden = !onDoc || !!state;
 }
 const openDocHistory = () => { location.href = 'sidepanel.html'; };
@@ -123,10 +161,47 @@ chrome.tabs.onActivated.addListener(updateDocLink);
 chrome.tabs.onUpdated.addListener((id, info) => { if (info.url) updateDocLink(); });
 
 $('sp-what').addEventListener('click', () => {
-  const list = $('sp-whatlist');
-  list.hidden = !list.hidden;
-  $('sp-what').setAttribute('aria-expanded', String(!list.hidden));
+  const wrap = $('sp-whatwrap'), open = !wrap.classList.contains('open');
+  wrap.classList.toggle('open', open);
+  $('sp-what').setAttribute('aria-expanded', String(open));
 });
+// An allowed site: open it in a new tab
+$('sp-rules').addEventListener('click', (e) => {
+  const chip = e.target.closest('[data-site]');
+  if (chip) chrome.tabs.create({ url: `https://${chip.dataset.site}` }).catch(() => {});
+});
+// Back to full screen: the Visor tab comes to the front, where one click
+// takes the writing back and returns to full screen
+$('sp-back').addEventListener('click', async () => {
+  const id = state && state.visorTabId;
+  const tab = id != null ? await chrome.tabs.get(id).catch(() => null) : null;
+  if (tab) {
+    await chrome.tabs.update(tab.id, { active: true }).catch(() => {});
+    chrome.windows.update(tab.windowId, { focused: true }).catch(() => {});
+  } else if (state) chrome.tabs.create({ url: `${state.origin}/write/${encodeURIComponent(state.assignmentId)}` }).catch(() => {});
+});
+
+// ── Presence: tell the service worker whether this copy is on screen ───────
+let port = null, pingTimer = null;
+function sendVisibility() {
+  try { port && port.postMessage({ type: 'visibility', visible: document.visibilityState === 'visible' }); } catch (_) {}
+}
+function presence(on) {
+  if (!on) {
+    clearInterval(pingTimer); pingTimer = null;
+    if (port) { const p = port; port = null; try { p.disconnect(); } catch (_) {} }
+    return;
+  }
+  if (port) return;
+  try { port = chrome.runtime.connect({ name: 'visor-session-panel' }); } catch (_) { port = null; return; }
+  // The worker restarted (or was updated): connect again
+  port.onDisconnect.addListener(() => { port = null; void chrome.runtime.lastError; setTimeout(() => { if (state) presence(true); }, 800); });
+  sendVisibility();
+  // A message every 20 s keeps the worker listening while the panel is open
+  clearInterval(pingTimer);
+  pingTimer = setInterval(() => { try { port && port.postMessage({ type: 'ping' }); } catch (_) {} }, 20000);
+}
+document.addEventListener('visibilitychange', sendVisibility);
 
 // The cite button (formatting and insertion happen in the editor)
 $('sp-cite').addEventListener('click', async () => {
@@ -137,6 +212,7 @@ $('sp-cite').addEventListener('click', async () => {
   const r = await ask('VISOR_CITE_ACTIVE', { from: 'panel' });
   btn.disabled = false;
   if (!r || !r.ok) { status.className = 'sp-cite-status warn'; status.textContent = (r && r.error) || 'Couldn’t read this page.'; return; }
+  status.className = 'sp-cite-status ok';
   status.textContent = r.message || `Cited: ${r.meta && r.meta.title ? r.meta.title : 'this page'}`;
   setTimeout(() => { if (status.textContent.startsWith('Cited')) status.textContent = ''; }, 6000);
 });

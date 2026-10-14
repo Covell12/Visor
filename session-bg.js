@@ -10,7 +10,8 @@
  *   • the side panel is the session panel (sessionpanel.html) on every tab;
  *   • research is recorded (research capture below; research.js parses searches);
  *   • locked sessions keep the student on allowed sites (lockdown below), or,
- *     while they write in the side panel (research mode), off blocked sites;
+ *     while they write in the side panel (research mode), off blocked sites,
+ *     for only as long as that panel is actually on screen (panel presence);
  *   • every minute the queue of research events is sent, and the extension
  *     tells the server it's still here.
  *
@@ -209,6 +210,9 @@ async function recoverFromLostSession() {
   await restoreDocsPanelMode();
 }
 sessionReady.then(recoverFromLostSession).catch(() => {});
+// A worker that wakes in the middle of research mode gives the panel a moment
+// to reconnect, then checks it's really there
+sessionReady.then(async () => { const s = await getState(); if (s && s.active && s.researchMode) checkPanelSoon(PANEL_OPEN_MS); }).catch(() => {});
 
 async function disconnectedByServer() {
   await chrome.storage.local.remove(AUTH_KEY);
@@ -229,7 +233,7 @@ async function extBeat() {
     // Not right after a switch: the tab moves the lease just after its message.
     const settling = s.researchAt && Date.now() - s.researchAt < RESEARCH_SETTLE_MS;
     if (s.settings.mode === 'locked' && s.settings.panelBrowsing !== false && !settling) {
-      if (r.leaseSurf === 'panel' && !s.researchMode) await setResearchMode(true);
+      if (r.leaseSurf === 'panel' && !s.researchMode && panelVisible()) await setResearchMode(true);
       else if (r.leaseSurf === 'tab' && s.researchMode) await setResearchMode(false);
     }
   } catch (e) {
@@ -274,7 +278,81 @@ async function switchResearchMode(on) {
   // student can't look at them without a pause being recorded.
   const next = await getState();
   if (next && next.active) await lockdownOn(next, { sweep: false });
+  // The panel has a few seconds to show up (opening it takes a click in the tab)
+  if (on) checkPanelSoon(PANEL_OPEN_MS);
   return { ok: true, researchMode: !!on };
+}
+
+// ── Panel presence: is the session panel actually on screen? ───────────────
+// Each copy of the session panel (Chrome may keep one per tab) holds a port
+// and says whether it's visible. A locked session writing in the side panel
+// (research mode) has its allowed list set aside only while the panel is
+// there: once no copy has been on screen for PANEL_GONE_MS (the student
+// closed it, or put another panel such as Chrome's own Gemini or Lens in its
+// place), research mode ends at once. The allowed list is back, the Visor tab
+// comes to the front and says so, and the session records 'panel-closed'.
+// Opening the panel again resumes research mode (it still holds the lease).
+// The ports live in memory: a restarted worker learns them again within a
+// second, and never ends research mode on its own account meanwhile.
+const PANEL_PORT = 'visor-session-panel';
+const PANEL_GONE_MS = 3000;
+const PANEL_OPEN_MS = 8000;
+const panelPorts = new Map();   // port -> { visible }
+let panelTimer = null;
+const panelVisible = () => [...panelPorts.values()].some((p) => p.visible);
+
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name !== PANEL_PORT) return;
+  // Only the session panel itself: not a content script in some tab (which
+  // could otherwise claim the panel is on screen and keep the rules loose)
+  const from = port.sender || {};
+  if (from.tab || !String(from.url || '').startsWith(chrome.runtime.getURL(SESSION_PANEL))) { try { port.disconnect(); } catch (_) {} return; }
+  panelPorts.set(port, { visible: false });
+  port.onMessage.addListener((m) => {
+    if (!m || m.type !== 'visibility' || !panelPorts.has(port)) return;   // ('ping' only keeps the worker awake)
+    const was = panelVisible();
+    panelPorts.get(port).visible = !!m.visible;
+    panelPresenceChanged(was);
+  });
+  port.onDisconnect.addListener(() => {
+    const was = panelVisible();
+    panelPorts.delete(port);
+    panelPresenceChanged(was);
+  });
+});
+
+function panelPresenceChanged(was) {
+  if (panelVisible()) {
+    clearTimeout(panelTimer); panelTimer = null;
+    // Back on screen: the beat says whether the panel still holds the lease
+    if (!was) extBeat().catch(() => {});
+    return;
+  }
+  if (was) checkPanelSoon(PANEL_GONE_MS);
+}
+function checkPanelSoon(ms) {
+  clearTimeout(panelTimer);
+  panelTimer = setTimeout(() => { panelTimer = null; panelGone().catch(() => {}); }, ms);
+}
+
+async function panelGone() {
+  if (panelVisible()) return;
+  const s = await getState();
+  if (!s || !s.active || s.settings.mode !== 'locked' || !s.researchMode) return;
+  await withState((x) => { queueEvent(x, { type: 'panel-closed' }); });
+  await setResearchMode(false);
+  flushResearch().catch(() => {});
+  // Back to the Visor tab (a new one if it's gone), which offers full screen again
+  let tab = s.visorTabId != null ? await chrome.tabs.get(s.visorTabId).catch(() => null) : null;
+  if (tab && !VisorConfig.isVisorOrigin(tab.url || '')) tab = null;
+  if (!tab) {
+    tab = await chrome.tabs.create({ url: `${s.origin}/write/${encodeURIComponent(s.assignmentId)}` }).catch(() => null);
+    if (tab) await patchState((x) => { x.visorTabId = tab.id; x.visorWindowId = tab.windowId; });
+    return;
+  }
+  await chrome.tabs.update(tab.id, { active: true }).catch(() => {});
+  chrome.windows.update(tab.windowId, { focused: true }).catch(() => {});
+  chrome.tabs.sendMessage(tab.id, { channel: 'visor-to-page', type: 'PANEL_CLOSED', docId: s.docId }).catch(() => {});
 }
 
 // ── Messages from the Visor page (site-bridge.js) ─────────────────────────
@@ -293,7 +371,7 @@ async function handleBridge(msg, sender) {
         user: auth && auth.origin === sender.origin ? auth.user : null,
         hasHostPermission: await hasHostPermission(),
         lockActive: !!(s && s.lockActive),
-        session: s && s.active ? { docId: s.docId, assignmentId: s.assignmentId } : null
+        session: s && s.active ? { docId: s.docId, assignmentId: s.assignmentId, researchMode: !!s.researchMode, panelOpen: panelVisible() } : null
       };
     }
     case 'CONNECT': {
@@ -487,7 +565,7 @@ async function beforeNavigate(details) {
   // search) never commits its own URL, so it's read here too
   if (details.documentLifecycle !== 'prerender' && VisorResearch.parseSearch(details.url)) await recordSearch(details.url);
   await withState(async (s) => {
-    const hit = VisorResearch.siteMatch(details.url, s.settings.blockedSites);
+    const hit = VisorResearch.siteMatch(details.url, s.settings.blockedSites) || VisorLockdown.searchAiMatch(details.url);
     if (!hit) return;
     const blocked = !!s.settings.blockAiSites || (s.settings.mode === 'locked' && s.lockActive && !inResearch(s) && (s.settings.allowedSites || []).length > 0);
     const ev = { type: 'ai-site', url: capUrl(details.url), host: hostOf(details.url), site: hit, blocked };
@@ -921,6 +999,9 @@ async function panelState() {
     active: true, docId: s.docId, assignmentId: s.assignmentId, origin: s.origin, title: s.settings.title || 'Writing session',
     startedAt: s.startedAt, deadlineAt: s.deadlineAt, recording: !!s.recording, mode: s.settings.mode,
     citationStyle: s.settings.citationStyle || 'mla', sessionToken: s.sessionToken, extToken: auth ? auth.token : null,
-    oneClickCite: s.settings.oneClickCite !== false, panelBrowsing: s.settings.panelBrowsing !== false, researchMode: !!s.researchMode
+    oneClickCite: s.settings.oneClickCite !== false, panelBrowsing: s.settings.panelBrowsing !== false, researchMode: !!s.researchMode,
+    // What the session lets the student open, for the panel's note
+    blockAiSites: !!s.settings.blockAiSites, allowedSites: s.settings.mode === 'locked' ? (s.settings.allowedSites || []).slice(0, 30) : [],
+    lockActive: !!s.lockActive, visorTabId: s.visorTabId
   };
 }

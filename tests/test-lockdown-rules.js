@@ -10,7 +10,7 @@
 
 'use strict';
 
-const { buildBlockRules, blockedReason, shouldBounce, RULE_BASE } = require('../lockdown.js');
+const { buildBlockRules, blockedReason, shouldBounce, searchAiMatch, RULE_BASE } = require('../lockdown.js');
 
 const out = [];
 const ck = (name, got, want) => {
@@ -22,20 +22,23 @@ const ck = (name, got, want) => {
 const opts = { visorOrigin: 'https://visor-ed.web.app', blockedPage: 'chrome-extension://abc/blocked.html' };
 const AI = ['chatgpt.com', 'openai.com', 'huggingface.co/chat'];
 
-// What Chrome would do with a main-frame URL: the highest-priority matching rule
-function decide(rules, url) {
+// What Chrome would do with a URL loaded as a page (main_frame) or inside a
+// frame (sub_frame): the highest-priority matching rule
+function decide(rules, url, type = 'main_frame') {
   const u = new URL(url);
   const hostMatch = (domains) => domains.some((d) => u.hostname === d || u.hostname.endsWith('.' + d));
   const hits = rules.filter((r) => {
     const c = r.condition;
+    if (!c.resourceTypes.includes(type)) return false;
     if (c.requestDomains && !hostMatch(c.requestDomains)) return false;
-    if (c.regexFilter && !new RegExp(c.regexFilter).test(url)) return false;
+    if (c.regexFilter && !new RegExp(c.regexFilter, c.isUrlFilterCaseSensitive === false ? 'i' : '').test(url)) return false;
     if (c.urlFilter) { const f = c.urlFilter.replace(/^\|\|/, ''); const hp = u.hostname + u.pathname; if (!(hp === f || hp.startsWith(f + '/') || ('.' + hp).includes('.' + f))) return false; }
     return true;
   }).sort((a, b) => b.priority - a.priority);
   if (!hits.length) return 'load';
   const r = hits[0];
   if (r.action.type === 'allow') return 'allow';
+  if (r.action.type === 'block') return 'block';
   return url.replace(new RegExp(r.condition.regexFilter), r.action.redirect.regexSubstitution.split('\\0').join('$&'));
 }
 
@@ -43,7 +46,9 @@ function decide(rules, url) {
 {
   const rules = buildBlockRules({ mode: 'locked', allowedSites: ['en.wikipedia.org', 'jstor.org', 'example.org/library'], blockedSites: AI, blockAiSites: true }, opts);
   ck('rule ids start at the reserved base', rules[0].id, RULE_BASE);
-  ck('only top-level pages', rules.every((r) => JSON.stringify(r.condition.resourceTypes) === '["main_frame"]'), true);
+  ck('pages are redirected and allowed at the top level only', rules.filter((r) => r.action.type !== 'block').every((r) => JSON.stringify(r.condition.resourceTypes) === '["main_frame"]'), true);
+  ck('frames are only ever blocked', rules.filter((r) => r.condition.resourceTypes.includes('sub_frame')).every((r) => r.action.type === 'block' && r.condition.resourceTypes.length === 1), true);
+  ck('an allowed site may still be framed', decide(rules, 'https://en.wikipedia.org/wiki/Sleep', 'sub_frame'), 'load');
   ck('Visor is allowed', decide(rules, 'https://visor-ed.web.app/write/abc'), 'allow');
   ck('Google sign-in is allowed', decide(rules, 'https://accounts.google.com/signin'), 'allow');
   ck('an allowed site', decide(rules, 'https://en.wikipedia.org/wiki/Sleep'), 'allow');
@@ -110,6 +115,30 @@ ck('locked, no list, "block AI sites" off: nothing is redirected', buildBlockRul
   const why = (url, o) => blockedReason(url, st, opts.visorOrigin, o);
   ck('blockedReason agrees in research mode', [why('https://example.com/', { research: true }), why('https://chatgpt.com/', { research: true }), why('https://gemini.google.com/app', { research: true })], [null, 'ai', 'ai']);
   ck('…and without it', [why('https://example.com/'), why('https://example.com/', { research: false })], ['not-allowed', 'not-allowed']);
+}
+
+// ── AI inside frames, and the search engines' AI modes ─────────────────────
+{
+  const st = { mode: 'open', allowedSites: [], blockedSites: AI, blockAiSites: true };
+  const rules = buildBlockRules(st, opts);
+  ck('an AI site framed in another page is blocked', decide(rules, 'https://chatgpt.com/embed', 'sub_frame'), 'block');
+  ck('…a subdomain too', decide(rules, 'https://chat.openai.com/', 'sub_frame'), 'block');
+  ck('…and an AI path', decide(rules, 'https://huggingface.co/chat/abc', 'sub_frame'), 'block');
+  ck('other frames load', [decide(rules, 'https://www.youtube.com/embed/x', 'sub_frame'), decide(rules, 'https://huggingface.co/models', 'sub_frame')], ['load', 'load']);
+  ck('Google AI Mode goes to the blocked page', decide(rules, 'https://www.google.com/search?q=sleep&udm=50'), 'chrome-extension://abc/blocked.html?u=https://www.google.com/search?q=sleep&udm=50');
+  ck('…in any Google country', decide(rules, 'https://www.google.co.uk/search?udm=50&q=x'), 'chrome-extension://abc/blocked.html?u=https://www.google.co.uk/search?udm=50&q=x');
+  ck('an ordinary Google search loads', [decide(rules, 'https://www.google.com/search?q=sleep'), decide(rules, 'https://www.google.com/search?q=sleep&udm=5'), decide(rules, 'https://www.google.com/search?q=udm%3D50')], ['load', 'load', 'load']);
+  ck('Bing Copilot search and chat are blocked', [decide(rules, 'https://www.bing.com/copilotsearch?q=x'), decide(rules, 'https://www.bing.com/chat')].map((x) => x.startsWith('chrome-extension://abc/blocked.html')), [true, true]);
+  ck('a Bing search loads', decide(rules, 'https://www.bing.com/search?q=chat'), 'load');
+  ck('Duck.ai is blocked', [decide(rules, 'https://duckduckgo.com/?q=x&ia=chat'), decide(rules, 'https://duckduckgo.com/aichat')].map((x) => x.startsWith('chrome-extension://abc/blocked.html')), [true, true]);
+  ck('a DuckDuckGo search loads', decide(rules, 'https://duckduckgo.com/?q=x&ia=web'), 'load');
+  ck('searchAiMatch names them', [searchAiMatch('https://www.google.com/search?udm=50&q=a'), searchAiMatch('https://www.bing.com/chat'), searchAiMatch('https://duckduckgo.com/aichat'), searchAiMatch('https://www.google.com/search?q=a')], ['Google AI Mode', 'Bing Copilot Search', 'Duck.ai', null]);
+  ck('blockedReason sends an open AI Mode page away', blockedReason('https://www.google.com/search?q=a&udm=50', st, opts.visorOrigin), 'ai');
+  ck('…only when AI sites are blocked', blockedReason('https://www.google.com/search?q=a&udm=50', { ...st, blockAiSites: false }, opts.visorOrigin), null);
+  ck('"block AI sites" off: no frame rules either', buildBlockRules({ ...st, blockAiSites: false }, opts), []);
+  const locked = buildBlockRules({ mode: 'locked', allowedSites: ['google.com'], blockedSites: AI, blockAiSites: true }, opts);
+  ck('locked, google.com allowed: AI Mode is still blocked', decide(locked, 'https://www.google.com/search?q=a&udm=50').startsWith('chrome-extension://abc/blocked.html'), true);
+  ck('…while ordinary searches are allowed', decide(locked, 'https://www.google.com/search?q=a'), 'allow');
 }
 
 // ── Browser pages ──────────────────────────────────────────────────────────

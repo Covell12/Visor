@@ -7,50 +7,65 @@
   <link rel="stylesheet" href="sessionpanel.css" />
 </head>
 <body>
-  <!-- During a Visor writing session: the assignment, the timer, the cite
-       button, Open Google, and the student's own document from the Visor
-       web app. -->
+  <!-- During a Visor writing session: the assignment and its timer, what the
+       session allows, the cite button, Open Google, and the student's own
+       document from the Visor web app. In the web app's "lens" look. -->
   <header class="sp-head">
-    <img src="logo.png" alt="Visor" class="sp-mark" width="33" height="22">
+    <span class="sp-mark" aria-hidden="true"><img src="logo.png" alt="" width="24" height="16"></span>
     <div class="sp-head-text">
       <strong id="sp-title">Visor</strong>
-      <div class="sp-rec" id="sp-rec" hidden><i aria-hidden="true"></i><span>Session active</span><span id="sp-timer" class="sp-timer"></span></div>
+      <span class="sp-sub" id="sp-sub">Writing session</span>
     </div>
-    <button id="sp-dochist" class="sp-link" hidden title="This Google Doc's edit history (Visor's original panel)">Doc history</button>
+    <button id="sp-dochist" class="sp-pill-link" hidden title="This Google Doc's edit history (Visor's original panel)">Doc history</button>
   </header>
 
   <main id="sp-main" hidden>
-    <div class="sp-cite-row" id="sp-cite-row">
-      <button id="sp-cite" class="sp-cite sp-act-main" title="Alt+Shift+C">
-        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 21c3 0 7-1 7-8V5c0-1.25-.756-2.017-2-2H4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2 1 0 1 0 1 1v1c0 1-1 2-2 2s-1 .008-1 1.031V20c0 1 0 1 1 1z"/><path d="M15 21c3 0 7-1 7-8V5c0-1.25-.757-2.017-2-2h-4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2h.75c0 2.25.25 4-2.75 4v3c0 1 0 1 1 1z"/></svg>
-        Cite this page
-      </button>
-      <button id="sp-google" class="sp-act-2" hidden title="Opens Google in a new tab">
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.35-4.35"/></svg>
-        Open Google
-      </button>
+    <!-- Recording / paused, the timer, and the session's rules -->
+    <section class="sp-card sp-status" aria-label="Session">
+      <div class="sp-status-row">
+        <span class="sp-state rec" id="sp-state" role="status" aria-live="polite"><i aria-hidden="true"></i><span id="sp-state-t">Recording</span></span>
+        <span id="sp-timer" class="sp-timer" aria-label="Time"></span>
+      </div>
+      <div class="sp-rules" id="sp-rules"></div>
+      <div class="sp-actions" id="sp-cite-row">
+        <button id="sp-cite" class="sp-btn primary" title="Alt+Shift+C">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 21c3 0 7-1 7-8V5c0-1.25-.756-2.017-2-2H4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2 1 0 1 0 1 1v1c0 1-1 2-2 2s-1 .008-1 1.031V20c0 1 0 1 1 1z"/><path d="M15 21c3 0 7-1 7-8V5c0-1.25-.757-2.017-2-2h-4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2h.75c0 2.25.25 4-2.75 4v3c0 1 0 1 1 1z"/></svg>
+          Cite this page
+        </button>
+        <button id="sp-google" class="sp-btn" hidden title="Opens Google in a new tab">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.35-4.35"/></svg>
+          Open Google
+        </button>
+        <button id="sp-back" class="sp-btn" hidden title="Go back to the Visor tab and write in full screen">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3"/></svg>
+          Back to full screen
+        </button>
+      </div>
       <div id="sp-cite-status" class="sp-cite-status" role="status" aria-live="polite"></div>
-    </div>
-    <iframe id="sp-frame" class="sp-frame" title="Your document" allow="clipboard-read; clipboard-write"></iframe>
+    </section>
+    <div class="sp-frame-wrap"><iframe id="sp-frame" class="sp-frame" title="Your document" allow="clipboard-read; clipboard-write"></iframe></div>
   </main>
 
   <section id="sp-none" class="sp-none" hidden>
+    <span class="sp-none-ic" aria-hidden="true"><img src="logo.png" alt="" width="36" height="24"></span>
     <h2>No writing session</h2>
     <p>Start a writing session in Visor, and your document opens here so you can write next to your research.</p>
-    <button id="sp-none-dochist" class="sp-link" hidden>See this Google Doc's history</button>
+    <button id="sp-none-dochist" class="sp-btn" hidden>See this Google Doc's history</button>
   </section>
 
   <footer class="sp-foot" id="sp-foot" hidden>
-    <span id="sp-recording">Recording research</span> ·
-    <button id="sp-what" class="sp-link" aria-expanded="false" aria-controls="sp-whatlist">What’s recorded?</button>
-    <ul id="sp-whatlist" hidden>
-      <li>The searches you make (Google, Bing, YouTube, Scholar and others), and when.</li>
-      <li>The pages you visit during the session, and how long each one is open.</li>
-      <li>Text you copy from a page (its length and first 140 characters), so a paste can show where it came from.</li>
-      <li>Visits to AI and answer sites, and sites a locked session blocks.</li>
-      <li>Citations you add.</li>
-      <li><b>Not recorded:</b> what you type on other sites, passwords, or anything when no session is running.</li>
-    </ul>
+    <div class="sp-foot-row"><span class="sp-dot" id="sp-rec-dot" aria-hidden="true"></span><span id="sp-recording">Recording research</span>
+      <button id="sp-what" class="sp-pill-link" aria-expanded="false" aria-controls="sp-whatlist">What’s recorded?</button></div>
+    <div class="sp-what" id="sp-whatwrap"><div class="sp-what-in">
+      <ul id="sp-whatlist">
+        <li>The searches you make (Google, Bing, YouTube, Scholar and others), and when.</li>
+        <li>The pages you visit during the session, and how long each one is open.</li>
+        <li>Text you copy from a page (its length and first 140 characters), so a paste can show where it came from.</li>
+        <li>Visits to AI and answer sites, and sites a locked session blocks.</li>
+        <li>Citations you add, and when this panel is closed during a locked session.</li>
+        <li><b>Not recorded:</b> what you type on other sites, passwords, or anything when no session is running.</li>
+      </ul>
+    </div></div>
   </footer>
 
   <script src="config.js"></script>

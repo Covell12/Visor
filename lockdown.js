@@ -18,9 +18,16 @@
  * research: true is a locked session writing in the side panel. The allowed
  * list doesn't apply then, so it gets the "no allowed list" rules above.
  *
- * Only top-level pages (main_frame) are redirected. The blocked page reads the
- * original address from everything after "?u=" (it isn't re-encoded, so the
- * original's own "?" and "&" survive).
+ * With "block AI sites", the AI list also covers:
+ *   • the AI answer modes of search engines (SEARCH_AI: Google's AI Mode,
+ *     Bing's Copilot search, DuckDuckGo's Duck.ai), which live at a search
+ *     address rather than a site of their own;
+ *   • frames: an AI site embedded in another page (a chat widget, a page
+ *     that frames ChatGPT) is blocked outright (sub_frame, action "block").
+ *
+ * Top-level pages (main_frame) are redirected to the blocked page, which reads
+ * the original address from everything after "?u=" (it isn't re-encoded, so
+ * the original's own "?" and "&" survive).
  * ==========================================================================*/
 
 'use strict';
@@ -28,6 +35,20 @@
 (function (root) {
   const RULE_BASE = 9100;   // our dynamic rule ids: 9100 and up
   const MAIN = ['main_frame'];
+  const SUB = ['sub_frame'];
+
+  // AI answer modes inside search engines (RE2 regexes, as Chrome runs them)
+  const SEARCH_AI = [
+    { name: 'Google AI Mode', re: '^https?://(www\\.)?google\\.[a-z]{2,3}(\\.[a-z]{2})?/search\\?([^#]*&)?udm=50(&.*|#.*)?$' },
+    { name: 'Bing Copilot Search', re: '^https?://(www\\.)?bing\\.com/(chat|copilotsearch)([/?#].*)?$' },
+    { name: 'Duck.ai', re: '^https?://(www\\.)?duckduckgo\\.com/(aichat([/?#].*)?|\\?([^#]*&)?ia=chat(&.*|#.*)?)$' }
+  ];
+  // Which of them a URL is (its name), or null
+  function searchAiMatch(url) {
+    const u = String(url || '');
+    const hit = SEARCH_AI.find((x) => new RegExp(x.re, 'i').test(u));
+    return hit ? hit.name : null;
+  }
 
   // "example.com" -> { host: 'example.com' }; "huggingface.co/chat" -> { host, path: '/chat' }
   function splitEntry(entry) {
@@ -43,13 +64,21 @@
     try { return new URL(origin).hostname; } catch (_) { return null; }
   }
 
+  // The AI list (and the search engines' AI modes): pages go to the blocked
+  // page; the same sites inside a frame are blocked outright
   function aiRedirectRules(blocked, redirect, priority, nextId) {
     const rules = [];
+    const block = { type: 'block' };
     const hosts = blocked.filter((b) => !b.path).map((b) => b.host);
-    if (hosts.length) rules.push({ id: nextId(), priority, action: redirect, condition: { regexFilter: '^https?://.*', requestDomains: hosts, resourceTypes: MAIN } });
-    for (const b of blocked.filter((x) => x.path)) {
-      const re = `^https?://([a-z0-9-]+\\.)*${b.host.replace(/\./g, '\\.')}${b.path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([/?#].*)?$`;
-      rules.push({ id: nextId(), priority, action: redirect, condition: { regexFilter: re, resourceTypes: MAIN } });
+    if (hosts.length) {
+      rules.push({ id: nextId(), priority, action: redirect, condition: { regexFilter: '^https?://.*', requestDomains: hosts, resourceTypes: MAIN } });
+      rules.push({ id: nextId(), priority, action: block, condition: { requestDomains: hosts, resourceTypes: SUB } });
+    }
+    const regexes = blocked.filter((x) => x.path).map((b) => `^https?://([a-z0-9-]+\\.)*${b.host.replace(/\./g, '\\.')}${b.path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([/?#].*)?$`)
+      .concat(SEARCH_AI.map((x) => x.re));
+    for (const re of regexes) {
+      rules.push({ id: nextId(), priority, action: redirect, condition: { regexFilter: re, isUrlFilterCaseSensitive: false, resourceTypes: MAIN } });
+      rules.push({ id: nextId(), priority, action: block, condition: { regexFilter: re, isUrlFilterCaseSensitive: false, resourceTypes: SUB } });
     }
     return rules;
   }
@@ -107,7 +136,7 @@
     if (host === 'accounts.google.com' || (vh && host === vh)) return null;
     const allowed = (s.allowedSites || []).map(splitEntry).filter(Boolean);
     const blocked = (s.blockedSites || []).map(splitEntry).filter(Boolean);
-    if (s.blockAiSites && blocked.some(under)) return 'ai';
+    if (s.blockAiSites && (blocked.some(under) || searchAiMatch(url))) return 'ai';
     if (s.mode === 'locked' && !research && allowed.length && !allowed.some(under)) return 'not-allowed';
     return null;
   }
@@ -116,7 +145,7 @@
   const BOUNCE = /^(chrome|edge|brave|opera|vivaldi):\/\/(extensions|settings|flags|policy|management|history|downloads|net-internals|inspect)/i;
   function shouldBounce(url) { return BOUNCE.test(String(url || '')); }
 
-  const api = { RULE_BASE, buildBlockRules, blockedReason, shouldBounce, splitEntry };
+  const api = { RULE_BASE, SEARCH_AI, buildBlockRules, blockedReason, shouldBounce, splitEntry, searchAiMatch };
   root.VisorLockdown = api;
   if (typeof module === 'object' && module.exports) module.exports = api;
 })(typeof self !== 'undefined' ? self : this);

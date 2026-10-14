@@ -31,7 +31,8 @@
     'perplexity.ai', 'copilot.microsoft.com', 'poe.com', 'character.ai', 'deepseek.com', 'chat.deepseek.com',
     'meta.ai', 'you.com', 'phind.com', 'quillbot.com', 'chat.mistral.ai', 'grok.com', 'x.ai', 'huggingface.co/chat',
     'jasper.ai', 'writesonic.com', 'rytr.me', 'copy.ai', 'hix.ai', 'undetectable.ai', 'stealthgpt.ai',
-    'studocu.com', 'coursehero.com', 'chegg.com', 'brainly.com', 'gptzero.me'
+    'studocu.com', 'coursehero.com', 'chegg.com', 'brainly.com', 'gptzero.me',
+    'duck.ai', 'notebooklm.google.com', 'pi.ai', 'chat.qwen.ai', 'kimi.com', 'wordtune.com'
   ];
 
   // Is this page part of Visor itself? (Never recorded as research.)

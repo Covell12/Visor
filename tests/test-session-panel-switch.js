@@ -44,7 +44,7 @@ function makeChrome(seed = {}) {
   const rec = (name) => async (...args) => { calls.push([name, ...JSON.parse(JSON.stringify(args))]); };
   const ipc = () => new Promise((r) => setTimeout(r, 2));
   const chrome = {
-    runtime: { onMessage: ev(), onInstalled: ev(), getManifest: () => ({ version: '4.0.0' }), lastError: null, id: 'test', getURL: (p) => `chrome-extension://test/${p}` },
+    runtime: { onMessage: ev(), onInstalled: ev(), onConnect: ev(), getManifest: () => ({ version: '4.0.0' }), lastError: null, id: 'test', getURL: (p) => `chrome-extension://test/${p}` },
     sidePanel: { setOptions: rec('setOptions'), setPanelBehavior: rec('setPanelBehavior'), open: rec('open') },
     action: { setBadgeText: rec('setBadgeText'), setBadgeBackgroundColor: rec('setBadgeBackgroundColor'), setTitle: rec('setTitle'), setPopup: rec('setPopup') },
     tabs: { onUpdated: ev(), onActivated: ev(), onRemoved: ev(), query: async () => tabs, get: async (id) => tabs.find((t) => t.id === id), update: rec('tabs.update'), create: rec('tabs.create'), sendMessage: async (...args) => { await rec('tabs.sendMessage')(...args); return { ok: true }; } },
@@ -97,6 +97,15 @@ function load(seed) {
 }
 
 const visor = { origin: 'http://localhost:3000', url: 'http://localhost:3000/write/a1', tab: { id: 5, windowId: 1 } };
+// A copy of the session panel: its port to the worker, saying whether it's on screen
+function openPanel(h, visible = true, sender = { url: 'chrome-extension://test/sessionpanel.html' }) {
+  const ev = () => { const fns = []; return { addListener: (f) => fns.push(f), fns }; };
+  const port = { name: 'visor-session-panel', sender, onMessage: ev(), onDisconnect: ev(), postMessage() {}, disconnect() {} };
+  h.chrome.runtime.onConnect.fns.forEach((f) => f(port));
+  const say = (m) => port.onMessage.fns.forEach((f) => f(m));
+  say({ type: 'visibility', visible });
+  return { show: (v) => say({ type: 'visibility', visible: v }), close: () => port.onDisconnect.fns.forEach((f) => f()) };
+}
 const settle = () => new Promise((r) => setTimeout(r, 20));
 const callsOf = (calls, name) => calls.filter((c) => c[0] === name).map((c) => c.slice(1));
 // The locked session's "everything else goes to the blocked page" rule, and an AI-site rule
@@ -213,6 +222,7 @@ const CITE_OFF = 'One-click citing is turned off for this assignment.';
   ck('  and nothing reaches the editor', callsOf(L.calls, 'tabs.sendMessage').length, 0);
 
   L.calls.length = 0;
+  const lp = openPanel(L);   // the student opens the side panel to write there
   r = await L.send({ channel: 'visor-bridge', type: 'RESEARCH_MODE', payload: { docId: 'd2', on: true } }, visor);
   ck('research mode on', r, { ok: true, researchMode: true });
   let rules = await L.chrome.declarativeNetRequest.getDynamicRules();
@@ -239,6 +249,12 @@ const CITE_OFF = 'One-click citing is turned off for this assignment.';
   L.beat.leaseSurf = 'panel';
   await beatNow(L);
   ck('beat: just after the tab switched, the beat doesn’t undo it', (await sessionOf(L)).researchMode, false);
+  switchedLongAgo(L);
+  lp.show(false);
+  await beatNow(L);
+  ck('beat: the panel holds the lease but isn’t on screen, so research mode stays off', (await sessionOf(L)).researchMode, false);
+  lp.show(true);
+  await settle();
   switchedLongAgo(L);
   await beatNow(L);
   ck('beat: the side panel holds the lease, so research mode goes on', [(await sessionOf(L)).researchMode, catchAll(await L.chrome.declarativeNetRequest.getDynamicRules())], [true, false]);
@@ -312,6 +328,55 @@ const CITE_OFF = 'One-click citing is turned off for this assignment.';
   ck('blocked page, AI site: says so, records nothing more', [r.reason, (await queued(R)).length - before], ['ai', 0]);
   r = await R.send({ type: 'VISOR_BLOCKED', url: 'https://example.com/page' }, { tab: { id: 7 } });
   ck('blocked page, a site off the locked list: recorded as blocked', [r.reason, (await queued(R)).slice(before)], ['not-allowed', ['blocked:example.com']]);
+
+  // ── Closing the side panel mid-research (panel presence) ────────────────
+  // A locked session writing in the side panel keeps its looser rules only
+  // while the panel is on screen. Closed (or replaced by another panel) for
+  // 3 s: research mode ends, the allowed list is back, the session records
+  // it, and the Visor tab comes to the front and is told.
+  const P = load();
+  await settle();
+  await P.send({ channel: 'visor-bridge', type: 'CONNECT', payload: { token: 'tok', user: { id: 'u1', name: 'Sam' } } }, visor);
+  await P.send({ channel: 'visor-bridge', type: 'SESSION_START', payload: { docId: 'd9', assignmentId: 'a9', sessionToken: 'wsess9', settings: locked } }, visor);
+  const pp = openPanel(P);
+  const hidden = openPanel(P, false);   // another tab's copy, not on screen
+  await P.send({ channel: 'visor-bridge', type: 'RESEARCH_MODE', payload: { docId: 'd9', on: true } }, visor);
+  r = await P.send({ channel: 'visor-bridge', type: 'PING', payload: {} }, visor);
+  ck('ping tells the page about research mode and the panel', [r.session.researchMode, r.session.panelOpen], [true, true]);
+  // A content script pretending to be the panel isn't counted
+  const fake = openPanel(P, true, { url: 'https://example.com/', tab: { id: 2 } });
+  P.calls.length = 0;
+  pp.close();
+  await new Promise((done) => setTimeout(done, 1000));
+  ck('a moment after closing, nothing has changed yet', (await sessionOf(P)).researchMode, true);
+  await new Promise((done) => setTimeout(done, 2400));
+  await settle();
+  let pst = await sessionOf(P);
+  rules = await P.chrome.declarativeNetRequest.getDynamicRules();
+  ck('panel closed: research mode ends (a hidden copy doesn’t count)', [pst.researchMode, catchAll(rules), blocksAi(rules)], [false, true, true]);
+  // (queued, and sent to the server straight away)
+  const sentClosed = P.fetches.some(([url, , body]) => /\/api\/ext\/research$/.test(url) && body.events.some((e) => e.type === 'panel-closed'));
+  ck('  the session records it, and sends it at once', sentClosed || (pst.researchQueue || []).some((e) => e.type === 'panel-closed'), true);
+  ck('  the Visor tab comes to the front', callsOf(P.calls, 'tabs.update').some((c) => c[0] === 5 && c[1].active === true), true);
+  ck('  …and is told', callsOf(P.calls, 'tabs.sendMessage').some((c) => c[0] === 5 && c[1].type === 'PANEL_CLOSED' && c[1].docId === 'd9'), true);
+  r = await P.send({ channel: 'visor-bridge', type: 'PING', payload: {} }, visor);
+  ck('  ping says so', [r.session.researchMode, r.session.panelOpen], [false, false]);
+  // Open again: the next beat finds the panel still holds the lease
+  P.beat.leaseSurf = 'panel';
+  switchedLongAgo(P);
+  const again = openPanel(P);
+  await settle(); await settle();
+  ck('panel open again: research mode resumes', (await sessionOf(P)).researchMode, true);
+  // An open session never had looser rules: closing its panel records nothing
+  again.close(); hidden.close();
+  await P.send({ channel: 'visor-bridge', type: 'SESSION_END', payload: { docId: 'd9' } }, visor);
+  await P.send({ channel: 'visor-bridge', type: 'SESSION_START', payload: { docId: 'd10', assignmentId: 'a10', sessionToken: 'wsess10', settings: { mode: 'open', researchTracking: true, title: 'Essay', blockAiSites: true } } }, visor);
+  const op = openPanel(P);
+  P.calls.length = 0;
+  op.close();
+  await new Promise((done) => setTimeout(done, 3300));
+  const closedSends = () => P.fetches.filter(([url, , body]) => /\/api\/ext\/research$/.test(url) && body.docId === 'd10' && body.events.some((e) => e.type === 'panel-closed')).length;
+  ck('open session: closing the panel changes nothing', [((await sessionOf(P)).researchQueue || []).some((e) => e.type === 'panel-closed'), closedSends(), callsOf(P.calls, 'tabs.sendMessage').length], [false, 0, 0]);
 
   console.log(out.every(Boolean) ? `\nall passed (${out.length} checks)` : `\n${out.filter((x) => !x).length} FAILED`);
   process.exit(out.every(Boolean) ? 0 : 1);
