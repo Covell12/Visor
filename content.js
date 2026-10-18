@@ -1427,9 +1427,13 @@ function renderAwarePanel() {
     <div class="va-head">
       <span class="va-dots" aria-hidden="true"><i></i><i></i><i></i></span>
       <b class="va-title">Visor <span>AWARE</span></b>
-      <button type="button" class="va-icon" data-aw="min" aria-expanded="${!awareMin}"
-              title="${awareMin ? 'Show the key' : 'Fold the panel'}" aria-label="${awareMin ? 'Show the key' : 'Fold the panel'}">${awareMin ? '▸' : '▾'}</button>
-      <button type="button" class="va-icon" data-aw="off" title="Turn AWARE off" aria-label="Turn AWARE off">×</button>
+      <button type="button" class="va-icon va-fold" data-aw="min" aria-expanded="${!awareMin}"
+              title="${awareMin ? 'Show the key' : 'Fold the panel'}" aria-label="${awareMin ? 'Show the key' : 'Fold the panel'}">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 14.5 12 9l5.5 5.5"/></svg>
+      </button>
+      <button type="button" class="va-icon" data-aw="off" title="Turn AWARE off" aria-label="Turn AWARE off">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7.5 7.5l9 9M16.5 7.5l-9 9"/></svg>
+      </button>
     </div>
     <div class="va-body">
       <p class="va-note">Each person's text in their colour. Click someone to hide or show their colour.</p>

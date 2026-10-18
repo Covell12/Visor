@@ -750,13 +750,18 @@
 .va-title { flex: 1; font-size: 13px; font-weight: 700; letter-spacing: -.01em; }
 .va-title span { font-size: 11px; font-weight: 800; letter-spacing: .08em; }
 .va-icon {
-  width: 24px; height: 24px; padding: 0;
+  width: 26px; height: 26px; padding: 0;
   display: grid; place-items: center;
   border: 0; border-radius: 999px; cursor: pointer;
-  font-size: 14px; line-height: 1;
   color: var(--v-ink-2) !important; background: transparent;
+  transition: background-color .15s var(--v-ease), color .15s var(--v-ease);
 }
+.va-icon svg { display: block; width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .va-icon:hover { color: var(--v-ink) !important; background: var(--v-hair-dim); }
+/* the chevron points up while the key is open, down once it's folded */
+.visor-aware-panel.is-min .va-fold svg { transform: rotate(180deg); }
+.va-head .va-fold { margin-left: 2px; }
+.va-head .va-icon + .va-icon { margin-left: -4px; }
 .va-body { padding: 0 8px 10px; border-top: 1px solid var(--v-hair-dim); }
 .visor-aware-panel.is-min .va-body { display: none; }
 .va-note { margin: 10px 4px 8px; font-size: 11.5px; color: var(--v-ink-2); }
