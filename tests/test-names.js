@@ -115,6 +115,21 @@ const names = (VisorChangelog, res) => VisorChangelog.analyze(VisorChangelog.bui
     ck('  and the people are still themselves', a.contributors.filter((c) => !c.unattributed).map((c) => c.name).sort(), ['Maya Lopez', 'Sam Ortiz']);
   }
 
+  // ── "Copy details": the shape of the naming, never its contents ──────────
+  {
+    const rows = [['A1', 'Hello '], ['B2', 'there. '], ['C3', 'More.']];
+    const { VisorChangelog } = stand_in({ rows, people: { A1: 'Maya Lopez', B2: 'Sam Ortiz' } });
+    const res = await VisorChangelog.fetchChangelog('DOC', 'doc', {});
+    const n = res.diagnostics.naming;
+    const json = JSON.stringify(n);
+    ck('the details say where the roster was', n.responses[0].rosterIn, ['userMap']);
+    ck('  what its records look like', n.responses[0].rosterRecords[0].startsWith('{name:text('), true);
+    ck('  which log column holds the authors, and how much of it the roster covers',
+      [n.authorColumn, n.logColumns[2].matchesRoster], [2, '67%']);
+    ck('  and how each author came out', n.authors, { named: 2, inRosterWithoutName: 0, anonymous: 0, notInRoster: 1, noAuthorColumn: 0 });
+    ck('  with no names, ids or text in it', ['Maya', 'Sam', '"A1"', '"B2"', 'Hello', 'there'].some((x) => json.includes(x)), false);
+  }
+
   const failed = out.filter((x) => !x).length;
   console.log(failed ? `${failed} of ${out.length} checks FAILED` : `all passed (${out.length} checks)`);
   process.exit(failed ? 1 : 0);

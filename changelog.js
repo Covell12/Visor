@@ -183,6 +183,7 @@
 
     const users = [];
     const rows  = [];
+    let firstLoad = null;   // the first log page, kept only to describe its shape
 
     // Pass one: how long is the document?
     const tiles = await getJSON(tilesUrl(fileId, kind, creds, 1500, false));
@@ -209,6 +210,7 @@
       const end = Math.min(start + PAGE_SIZE - 1, last);
       const json = await getJSON(loadUrl(fileId, kind, start, end, creds));
       if (!json) continue;
+      if (!firstLoad) firstLoad = json;
       absorbUsers(json, users);
       collectRows(json, rows, start);
       onProgress(Math.min(1, end / last), end, last);
@@ -281,7 +283,10 @@
       // Count every page-derived source, not just the id path — the previous
       // counter reported zero even when positional matching had worked.
       titlesFromPage: tabs.filter((t) => /^page/.test(t.titleSource || '')).length,
-      layout
+      layout,
+      // How the naming went, in shapes and counts only (no names, ids or text):
+      // what "Copy details" in the side panel hands over when names go wrong.
+      naming: describeNaming([['tiles', tiles], ['detailedTiles', detailedTiles], ['log', firstLoad]], rows, users, entries, layout, creds, opts.me)
     };
 
     return { entries, users, lastRevision: last, layout, diagnostics, tabs };
@@ -340,6 +345,113 @@
     for (let start = 1; missing.length && start <= last && calls < MAX_CALLS; start += WINDOW) await ask(start);
 
     return { authorsInLog: inLog.size, unresolved: missing.length, calls };
+  }
+
+  // ── Describing the naming, for support ─────────────────────────────────────
+
+  /** A value's shape, never its content: "digits(20)", "hex(12)", "text(9)", "time", … */
+  function shapeOfValue(v) {
+    if (v === null) return 'null';
+    if (v === undefined) return 'none';
+    if (typeof v === 'boolean') return 'bool';
+    if (typeof v === 'number') return Number.isInteger(v) ? (v >= EPOCH_MIN && v <= EPOCH_MAX ? 'time' : 'int') : 'num';
+    if (Array.isArray(v)) return `array(${v.length})`;
+    if (typeof v === 'object') return 'object';
+    const s = String(v);
+    if (/^\d+$/.test(s)) return `digits(${s.length})`;
+    if (/^[0-9a-f]+$/i.test(s)) return `hex(${s.length})`;
+    if (/^#[0-9a-f]{3,8}$/i.test(s)) return 'colour';
+    if (/^(https?:)?\/\//i.test(s)) return 'link';
+    if (/@/.test(s)) return 'address';
+    if (/^[\w.-]+$/.test(s)) return `id(${s.length})`;
+    return `text(${s.length})`;
+  }
+
+  const tally = (list) => {
+    const m = {};
+    for (const k of list) m[k] = (m[k] || 0) + 1;
+    return Object.entries(m).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([k, n]) => `${k} ×${n}`);
+  };
+
+  /**
+   * How names were (or weren't) found: where each response kept its roster and
+   * what its records look like, what each column of the log holds and how much
+   * of it matches the roster, and how each author in the log came out. Shapes
+   * and counts only: no names, addresses, ids or document text.
+   */
+  function describeNaming(responses, rows, users, entries, layout, creds, me) {
+    const ROSTER_KEYS = ['userMap', 'users', 'um', 'userMapping', 'authors'];
+    const rosterIds = new Set(users.map((u) => u.id));
+    const sources = responses.map(([label, j]) => {
+      if (!j) return { from: label, answered: false };
+      const holds = ROSTER_KEYS.filter((k) => j[k] && typeof j[k] === 'object');
+      const records = [];
+      const keys = [];
+      for (const k of holds) {
+        const map = j[k];
+        const list = Array.isArray(map) ? map.map((v, i) => [i, v]) : Object.entries(map);
+        for (const [key, v] of list.slice(0, 300)) {
+          keys.push(shapeOfValue(String(key)));
+          records.push(Array.isArray(v) ? `[${v.slice(0, 8).map(shapeOfValue).join(', ')}]`
+            : v && typeof v === 'object' ? `{${Object.keys(v).slice(0, 12).map((f) => `${f}:${shapeOfValue(v[f])}`).join(', ')}}`
+            : shapeOfValue(v));
+        }
+      }
+      const tileUsers = [];
+      const info = j.tileInfo || j.tiles;
+      if (Array.isArray(info)) for (const t of info.slice(0, 200)) if (t && Array.isArray(t.users)) for (const u of t.users) tileUsers.push(u);
+      return {
+        from: label, answered: true,
+        topKeys: Object.keys(j).slice(0, 16),
+        rosterIn: holds,
+        rosterSize: records.length,
+        rosterKeys: tally(keys),
+        rosterRecords: tally(records),
+        tileUsers: tally(tileUsers.map(shapeOfValue)),
+        tileUsersInRoster: tileUsers.length ? `${Math.round(100 * tileUsers.filter((u) => rosterIds.has(String(u))).length / tileUsers.length)}%` : null
+      };
+    });
+
+    const sample = rows.slice(0, 4000);
+    const width = sample.reduce((w, r) => Math.max(w, r.row.length), 0);
+    const columns = [];
+    for (let c = 0; c < Math.min(width, 12); c++) {
+      const kinds = [];
+      const distinct = new Set();
+      let strings = 0, matched = 0;
+      for (const r of sample) {
+        const v = r.row[c];
+        kinds.push(shapeOfValue(v));
+        if (typeof v === 'string' || typeof v === 'number') {
+          const sv = String(v);
+          if (typeof v === 'string') { strings++; distinct.add(sv); }
+          if (rosterIds.has(sv)) matched++;
+        }
+      }
+      columns.push({
+        col: c, holds: tally(kinds), distinct: distinct.size,
+        matchesRoster: matched ? `${Math.round(100 * matched / sample.length)}%` : '0%'
+      });
+    }
+
+    const byAuthor = new Map();
+    for (const e of entries) if (!byAuthor.has(e.userId)) byAuthor.set(e.userId, 0);
+    const outcome = { named: 0, inRosterWithoutName: 0, anonymous: 0, notInRoster: 0, noAuthorColumn: byAuthor.has('0') ? 1 : 0 };
+    for (const id of byAuthor.keys()) {
+      if (id === '0') continue;
+      const u = users.find((x) => x.id === id);
+      if (!u) outcome.notInRoster++;
+      else if (u.name) outcome.named++;
+      else if (u.anonymous) outcome.anonymous++;
+      else outcome.inRosterWithoutName++;
+    }
+    return {
+      responses: sources,
+      logColumns: columns,
+      authorColumn: layout ? layout.userIdx : null,
+      authors: outcome,
+      signedIn: { pageId: creds.ouid ? shapeOfValue(String(creds.ouid)) : null, pageIdInLog: !!creds.ouid && byAuthor.has(String(creds.ouid)), nameOnPage: !!(me && me.name) }
+    };
   }
 
   /** Total revisions, straight from the tile index. */

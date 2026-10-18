@@ -426,6 +426,49 @@ function renderHeatmap(heat) {
     </div>`;
 }
 
+/**
+ * What "Copy details" copies when names go missing: how Visor read the
+ * document's history and how the naming came out, as shapes and counts.
+ * No names, addresses, ids or text (the engine builds `naming` that way).
+ */
+function namingDetails(a) {
+  const d = a.diagnostics || {};
+  const out = {
+    visor: (() => { try { return chrome.runtime.getManifest().version; } catch (_) { return null; } })(),
+    kind: meta && meta.kind,
+    contributors: a.contributors.length,
+    unnamed: a.contributors.filter((c) => !c.identified).length,
+    unattributed: a.contributors.filter((c) => c.unattributed).length,
+    collapsed: a.collapsedRoster || 0
+  };
+  for (const k of ['rows', 'tilesResponded', 'detailedRoster', 'hasToken', 'hasOuid', 'revisionCountFrom',
+    'rosterSize', 'rosterWithNames', 'rosterWithEmails', 'authorsInLog', 'authorsUnresolved', 'rosterSweeps',
+    'namedFromPage', 'authorlessRows', 'layoutSource', 'layout', 'naming']) {
+    if (k in d) out[k] = d[k];
+  }
+  return JSON.stringify(out, null, 1);
+}
+
+$('people-list').addEventListener('click', async (e) => {
+  const btn = e.target.closest && e.target.closest('[data-copy-details]');
+  if (!btn || !current) return;
+  const status = btn.parentElement.querySelector('.v-copy-status');
+  const text = namingDetails(current);
+  try {
+    await navigator.clipboard.writeText(text);
+    status.textContent = 'Copied. Paste it into your message.';
+  } catch (_) {
+    // No clipboard: show it to be copied by hand.
+    status.textContent = '';
+    const box = document.createElement('textarea');
+    box.className = 'v-copy-box';
+    box.readOnly = true;
+    box.value = text;
+    btn.parentElement.after(box);
+    box.select();
+  }
+});
+
 function renderPeople(a) {
   const host = $('people-list');
   if (!a.contributors.length) {
@@ -443,7 +486,9 @@ function renderPeople(a) {
     : unnamed
       ? `<div class="v-note">Google did not include ${
           unnamed === a.contributors.length ? 'author names' : `names for ${unnamed} of these authors`
-        }, so they are numbered in the order they first edited.</div>`
+        }, so they are numbered in the order they first edited.
+          <span class="v-copy-row"><button type="button" class="v-copy-details" data-copy-details>Copy details</button>
+          <span class="v-copy-status" role="status" aria-live="polite"></span></span></div>`
       : '';
 
   host.innerHTML = notice + a.contributors.map((c) => {
