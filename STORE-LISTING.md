@@ -248,7 +248,7 @@ Visor does not modify Google documents and never labels writing as AI-generated.
 ### `storage`
 
 ```
-Stores the user's light or dark theme choice; the token that connects the extension to the user's Visor Classroom account (set when they connect on the Visor website); and, during a writing session only, the session's state and the queue of research events waiting to be sent. Session data is kept in chrome.storage.session and cleared when the session ends.
+Stores the user's display preferences (light, dark or matching the computer; whether AWARE mode is on and whose colours and which pastes it shows; whether percentages leave out pasted text); the token that connects the extension to the user's Visor Classroom account (set when they connect on the Visor website); and, during a writing session only, the session's state and the queue of research events waiting to be sent. Session data is kept in chrome.storage.session and cleared when the session ends. Preferences stay on the user's computer.
 ```
 
 ### `scripting`
@@ -260,7 +260,7 @@ During a Visor writing session that records research, registers a small script o
 ### `webNavigation`
 
 ```
-During a Visor writing session, records which pages the student visits and searches they make, with time on each page, for their teacher's research log. Not used outside a session.
+During a Visor writing session, records which pages the student visits and searches they make, with time on each page, for their teacher's research log, and notes when the student opens an AI site (including one the session blocks). Not used outside a session.
 ```
 
 ### `contextMenus`
