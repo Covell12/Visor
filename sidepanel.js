@@ -1860,6 +1860,7 @@ const escHtml = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ 
 const sentAt = (ms) => new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 
 async function refreshSendBox() {
+  if (globalThis.VISOR_EDITION === 'docs') return;   // Visor Classroom only (the box is hidden)
   const st = await bg({ type: 'VISOR_SEND_STATE', fileId: meta && meta.fileId });
   if (!st) return;
   const projects = (st.projects || []).slice().sort((a, b) => Number(b.linked) - Number(a.linked));

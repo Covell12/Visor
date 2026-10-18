@@ -390,6 +390,7 @@ function exportReport() {
 // worker sends each fresh analysis there (at most every 5 minutes). Nothing
 // is sent for documents that aren't linked, or when Visor isn't connected.
 function autoSendReport() {
+  if (globalThis.VISOR_EDITION === 'docs') return;   // Visor Classroom only
   if (!analysis || !visorAlive()) return;
   try { chrome.runtime.sendMessage({ type: 'VISOR_AUTO_SEND', fileId: getFileId(), report: exportReport() }, () => void chrome.runtime.lastError); } catch (_) {}
 }
@@ -397,6 +398,7 @@ function autoSendReport() {
 // A linked group Doc is read when it's opened, so its project stays current
 // without anyone pressing the Visor button.
 function readIfLinked() {
+  if (globalThis.VISOR_EDITION === 'docs') return;   // Visor Classroom only
   if (!visorAlive() || analysis || running || !getFileId() || accessVerdict() === 'viewer') return;
   try {
     chrome.runtime.sendMessage({ type: 'VISOR_IS_LINKED', fileId: getFileId() }, (res) => {

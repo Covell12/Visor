@@ -16,7 +16,12 @@
 
 'use strict';
 
-importScripts('config.js', 'research.js', 'cite.js', 'lockdown.js', 'session-bg.js');
+importScripts('edition.js');
+// The Docs-only build has none of the writing-session modules; everything
+// below that belongs to them checks CLASSROOM first.
+const CLASSROOM = globalThis.VISOR_EDITION !== 'docs';
+if (CLASSROOM) importScripts('config.js', 'research.js', 'cite.js', 'lockdown.js', 'session-bg.js');
+const inSessionPanel = () => CLASSROOM && sessionPanelOn;
 
 const DOC_URL = /^https:\/\/docs\.google\.com\/(document|presentation)\/d\//;
 
@@ -29,22 +34,22 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   // panel and the permission window.
   // "Open side panel" from the Visor page: Chrome only opens a panel inside
   // the click that asked for it, so this can't wait for anything first
-  if (msg && msg.channel === 'visor-bridge' && msg.type === 'OPEN_PANEL') {
+  if (CLASSROOM && msg && msg.channel === 'visor-bridge' && msg.type === 'OPEN_PANEL') {
     if (!sender.tab || !VisorConfig.isVisorOrigin(sender.url || sender.origin || '')) { sendResponse({ ok: false, error: 'not a Visor page' }); return false; }
     chrome.sidePanel.open({ windowId: sender.tab.windowId })
       .then(() => sendResponse({ ok: true }))
       .catch(() => sendResponse({ ok: false, error: 'Click the Visor icon in Chrome’s toolbar to open the side panel.' }));
     return true;
   }
-  if (msg && msg.channel === 'visor-bridge') {
+  if (CLASSROOM && msg && msg.channel === 'visor-bridge') {
     sessionReady.then(() => handleBridge(msg, sender)).then(sendResponse, (e) => sendResponse({ ok: false, error: String((e && e.message) || e) }));
     return true;
   }
-  if (msg && msg.type === 'VISOR_PANEL_STATE') {
+  if (CLASSROOM && msg && msg.type === 'VISOR_PANEL_STATE') {
     panelState().then(sendResponse, () => sendResponse({ active: false }));
     return true;
   }
-  if (msg && msg.type === 'VISOR_PERMISSION_RESULT') {
+  if (CLASSROOM && msg && msg.type === 'VISOR_PERMISSION_RESULT') {
     permissionAnswered(!!msg.granted).then(() => sendResponse({ ok: true }));
     return true;
   }
@@ -61,9 +66,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       // During a writing session the panel is the session panel, even on a
       // Google Doc (it links to this document's history).
       chrome.sidePanel
-        .setOptions({ tabId, path: sessionPanelOn ? 'sessionpanel.html' : 'sidepanel.html', enabled: true })
+        .setOptions({ tabId, path: inSessionPanel() ? 'sessionpanel.html' : 'sidepanel.html', enabled: true })
         .catch(() => {});
-      panelEnabled.set(tabId, sessionPanelOn ? 'session' : true);
+      panelEnabled.set(tabId, inSessionPanel() ? 'session' : true);
 
       // Report what actually happened. open() must be called inside the user's
       // gesture, and after the laptop sleeps this worker is dead — the click
@@ -108,7 +113,7 @@ let openedFor = null;
 
 async function syncPanel(tabId, url) {
   // A writing session puts the session panel on every tab (session-bg.js)
-  if (sessionPanelOn) {
+  if (inSessionPanel()) {
     if (panelEnabled.get(tabId) === 'session') return;
     panelEnabled.set(tabId, 'session');
     try { await chrome.sidePanel.setOptions({ tabId, path: 'sessionpanel.html', enabled: true }); } catch (_) { panelEnabled.delete(tabId); }

@@ -54,6 +54,7 @@
         "https://docs.google.com/presentation/*"
       ],
       "js": [
+        "edition.js",
         "changelog.js",
         "shares.js",
         "content.js"

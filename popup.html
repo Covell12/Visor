@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
+  <script src="edition.js"></script>
   <title>Visor</title>
   <link rel="stylesheet" href="glass.css" />
   <style>
@@ -51,6 +52,7 @@
     .p-facts { display: flex; flex-direction: column; gap: 7px; margin-top: 11px; }
     .p-fact { display: flex; gap: 8px; font-size: 11px; line-height: 1.45; color: var(--ink-2); }
     .p-fact b { color: var(--good); flex-shrink: 0; }
+    html[data-edition="docs"] .classroom-only, html:not([data-edition="docs"]) .docs-only { display: none; }
   </style>
 </head>
 <body>
@@ -76,9 +78,10 @@
     <div class="p-facts">
       <div class="p-fact"><b>✓</b> Docs history needs no sign-in, no Google API, no account.</div>
       <div class="p-fact"><b>✓</b> Reads only the document you have open, from its own page.</div>
-      <div class="p-fact"><b>✓</b> Nothing leaves your browser unless you send it to Visor, or your teacher linked this Doc to your group project.</div>
+      <div class="p-fact classroom-only"><b>✓</b> Nothing leaves your browser unless you send it to Visor, or your teacher linked this Doc to your group project.</div>
+      <div class="p-fact docs-only"><b>✓</b> Nothing leaves your browser.</div>
       <div class="p-fact"><b>✓</b> Editors only — view-only access shows no history.</div>
-      <div class="p-fact"><b>✓</b> Visor Classroom writing sessions record research only while a session runs (REC on this icon).</div>
+      <div class="p-fact classroom-only"><b>✓</b> Visor Classroom writing sessions record research only while a session runs (REC on this icon).</div>
     </div>
   </div>
 
