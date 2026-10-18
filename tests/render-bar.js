@@ -59,6 +59,7 @@ const USERS = [{ id: '1', name: 'Ethan Bernstein' }, { id: '2', name: 'Maya Okon
 win.__entries = entries();
 win.__users = USERS;
 
+vm.runInContext(fs.readFileSync(`${DIR}/shares.js`, 'utf8'), ctx, { filename: 'shares.js' });
 vm.runInContext(fs.readFileSync(`${DIR}/content.js`, 'utf8'), ctx, { filename: 'content.js' });
 vm.runInContext(`
   const TL = VisorChangelog.buildTimeline(__entries, __users);

@@ -38,6 +38,7 @@ for (const cls of ['v-icon-sun', 'v-icon-moon']) {
   document.body.appendChild(e);
 }
 const ctx = vm.createContext(win);
+vm.runInContext(fs.readFileSync(`${DIR}/shares.js`, 'utf8'), ctx, { filename: 'shares.js' });
 vm.runInContext(fs.readFileSync(`${DIR}/sidepanel.js`, 'utf8'), ctx, { filename: 'sidepanel.js' });
 
 const tipLeft = (tipWidth, at, cardWidth) =>

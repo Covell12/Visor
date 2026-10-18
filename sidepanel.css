@@ -1733,3 +1733,43 @@ details.v-note > summary::-webkit-details-marker { display: none; }
 .v-copy-details:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .v-copy-status { font-size: 12px; color: var(--good); font-weight: 600; }
 .v-copy-box { width: 100%; height: 120px; margin-top: 8px; font: 11px/1.4 ui-monospace, Menlo, monospace; border: 1px solid var(--hairline); border-radius: 8px; padding: 8px; background: var(--surface); color: var(--ink); }
+
+/* ── Who wrote it: the list in the overview's headline card ──────────────────
+   One row per person (dot, name, a bar of their share, the share), largest
+   first, then the two switches for what the percentages count. */
+.v-hero-people { display: block; }
+.v-share-list { display: flex; flex-direction: column; gap: 7px; }
+.v-share-row {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) minmax(60px, 34%) 38px;
+  align-items: center;
+  gap: 9px;
+  font-size: 13px;
+}
+.v-share-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--c); }
+.v-share-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 650; color: var(--on-ink); }
+.v-share-bar { height: 6px; border-radius: 999px; background: var(--ink-panel-2); overflow: hidden; }
+.v-share-bar b { display: block; height: 100%; border-radius: 999px; background: var(--c); }
+.v-share-pct { text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--on-ink); }
+.v-share-more {
+  align-self: flex-start; margin-top: 2px; padding: 0;
+  border: 0; background: none; cursor: pointer;
+  font: inherit; font-size: 12px; font-weight: 650; color: var(--on-ink-2);
+}
+.v-share-more:hover { text-decoration: underline; }
+.v-share-opts { display: flex; flex-direction: column; gap: 2px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--ink-panel-rule); }
+.v-share-opt {
+  display: flex; align-items: center; gap: 9px;
+  width: 100%; padding: 5px 2px;
+  border: 0; border-radius: 8px; background: none; cursor: pointer;
+  font: inherit; font-size: 12.5px; font-weight: 600; text-align: left; color: var(--on-ink);
+}
+.v-share-opt:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.v-share-opt-label { flex: 1; }
+.v-share-swatch { width: 11px; height: 11px; flex: none; border-radius: 3px; }
+.v-share-swatch.is-ext { background: #FFF2CC; box-shadow: inset 0 0 0 1px #E8D9A8; }
+.v-share-swatch.is-int { background: #CFE2F3; box-shadow: inset 0 0 0 1px #AFC8DE; }
+.v-switch-sm { position: relative; width: 28px; height: 16px; flex: none; border-radius: 999px; background: var(--hairline); transition: background-color .18s ease; }
+.v-switch-sm i { position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, .25); transition: transform .18s ease; }
+.v-share-opt.is-on .v-switch-sm { background: var(--accent); }
+.v-share-opt.is-on .v-switch-sm i { transform: translateX(12px); }

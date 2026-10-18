@@ -32,6 +32,7 @@ function load(build) {
   win.VisorChangelog = { fetchChangelog: async () => ({ entries: [], users: [], lastRevision: 0, tabs: [] }), latestRevision: async () => 0 };
   if (build) build(document);
   const ctx = vm.createContext(win);
+  vm.runInContext(fs.readFileSync(`${DIR}/shares.js`, 'utf8'), ctx, { filename: 'shares.js' });
   vm.runInContext(fs.readFileSync(`${DIR}/content.js`, 'utf8'), ctx, { filename: 'content.js' });
   return { ctx, document, clock, run: (c) => vm.runInContext(c, ctx) };
 }

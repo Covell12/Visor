@@ -67,6 +67,7 @@ function load({ editable = true } = {}) {
   };
 
   const ctx = vm.createContext(win);
+  vm.runInContext(fs.readFileSync(`${DIR}/shares.js`, 'utf8'), ctx, { filename: 'shares.js' });
   vm.runInContext(fs.readFileSync(`${DIR}/content.js`, 'utf8'), ctx, { filename: 'content.js' });
   // Editability is read from the page; say so directly.
   vm.runInContext(`probeResult = { editable: ${editable}, revisionHint: 0, liveTabs: [], ready: true };`, ctx);

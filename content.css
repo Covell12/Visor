@@ -799,3 +799,52 @@
 .va-pastes.is-on .va-switch i { transform: translateX(12px); }
 .va-foot { margin: 6px 4px 0; font-size: 11px; color: var(--v-ink-2); }
 .visor-aware-panel :focus-visible { outline: 2px solid var(--v-accent); outline-offset: 1px; }
+
+/* ── What the percentages count (on the bar) ──────────────────────────────────
+   A pill naming the setting; its menu opens upward, like the tab filter's, and
+   states its own colours for the same reason. */
+.vh-share { position: relative; display: flex; }
+.vh-btn-share {
+  width: auto;
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 0 9px 0 10px;
+  font-size: 10.5px; font-weight: 700; white-space: nowrap;
+}
+.vh-btn-share svg { opacity: .7; }
+.vh-share-menu {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 5;
+  width: 236px;
+  padding: 6px;
+  border-radius: 12px;
+  color: #11161F;
+  background: #FFFFFF;
+  border: 1px solid #E4E7EC;
+  box-shadow: 0 12px 32px rgba(17, 22, 31, .16);
+}
+.vh-share-menu[hidden] { display: none; }
+.vh-share-note { margin: 4px 6px 6px; font-size: 11px; line-height: 1.4; color: #5A6474; }
+.vh-share-opt {
+  display: flex; align-items: center; gap: 8px;
+  width: 100%; padding: 7px 6px;
+  border: 0; border-radius: 8px; cursor: pointer;
+  font: inherit; font-size: 12px; font-weight: 600; text-align: left;
+  color: inherit; background: transparent;
+}
+.vh-share-opt:hover { background: #F1F3F6; }
+.vh-share-opt > span:nth-child(2) { flex: 1; }
+.vh-share-swatch { width: 11px; height: 11px; flex: none; border-radius: 3px; }
+.vh-share-swatch.is-ext { background: #FFF2CC; box-shadow: inset 0 0 0 1px #E8D9A8; }
+.vh-share-swatch.is-int { background: #CFE2F3; box-shadow: inset 0 0 0 1px #AFC8DE; }
+.vh-share-switch { position: relative; width: 28px; height: 16px; flex: none; border-radius: 999px; background: #D5DBE3; transition: background-color .15s var(--v-ease); }
+.vh-share-switch i { position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, .25); transition: transform .15s var(--v-ease); }
+.vh-share-opt.is-on .vh-share-switch { background: #1268C3; }
+.vh-share-opt.is-on .vh-share-switch i { transform: translateX(12px); }
+[data-visor-theme="dark"] .vh-share-menu { color: #E9ECF2; background: #171B22; border-color: #2A303B; box-shadow: 0 12px 32px rgba(0, 0, 0, .5); }
+[data-visor-theme="dark"] .vh-share-note { color: #AEB6C3; }
+[data-visor-theme="dark"] .vh-share-opt:hover { background: #222833; }
+[data-visor-theme="dark"] .vh-share-switch { background: #3A4250; }
+[data-visor-theme="dark"] .vh-share-opt.is-on .vh-share-switch { background: #6BB2F5; }

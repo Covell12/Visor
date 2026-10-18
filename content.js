@@ -1320,6 +1320,39 @@ let awarePasteInt = false;
 let awareMin = false;
 const awareHidden = () => new Set((awareHiddenAll[getFileId()] || []).map(String));
 
+// What the percentages count (shares.js): both kinds of paste left out unless
+// switched off, in the bar's menu here or in the side panel.
+let shareOpts = visorShareSettings();
+try {
+  chrome.storage.local.get([VISOR_SHARE_EXT_KEY, VISOR_SHARE_INT_KEY], (res) => {
+    if (chrome.runtime.lastError) return;
+    shareOpts = visorShareSettings(res);
+    refreshShares();
+  });
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== 'local' || (!changes[VISOR_SHARE_EXT_KEY] && !changes[VISOR_SHARE_INT_KEY])) return;
+    const next = { ...shareOpts };
+    if (changes[VISOR_SHARE_EXT_KEY]) next.excludeExternal = changes[VISOR_SHARE_EXT_KEY].newValue !== false;
+    if (changes[VISOR_SHARE_INT_KEY]) next.excludeInternal = changes[VISOR_SHARE_INT_KEY].newValue !== false;
+    shareOpts = next;
+    refreshShares();
+  });
+} catch (_) { /* defaults */ }
+
+function setShareOpt(key, on) {
+  shareOpts = { ...shareOpts, [key === VISOR_SHARE_EXT_KEY ? 'excludeExternal' : 'excludeInternal']: !!on };
+  try { chrome.storage.local.set({ [key]: !!on }); } catch (_) { /* no-op */ }
+  refreshShares();
+}
+
+/** Every percentage on screen, recounted. */
+function refreshShares() {
+  const hud = document.getElementById(VISOR_HUD_ID);
+  if (hud && analysis) { hudChipKey = ''; updateHUD(hud, analysis); }
+  syncShareMenu();
+  if (document.getElementById(AWARE_PANEL_ID)) renderAwarePanel();
+}
+
 function awarePost(msg) {
   try { window.postMessage({ source: AWARE_CHANNEL, ...msg }, window.location.origin); } catch (_) { /* nothing to do */ }
 }
@@ -1382,7 +1415,7 @@ let awarePanelResize = false;
 
 function renderAwarePanel() {
   const existing = document.getElementById(AWARE_PANEL_ID);
-  const people = (analysis && analysis.contributors) || [];
+  const people = visorShares((analysis && analysis.contributors) || [], shareOpts);
   if (!awareOn || visorStopped || !analysis || getDocKind() !== 'doc') {
     existing?.remove();
     if (awarePanelTimer) { clearInterval(awarePanelTimer); awarePanelTimer = 0; }
@@ -1557,6 +1590,26 @@ function ensureHUD() {
       </div>
       <div class="vh-rule"></div>
       <div class="vh-chips"></div>
+      <div class="vh-share">
+        <button class="vh-btn vh-btn-share" data-act="share" aria-haspopup="true" aria-expanded="false"
+                title="What the percentages count">
+          <span class="vh-share-label">Excl. pastes</span>
+          <svg width="10" height="10" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <div class="vh-share-menu" role="menu" aria-label="What the percentages count" hidden>
+          <p class="vh-share-note">Percentages are each person's share of the text added. Leave out:</p>
+          <button class="vh-share-opt" role="menuitemcheckbox" data-share="ext" aria-checked="true">
+            <span class="vh-share-swatch is-ext" aria-hidden="true"></span>
+            <span>Pastes from outside</span>
+            <span class="vh-share-switch" aria-hidden="true"><i></i></span>
+          </button>
+          <button class="vh-share-opt" role="menuitemcheckbox" data-share="int" aria-checked="true">
+            <span class="vh-share-swatch is-int" aria-hidden="true"></span>
+            <span>Pastes from within</span>
+            <span class="vh-share-switch" aria-hidden="true"><i></i></span>
+          </button>
+        </div>
+      </div>
       <div class="vh-rule"></div>
       <div class="vh-stats"></div>
       <span class="vh-flag vh-flag-cool" hidden></span>
@@ -1594,6 +1647,7 @@ function ensureHUD() {
   hud.querySelector('[data-act="replay"]')?.addEventListener('click', () => openReplay());
   hud.querySelector('[data-act="collapse"]')?.addEventListener('click', () => toggleHUD(false));
   hud.querySelector('[data-act="aware"]')?.addEventListener('click', () => setAware(!awareOn));
+  wireShareMenu(hud);
   wireHudFilter(hud);
   requestAnimationFrame(() => applyAware(awareOn, false));
   return hud;
@@ -1604,7 +1658,7 @@ function ensureHUD() {
 let hudChipKey = '';
 
 function updateHUD(hud, a) {
-  const top = a.contributors.slice(0, 3);
+  const top = visorShares(a.contributors, shareOpts).slice(0, 3);
   const t   = a.totals;
 
   // An empty selection gets its own key, so moving into one clears the chips
@@ -1621,7 +1675,7 @@ function updateHUD(hud, a) {
         <div class="vh-chip-head">
           <span class="vh-dot"></span>
           <span class="vh-name">${esc(firstName(c.name))}</span>
-          <span class="vh-meta" title="${Math.round(c.share * 100)}% of the text · ${esc(fmtMins(c.activeMinutes))} active">
+          <span class="vh-meta" title="${Math.round(c.share * 100)}% of the text${shareOpts.excludeExternal || shareOpts.excludeInternal ? ', leaving out pastes' : ''} · ${esc(fmtMins(c.activeMinutes))} active">
             <b class="vh-pct">${Math.round(c.share * 100)}%</b>
             <span class="vh-time">${esc(fmtMins(c.activeMinutes))}</span>
           </span>
@@ -1663,6 +1717,61 @@ function updateHUD(hud, a) {
       ? `Following the tab you are viewing: ${name}`
       : `Stats cover: ${name}`;
     btn.classList.toggle('is-following', tabState.pick === PICK_CURRENT);
+  }
+}
+
+/**
+ * "What the percentages count", on the bar: a pill naming the setting, and a
+ * menu (opening upward, like the tab filter) with a switch for each kind of
+ * paste. The same setting as the side panel's.
+ */
+let shareMenuOff = null;
+function wireShareMenu(hud) {
+  const wrap = hud.querySelector('.vh-share');
+  if (!wrap) return;
+  const btn = wrap.querySelector('[data-act="share"]');
+  const menu = wrap.querySelector('.vh-share-menu');
+  let open = false;
+  menu.hidden = true;
+  const close = () => {
+    open = false;
+    menu.hidden = true;
+    btn.setAttribute('aria-expanded', 'false');
+    if (shareMenuOff) { shareMenuOff(); shareMenuOff = null; }
+  };
+  btn.addEventListener('click', (e) => {
+    if (e && e.stopPropagation) e.stopPropagation();
+    if (open) return close();
+    open = true;
+    menu.hidden = false;
+    btn.setAttribute('aria-expanded', 'true');
+    // Close on a click anywhere else, or Escape.
+    const away = (ev) => { if (!wrap.contains(ev.target)) close(); };
+    const onKey = (ev) => { if (ev.key === 'Escape') close(); };
+    document.addEventListener('mousedown', away, true);
+    document.addEventListener('keydown', onKey, true);
+    shareMenuOff = () => { document.removeEventListener('mousedown', away, true); document.removeEventListener('keydown', onKey, true); };
+  });
+  menu.addEventListener('click', (e) => {
+    const opt = e.target && e.target.closest ? e.target.closest('[data-share]') : null;
+    if (!opt) return;
+    const ext = opt.getAttribute('data-share') === 'ext';
+    setShareOpt(ext ? VISOR_SHARE_EXT_KEY : VISOR_SHARE_INT_KEY, !(ext ? shareOpts.excludeExternal : shareOpts.excludeInternal));
+  });
+  syncShareMenu();
+}
+
+function syncShareMenu() {
+  const hud = document.getElementById(VISOR_HUD_ID);
+  if (!hud) return;
+  const label = hud.querySelector('.vh-share-label');
+  if (label) label.textContent = visorShareLabel(shareOpts);
+  const btn = hud.querySelector('[data-act="share"]');
+  if (btn) btn.classList.toggle('is-filtered', shareOpts.excludeExternal || shareOpts.excludeInternal);
+  for (const opt of hud.querySelectorAll('[data-share]')) {
+    const on = opt.getAttribute('data-share') === 'ext' ? shareOpts.excludeExternal : shareOpts.excludeInternal;
+    opt.setAttribute('aria-checked', String(on));
+    opt.classList.toggle('is-on', on);
   }
 }
 

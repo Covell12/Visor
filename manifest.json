@@ -55,6 +55,7 @@
       ],
       "js": [
         "changelog.js",
+        "shares.js",
         "content.js"
       ],
       "css": [

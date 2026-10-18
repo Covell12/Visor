@@ -173,6 +173,7 @@ function loadContent({ stored = {} } = {}) {
     }
   };
   const ctx = vm.createContext(win);
+  vm.runInContext(fs.readFileSync(`${DIR}/shares.js`, 'utf8'), ctx, { filename: 'shares.js' });
   vm.runInContext(fs.readFileSync(`${DIR}/content.js`, 'utf8'), ctx, { filename: 'content.js' });
   vm.runInContext('probeResult = { editable: true, revisionHint: 0, liveTabs: [], ready: true };', ctx);
   return { win, document, clock, posted, store, run: (c) => vm.runInContext(c, ctx), hud: () => document.getElementById('visor-hud'), setStored: (o) => win.chrome.storage.local.set(o) };

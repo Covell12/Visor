@@ -160,10 +160,34 @@ function renderMetrics(a) {
             : '';
   const sub = who ? `written by ${who} over ${esc(days)}` : `written over ${esc(days)}`;
 
-  const dots = people.slice(0, 6).map((c) => `
-    <span class="v-hero-who" style="--c:${esc(c.color)}">
-      <i></i>${esc(firstName(c.name))}<b>${Math.round((c.share || 0) * 100)}%</b>
-    </span>`).join('');
+  // Who wrote it, as a list: each person's share of the text added, recounted
+  // under "what the percentages count" (shares.js), with its two switches.
+  const ranked = visorShares(people, shareOpts);
+  const SHOWN = 8;
+  const rows = ranked.slice(0, SHOWN).map((c) => {
+    const pct = Math.round((c.share || 0) * 100);
+    return `
+    <div class="v-share-row" style="--c:${esc(c.color)}">
+      <i class="v-share-dot" aria-hidden="true"></i>
+      <span class="v-share-name" title="${esc(c.name)}">${esc(c.name)}</span>
+      <span class="v-share-bar" aria-hidden="true"><b style="width:${pct}%"></b></span>
+      <span class="v-share-pct">${pct}%</span>
+    </div>`;
+  }).join('');
+  const more = ranked.length > SHOWN
+    ? `<button type="button" class="v-share-more" data-goto="people">+${ranked.length - SHOWN} more in People</button>` : '';
+  const opt = (key, on, swatch, label) => `
+    <button type="button" class="v-share-opt${on ? ' is-on' : ''}" data-share-opt="${key}" role="switch" aria-checked="${on}">
+      <span class="v-share-swatch ${swatch}" aria-hidden="true"></span>
+      <span class="v-share-opt-label">${label}</span>
+      <span class="v-switch-sm" aria-hidden="true"><i></i></span>
+    </button>`;
+  const dots = rows ? `
+    <div class="v-share-list" role="list" aria-label="Share of the text added">${rows}${more}</div>
+    <div class="v-share-opts">
+      ${opt('ext', shareOpts.excludeExternal, 'is-ext', 'Leave out pastes from outside')}
+      ${opt('int', shareOpts.excludeInternal, 'is-int', 'Leave out pastes from within')}
+    </div>` : '';
 
   const strip = [
     { v: fmtInt(t.mutations),      l: 'edits' },
@@ -469,6 +493,34 @@ $('people-list').addEventListener('click', async (e) => {
   }
 });
 
+// ── What the percentages count ──
+// Shared with the bar in the document (shares.js); both switches start on.
+let shareOpts = visorShareSettings();
+chrome.storage.local.get([VISOR_SHARE_EXT_KEY, VISOR_SHARE_INT_KEY], (res) => {
+  shareOpts = visorShareSettings(res);
+  if (current) render(current);
+});
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== 'local' || (!changes[VISOR_SHARE_EXT_KEY] && !changes[VISOR_SHARE_INT_KEY])) return;
+  chrome.storage.local.get([VISOR_SHARE_EXT_KEY, VISOR_SHARE_INT_KEY], (res) => {
+    shareOpts = visorShareSettings(res);
+    if (current) render(current);
+  });
+});
+$('metrics').addEventListener('click', (e) => {
+  const opt = e.target.closest && e.target.closest('[data-share-opt]');
+  if (opt) {
+    const ext = opt.getAttribute('data-share-opt') === 'ext';
+    const key = ext ? VISOR_SHARE_EXT_KEY : VISOR_SHARE_INT_KEY;
+    shareOpts = { ...shareOpts, [ext ? 'excludeExternal' : 'excludeInternal']: !(ext ? shareOpts.excludeExternal : shareOpts.excludeInternal) };
+    chrome.storage.local.set({ [key]: ext ? shareOpts.excludeExternal : shareOpts.excludeInternal });
+    if (current) render(current);
+    return;
+  }
+  const more = e.target.closest && e.target.closest('[data-goto="people"]');
+  if (more) document.querySelector('.v-tab[data-tab="people"]')?.click();
+});
+
 function renderPeople(a) {
   const host = $('people-list');
   if (!a.contributors.length) {
@@ -491,7 +543,7 @@ function renderPeople(a) {
           <span class="v-copy-status" role="status" aria-live="polite"></span></span></div>`
       : '';
 
-  host.innerHTML = notice + a.contributors.map((c) => {
+  host.innerHTML = notice + visorShares(a.contributors, shareOpts).map((c) => {
     const typedPct = c.inserted ? (c.typedChars / c.inserted) * 100 : 0;
     const pastePct = 100 - typedPct;
     return `
