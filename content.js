@@ -1305,7 +1305,9 @@ function requestSidePanel(onFail) {
 const AWARE_KEY = 'visor_aware';
 const AWARE_SEEN_KEY = 'visor_aware_seen';
 const AWARE_HIDDEN_KEY = 'visor_aware_hidden';   // { fileId: [userId, ...] } switched off in the panel
-const AWARE_PASTES_KEY = 'visor_aware_pastes';   // the panel's "Show pastes"
+const AWARE_PASTE_EXT_KEY = 'visor_aware_paste_ext';   // highlight pastes from outside the document (yellow)
+const AWARE_PASTE_INT_KEY = 'visor_aware_paste_int';   // highlight text copied or moved within it (light blue)
+const AWARE_PASTES_OLD_KEY = 'visor_aware_pastes';     // the single switch these replaced; read once as the default for both
 const AWARE_MIN_KEY = 'visor_aware_min';         // the panel folded to its title
 const AWARE_CHANNEL = 'VISOR_AWARE';
 const AWARE_PANEL_ID = 'visor-aware-panel';
@@ -1313,7 +1315,8 @@ let awareOn = false;
 let awareSeen = true;          // until storage says otherwise, no NEW label
 let awareSent = null;          // the analysis last sent, so the text isn't resent on every repaint
 let awareHiddenAll = {};
-let awarePastes = false;
+let awarePasteExt = false;
+let awarePasteInt = false;
 let awareMin = false;
 const awareHidden = () => new Set((awareHiddenAll[getFileId()] || []).map(String));
 
@@ -1327,14 +1330,15 @@ function awarePayload(tl, a) {
   const colors = [];
   const index = new Map();
   for (const c of a.contributors || []) { index.set(String(c.id), colors.length); colors.push(c.color); }
-  // People switched off in the panel are left out; pastes are marked only
-  // while "Show pastes" is on.
+  // People switched off in the panel are left out; each kind of paste is
+  // marked only while its switch is on (1: from outside, 2: from within).
   const hidden = awareHidden();
   const owners = [];
   for (const [start, len, who, pasted] of a.ownership) {
     if (hidden.has(String(who))) continue;
     const c = index.get(String(who));
-    if (c != null) owners.push([start, len, c, awarePastes && pasted ? 1 : 0]);
+    const shown = (pasted === 1 && awarePasteExt) || (pasted === 2 && awarePasteInt) ? pasted : 0;
+    if (c != null) owners.push([start, len, c, shown]);
   }
   return { text: tl.finalText || '', owners, colors };
 }
@@ -1397,7 +1401,8 @@ function renderAwarePanel() {
       if (!t) return;
       const act = t.getAttribute('data-aw');
       if (act === 'person') toggleAwarePerson(t.getAttribute('data-id'));
-      else if (act === 'pastes') { awarePastes = !awarePastes; awareStore({ [AWARE_PASTES_KEY]: awarePastes }); awareSync(true); }
+      else if (act === 'paste-ext') { awarePasteExt = !awarePasteExt; awareStore({ [AWARE_PASTE_EXT_KEY]: awarePasteExt }); awareSync(true); }
+      else if (act === 'paste-int') { awarePasteInt = !awarePasteInt; awareStore({ [AWARE_PASTE_INT_KEY]: awarePasteInt }); awareSync(true); }
       else if (act === 'min') { awareMin = !awareMin; awareStore({ [AWARE_MIN_KEY]: awareMin }); renderAwarePanel(); }
       else if (act === 'off') setAware(false);
     });
@@ -1411,7 +1416,13 @@ function renderAwarePanel() {
   panel.classList.toggle('is-min', awareMin);
 
   const hidden = awareHidden();
-  const pasteCount = (analysis.totals && analysis.totals.pasteCount) || 0;
+  const t = analysis.totals || {};
+  const pasteRow = (act, on, swatch, label, n, tip) => `
+      <button type="button" class="va-pastes${on ? ' is-on' : ''}" data-aw="${act}" role="switch" aria-checked="${on}" title="${tip}">
+        <span class="${swatch}" aria-hidden="true"></span>
+        <span class="va-pastes-label">${label} <em>${Number(n || 0).toLocaleString()}</em></span>
+        <span class="va-switch" aria-hidden="true"><i></i></span>
+      </button>`;
   panel.innerHTML = `
     <div class="va-head">
       <span class="va-dots" aria-hidden="true"><i></i><i></i><i></i></span>
@@ -1433,12 +1444,12 @@ function renderAwarePanel() {
           </button>`;
         }).join('')}
       </div>
-      <button type="button" class="va-pastes${awarePastes ? ' is-on' : ''}" data-aw="pastes" role="switch" aria-checked="${awarePastes}"
-              title="Highlight in yellow every stretch of text that arrived as a paste (including text copied or moved within the document)">
-        <span class="va-yellow" aria-hidden="true"></span>
-        <span class="va-pastes-label">Show pastes <em>${pasteCount.toLocaleString()}</em></span>
-        <span class="va-switch" aria-hidden="true"><i></i></span>
-      </button>
+      <div class="va-paste-rows">
+        ${pasteRow('paste-ext', awarePasteExt, 'va-yellow', 'Pasted from outside', t.externalPastes,
+          'Highlight in yellow the text pasted in from outside this document')}
+        ${pasteRow('paste-int', awarePasteInt, 'va-blue', 'Pasted from within', t.internalPastes,
+          'Highlight in light blue the text copied or moved from elsewhere in this document')}
+      </div>
       <p class="va-foot">Only on your screen. The document isn't changed.</p>
     </div>`;
   placeAwarePanel(panel);
@@ -1487,11 +1498,14 @@ function applyAware(on, seen) {
 }
 
 try {
-  chrome.storage.local.get([AWARE_KEY, AWARE_SEEN_KEY, AWARE_HIDDEN_KEY, AWARE_PASTES_KEY, AWARE_MIN_KEY], (res) => {
+  chrome.storage.local.get([AWARE_KEY, AWARE_SEEN_KEY, AWARE_HIDDEN_KEY, AWARE_PASTE_EXT_KEY, AWARE_PASTE_INT_KEY, AWARE_PASTES_OLD_KEY, AWARE_MIN_KEY], (res) => {
     if (chrome.runtime.lastError) return;
-    awareSeen = !!(res && res[AWARE_SEEN_KEY]);
-    awareHiddenAll = (res && res[AWARE_HIDDEN_KEY] && typeof res[AWARE_HIDDEN_KEY] === 'object') ? res[AWARE_HIDDEN_KEY] : {};
-    awarePastes = !!(res && res[AWARE_PASTES_KEY]);
+    res = res || {};
+    awareSeen = !!res[AWARE_SEEN_KEY];
+    awareHiddenAll = (res[AWARE_HIDDEN_KEY] && typeof res[AWARE_HIDDEN_KEY] === 'object') ? res[AWARE_HIDDEN_KEY] : {};
+    const was = !!res[AWARE_PASTES_OLD_KEY];
+    awarePasteExt = AWARE_PASTE_EXT_KEY in res ? !!res[AWARE_PASTE_EXT_KEY] : was;
+    awarePasteInt = AWARE_PASTE_INT_KEY in res ? !!res[AWARE_PASTE_INT_KEY] : was;
     awareMin = !!(res && res[AWARE_MIN_KEY]);
     applyAware(!!(res && res[AWARE_KEY]), false);
   });
@@ -1502,7 +1516,8 @@ try {
     // the panel's settings, changed in this tab or another one on the same document
     let panelChanged = false;
     if (changes[AWARE_HIDDEN_KEY]) { awareHiddenAll = changes[AWARE_HIDDEN_KEY].newValue || {}; panelChanged = true; }
-    if (changes[AWARE_PASTES_KEY]) { awarePastes = !!changes[AWARE_PASTES_KEY].newValue; panelChanged = true; }
+    if (changes[AWARE_PASTE_EXT_KEY]) { awarePasteExt = !!changes[AWARE_PASTE_EXT_KEY].newValue; panelChanged = true; }
+    if (changes[AWARE_PASTE_INT_KEY]) { awarePasteInt = !!changes[AWARE_PASTE_INT_KEY].newValue; panelChanged = true; }
     if (changes[AWARE_MIN_KEY]) { awareMin = !!changes[AWARE_MIN_KEY].newValue; panelChanged = true; }
     if (changes[AWARE_KEY]) applyAware(!!changes[AWARE_KEY].newValue, false);
     else if (changes[AWARE_SEEN_KEY] || panelChanged) applyAware(awareOn, false);

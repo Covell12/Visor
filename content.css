@@ -774,13 +774,19 @@
 .va-person.is-off { opacity: .5; }
 .va-person.is-off .va-swatch { background: transparent; }
 .va-person.is-off .va-name { text-decoration: line-through; text-decoration-thickness: 1px; }
+/* the two kinds of paste, each with its own switch: from outside (Docs' light
+   yellow) and copied or moved within the document (Docs' light blue) */
+.va-paste-rows { margin-top: 8px; padding-top: 4px; border-top: 1px solid var(--v-hair-dim); }
 .va-pastes {
   display: flex; align-items: center; gap: 9px;
-  width: 100%; margin-top: 8px; padding: 9px 6px; text-align: left;
-  border: 0; border-top: 1px solid var(--v-hair-dim); border-radius: 0; cursor: pointer; background: transparent;
+  width: 100%; padding: 7px 6px; text-align: left;
+  border: 0; border-radius: 8px; cursor: pointer; background: transparent;
 }
-.va-yellow { width: 12px; height: 12px; flex: none; border-radius: 3px; background: #FFF2CC; box-shadow: inset 0 0 0 1px #E8D9A8; }
-.va-pastes-label { flex: 1; font-weight: 600; }
+.va-pastes:hover { background: var(--v-hair-dim); }
+.va-yellow, .va-blue { width: 12px; height: 12px; flex: none; border-radius: 3px; }
+.va-yellow { background: #FFF2CC; box-shadow: inset 0 0 0 1px #E8D9A8; }
+.va-blue { background: #CFE2F3; box-shadow: inset 0 0 0 1px #AFC8DE; }
+.va-pastes-label { flex: 1; font-weight: 600; font-size: 12.5px; }
 .va-pastes-label em { margin-left: 4px; font-style: normal; font-size: 11.5px; font-weight: 650; color: var(--v-ink-2); }
 .va-switch { position: relative; width: 30px; height: 18px; flex: none; border-radius: 999px; background: var(--v-hair); transition: background-color .15s var(--v-ease); }
 .va-switch i { position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, .25); transition: transform .15s var(--v-ease); }

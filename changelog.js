@@ -1699,7 +1699,11 @@
         if (o.op === 'insert') {
           const at = Math.min(o.at, len);
           const mode = o.text.length >= (pasteThreshold || PASTE_FLOOR) ? 'paste' : 'typed';
-          const tag = { u: s.userId == null ? '0' : s.userId, m: mode };
+          // A paste's origin, as the paste list has it: from outside the
+          // document, or copied or moved within it.
+          const origin = mode !== 'paste' ? null
+            : (s.pasteOrigin && s.pasteOrigin !== 'external' ? 'internal' : 'external');
+          const tag = { u: s.userId == null ? '0' : s.userId, m: mode, o: origin };
           spliceFill(marks, at, o.text.length, tag);
           len += o.text.length;
         } else if (o.op === 'delete') {
@@ -1725,9 +1729,11 @@
 
   /**
    * Who wrote each stretch of the surviving text, and whether it arrived as a
-   * paste, as runs over the final text: [start, length, userId, pasted (1|0)],
-   * in order, covering every character. Adjacent characters by the same person
-   * that arrived the same way form one run, so a document typed by two people
+   * paste, as runs over the final text: [start, length, userId, pasted], in
+   * order, covering every character. `pasted` is 0 for typed text, 1 for a
+   * paste from outside the document, 2 for text copied or moved within it.
+   * Adjacent characters by the same person that arrived the same way form one
+   * run, so a document typed by two people
    * taking turns is a few hundred runs, not one entry per character. (AWARE
    * mode colours the document on screen from this.) `as` puts every run under
    * one id, for a roster collapsed into one merged author.
@@ -1738,7 +1744,7 @@
     for (let i = 0; i <= marks.length; i++) {
       const m = i < marks.length ? marks[i] : null;
       const u = as != null ? String(as) : (m ? m.u : '0');
-      const p = m && m.m === 'paste' ? 1 : 0;
+      const p = m && m.m === 'paste' ? (m.o === 'internal' ? 2 : 1) : 0;
       const k = i < marks.length ? `${u}|${p}` : null;
       if (i === marks.length || k !== key) {
         if (key !== null && i > start) runs.push([start, i - start, who, pasted]);

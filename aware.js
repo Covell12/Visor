@@ -17,13 +17,15 @@
  * colours would only make a third. Switching it off removes the layers, and
  * the page is exactly as Docs drew it.
  *
- * Pastes (when the panel's "Show pastes" is on): pasted text is highlighted
- * in Google Docs' own light yellow, behind the author's colour. A single
- * blend layer can't make white paper yellow and black text a colour at once,
- * so two do it: a multiply layer by M and a screen layer by the author's
- * colour C send every pixel p to C + p·(Y − C), i.e. paper to Y and ink to C,
- * with the antialiasing in between kept. That needs Y ≥ C in every channel,
- * which the light yellow is for every colour in Visor's author palette.
+ * Pastes (the panel switches each kind on): text pasted from outside the
+ * document is highlighted in Google Docs' own light yellow, and text copied
+ * or moved within it in Docs' light blue, behind the author's colour. A
+ * single blend layer can't make white paper a colour and black text another
+ * at once, so two do it: a multiply layer by M and a screen layer by the
+ * author's colour C send every pixel p to C + p·(B − C), i.e. paper to the
+ * highlight B and ink to C, with the antialiasing in between kept. That needs
+ * B ≥ C in every channel, which both highlights are for every colour in
+ * Visor's author palette.
  *
  * Placing a run in the document: its text is looked up in the document's text
  * (which Visor's history engine rebuilt from the revision log), walking each
@@ -133,7 +135,7 @@
   /**
    * The authors' stretches within [at, at + len): [[from, to, colour, pasted],
    * ...], offsets relative to `at`. `owners` is sorted [[start, length,
-   * colour, pasted]].
+   * colour, pasted]]; pasted is 0, 1 (from outside) or 2 (from within).
    */
   function stretchesIn(owners, at, len) {
     const out = [];
@@ -145,7 +147,7 @@
     for (let k = first; k < owners.length && owners[k][0] < at + len; k++) {
       const [s, n, c, p] = owners[k];
       const from = Math.max(s, at) - at, to = Math.min(s + n, at + len) - at;
-      if (to > from) out.push([from, to, c, p ? 1 : 0]);
+      if (to > from) out.push([from, to, c, p || 0]);
     }
     return out;
   }
@@ -183,7 +185,9 @@
     return Math.max(r, g, b) <= 0x66 && Math.max(r, g, b) - Math.min(r, g, b) <= 0x30;
   }
 
-  const PASTE_YELLOW = [255, 242, 204];     // Docs' "light yellow 3"
+  const PASTE_YELLOW = [255, 242, 204];     // Docs' "light yellow 3": pasted from outside
+  const PASTE_BLUE = [207, 226, 243];       // Docs' "light blue 3": copied or moved within
+  const pasteBg = (kind) => (kind === 2 ? PASTE_BLUE : PASTE_YELLOW);
 
   /** '#rrggbb' → [r, g, b], or null. */
   function rgbOf(hex) {
@@ -193,19 +197,19 @@
 
   /**
    * The multiply colour M that, followed by a screen by `color`, turns paper
-   * into the paste yellow and ink into `color` (see the header).
+   * into the highlight `bg` and ink into `color` (see the header).
    */
-  function pasteMultiply(color) {
+  function pasteMultiply(color, bg = PASTE_YELLOW) {
     const c = rgbOf(color);
     if (!c) return null;
     const m = c.map((v, i) => {
-      const y = PASTE_YELLOW[i] / 255, k = v / 255;
+      const y = bg[i] / 255, k = v / 255;
       return k >= 1 ? 255 : Math.round(Math.max(0, Math.min(1, (y - k) / (1 - k))) * 255);
     });
     return `rgb(${m.join(',')})`;
   }
 
-  const core = { placeRuns, stretchesIn, readingOrder, plainInk, pasteMultiply, PASTE_YELLOW, WINDOW };
+  const core = { placeRuns, stretchesIn, readingOrder, plainInk, pasteMultiply, PASTE_YELLOW, PASTE_BLUE, WINDOW };
   if (typeof window === 'undefined') { module.exports = core; return; }   // the tests
 
   // ── In the page ────────────────────────────────────────────────────────────
@@ -321,7 +325,7 @@
 
   const measure = document.createElement('canvas').getContext('2d');
 
-  const yellow = `rgb(${PASTE_YELLOW.join(',')})`;
+  const css = (rgb) => `rgb(${rgb.join(',')})`;
   const mulCache = new Map();
   function paintRun(L, r, at) {
     const { tint: g, mark: u, mul, scr } = L;
@@ -348,10 +352,12 @@
       const a = from ? measure.measureText(r.t.slice(0, from)).width : 0;
       const b = to === r.t.length ? full.width : measure.measureText(r.t.slice(0, to)).width;
       const X = x0 + a * k, Wd = (b - a) * k + .6;
+      const bg = pasted ? pasteBg(pasted) : null;
       if (r.plain && pasted) {
-        // pasted: paper to yellow, ink to the author's colour (two layers)
-        if (!mulCache.has(color)) mulCache.set(color, pasteMultiply(color));
-        mul.fillStyle = mulCache.get(color) || yellow;
+        // pasted: paper to the highlight, ink to the author's colour (two layers)
+        const key = `${color}|${pasted}`;
+        if (!mulCache.has(key)) mulCache.set(key, pasteMultiply(color, bg));
+        mul.fillStyle = mulCache.get(key) || css(bg);
         origFillRect.call(mul, X, top, Wd, h);
         scr.fillStyle = color;
         origFillRect.call(scr, X, top, Wd, h);
@@ -360,8 +366,8 @@
         origFillRect.call(g, X, top, Wd, h);
       } else {
         // coloured text keeps its colour; a line under it in the author's,
-        // and yellow behind it if it was pasted
-        if (pasted) { mul.fillStyle = yellow; origFillRect.call(mul, X, top, Wd, h); }
+        // and the highlight behind it if it was pasted
+        if (pasted) { mul.fillStyle = css(bg); origFillRect.call(mul, X, top, Wd, h); }
         u.fillStyle = color;
         origFillRect.call(u, x0 + a * k, r.y + desc * r.sy * .45, (b - a) * k, Math.max(2, 1.6 * r.sy));
       }

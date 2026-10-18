@@ -88,6 +88,12 @@ const ck = (name, got, want) => {
 
 {
   ck('plain dark text is recoloured', ['#000000', '#222', 'rgb(51, 51, 51)', '#434343'].map(aware.plainInk), [true, true, true, true]);
+  ck('the light blue turns paper blue and keeps every author colour as it is',
+    ['#2F6FC4', '#B4603A', '#3D8B4F'].every((c) => {
+      const m = aware.pasteMultiply(c, aware.PASTE_BLUE).match(/\d+/g).map(Number), C = [1, 3, 5].map((i) => parseInt(c.slice(i, i + 2), 16));
+      const f = (px) => C.map((cv, i) => Math.round(255 * (1 - (1 - px * m[i] / 255) * (1 - cv / 255)))).join();
+      return f(1) === aware.PASTE_BLUE.join() && f(0) === C.join();
+    }), true);
   ck('  coloured, light or patterned text is underlined instead', ['#1155cc', '#ffffff', '#cc0000', '#999999', '[object CanvasGradient]', ''].map(aware.plainInk), [false, false, false, false, false, false]);
 }
 
@@ -109,8 +115,22 @@ const ck = (name, got, want) => {
   ck('  and every character is owned', a.ownership.reduce((n, r) => n + r[1], 0), tl.finalText.length);
   ck('runs from marks: neighbours by one person merge', VisorChangelog.ownershipRuns([{ u: 'a' }, { u: 'a' }, { u: 'b' }, null, { u: 'a' }]),
     [[0, 2, 'a', 0], [2, 1, 'b', 0], [3, 1, '0', 0], [4, 1, 'a', 0]]);
-  ck('  a pasted stretch is a run of its own, marked', VisorChangelog.ownershipRuns([{ u: 'a', m: 'typed' }, { u: 'a', m: 'paste' }, { u: 'a', m: 'paste' }, { u: 'a', m: 'typed' }]),
-    [[0, 1, 'a', 0], [1, 2, 'a', 1], [3, 1, 'a', 0]]);
+  ck('  a pasted stretch is a run of its own, marked by where it came from', VisorChangelog.ownershipRuns([{ u: 'a', m: 'typed' }, { u: 'a', m: 'paste', o: 'external' }, { u: 'a', m: 'paste', o: 'external' }, { u: 'a', m: 'paste', o: 'internal' }, { u: 'a', m: 'typed' }]),
+    [[0, 1, 'a', 0], [1, 2, 'a', 1], [3, 1, 'a', 2], [4, 1, 'a', 0]]);
+  {
+    // a real fold: a sentence copied within the document, and one pasted in
+    const t1 = Date.UTC(2026, 9, 2, 9);
+    const said = 'The tide turned in the spring of 1848 across Europe.';
+    const ins = (userId, at, s2, k) => ({ mutation: { ty: 'is', ibi: at, s: s2 }, time: t1 + k * 60000, rev: k + 1, userId, sid: null });
+    const typed = 'Intro. ';
+    let at = 1; const es = [];
+    for (const ch of typed) es.push(ins('1', at++, ch, es.length));
+    es.push(ins('1', at, said, es.length)); at += said.length;                    // pasted in from outside
+    es.push(ins('2', at, ' ' + said, es.length)); at += said.length + 1;          // the same sentence, copied within
+    const tl2 = VisorChangelog.buildTimeline(es, [{ id: '1', name: 'Maya' }, { id: '2', name: 'Sam' }]);
+    const own = VisorChangelog.analyze(tl2).ownership;
+    ck('a paste from outside is marked 1, a copy within the document 2', own.map((r) => [r[2], r[3]]), [['1', 0], ['1', 1], ['2', 2]]);
+  }
   ck('  collapsed into one author, the pastes are still marked', VisorChangelog.ownershipRuns([{ u: 'a', m: 'typed' }, { u: 'b', m: 'paste' }], '0'),
     [[0, 1, '0', 0], [1, 1, '0', 1]]);
 }
@@ -131,10 +151,10 @@ function loadContent({ stored = {} } = {}) {
     buildTimeline: () => ({ steps: [{ i: 0, time: 1, userId: '1', inserted: 5, deleted: 0, biggestInsert: 5, _norm: [] }], finalText: 'hello there', textAt: () => 'hello there' }),
     analyze: () => ({
       contributors: [{ id: '1', name: 'Maya', color: '#2F6FC4', share: .5, activeMinutes: 1 }, { id: '2', name: 'Sam', color: '#118A7E', share: .5, activeMinutes: 1 }],
-      totals: { finalChars: 11, finalWords: 2, mutations: 2, activeMinutes: 1, pasteCount: 0, deleted: 0, spanDays: 1 },
+      totals: { finalChars: 11, finalWords: 2, mutations: 2, activeMinutes: 1, pasteCount: 2, externalPastes: 1, internalPastes: 1, deleted: 0, spanDays: 1 },
       growth: [{ length: 1 }, { length: 11 }], sessions: [], heatmap: [], pastes: [], deletions: [],
       behavior: { enough: false }, calendar: {}, pasteThreshold: { value: 20, source: 'floor', samples: 0 },
-      ownership: [[0, 6, '1', 0], [6, 3, '2', 1], [9, 2, '2', 0]]
+      ownership: [[0, 6, '1', 0], [6, 3, '2', 1], [9, 2, '2', 2]]
     }),
     constants: {}
   };
@@ -202,11 +222,18 @@ const settle = async (h, ms = 1) => {
     ck('switching him back on colours him again', h.posted[h.posted.length - 1].owners.length, 3);
     ck('  and the document is forgotten from the list', h.store.visor_aware_hidden, {});
 
-    panel().fire('click', { target: panel().querySelector('[data-aw="pastes"]') });
+    ck('both paste switches start off', [panel().querySelector('[data-aw="paste-ext"]').getAttribute('aria-checked'), panel().querySelector('[data-aw="paste-int"]').getAttribute('aria-checked')], ['false', 'false']);
+    panel().fire('click', { target: panel().querySelector('[data-aw="paste-ext"]') });
     await settle(h, 50);
-    ck('"Show pastes" marks the pasted stretch', h.posted[h.posted.length - 1].owners, [[0, 6, 0, 0], [6, 3, 1, 1], [9, 2, 1, 0]]);
-    ck('  and is remembered', h.store.visor_aware_pastes, true);
-    ck('  its switch shows on', panel().querySelector('[data-aw="pastes"]').getAttribute('aria-checked'), 'true');
+    ck('"Pasted from outside" marks only the outside paste', h.posted[h.posted.length - 1].owners, [[0, 6, 0, 0], [6, 3, 1, 1], [9, 2, 1, 0]]);
+    panel().fire('click', { target: panel().querySelector('[data-aw="paste-int"]') });
+    await settle(h, 50);
+    ck('"Pasted from within" adds the internal one', h.posted[h.posted.length - 1].owners, [[0, 6, 0, 0], [6, 3, 1, 1], [9, 2, 1, 2]]);
+    panel().fire('click', { target: panel().querySelector('[data-aw="paste-ext"]') });
+    await settle(h, 50);
+    ck('  each turns off on its own', h.posted[h.posted.length - 1].owners, [[0, 6, 0, 0], [6, 3, 1, 0], [9, 2, 1, 2]]);
+    ck('  both are remembered', [h.store.visor_aware_paste_ext, h.store.visor_aware_paste_int], [false, true]);
+    ck('  with their counts in the panel', panel().querySelectorAll('em').map((e) => e.textContent), ['1', '1']);
 
     panel().fire('click', { target: panel().querySelector('[data-aw="min"]') });
     await settle(h, 50);
@@ -243,6 +270,14 @@ const settle = async (h, ms = 1) => {
     const btn = h.hud().querySelector('[data-act="aware"]');
     ck('stored on: the bar opens with AWARE on and no NEW label', [btn.getAttribute('aria-pressed'), btn.querySelector('.vh-new').hidden], ['true', true]);
     ck('  and the page is coloured as soon as the history is read', h.posted.some((m) => m.on === true && m.text === 'hello there'), true);
+  }
+
+  {
+    const h = loadContent({ stored: { visor_aware: true, visor_aware_seen: true, visor_aware_pastes: true } });
+    await settle(h, 1000);
+    h.document.getElementById('visor-hud-tab').fire('click', { target: h.document.getElementById('visor-hud-tab').querySelector('.vt-open') });
+    await settle(h, 100);
+    ck('the earlier single "Show pastes" setting turns both kinds on', h.posted[h.posted.length - 1].owners.map((o) => o[3]), [0, 1, 2]);
   }
 
   // ── 5. Theme: Light, Dark, System ──────────────────────────────────────────
