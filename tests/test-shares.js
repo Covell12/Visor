@@ -102,12 +102,15 @@ const chips = (h) => h.hud().querySelectorAll('.vh-pct').map((b) => b.textConten
     ck('  both switches on', h.hud().querySelectorAll('[data-share]').map((o) => o.getAttribute('aria-checked')), ['true', 'true']);
     menu.fire('click', { target: h.hud().querySelector('[data-share="ext"]') });
     await settle(h, 50);
+    ck('  the chips move in place rather than being rebuilt', h.hud().querySelectorAll('.vh-chip').map((c) => c.getAttribute('data-id')), ['w', 'k', 'e']);
+    await settle(h, 600);   // the figures count to their new values (about half a second)
     ck('counting outside pastes again recounts the bar', chips(h), ['78%', '15%', '7%']);
     ck('  stored for the side panel and next time', h.store.visor_share_excl_ext, false);
     ck('  the pill names the setting', h.hud().querySelector('.vh-share-label').textContent, 'Excl. pastes from within');
     ck('  its switch shows off', h.hud().querySelector('[data-share="ext"]').getAttribute('aria-checked'), 'false');
     menu.fire('click', { target: h.hud().querySelector('[data-share="int"]') });
     await settle(h, 50);
+    await settle(h, 600);
     ck('both off: every character counts', [chips(h), h.hud().querySelector('.vh-share-label').textContent], [['78%', '14%', '9%'], 'All text']);
     btn.fire('click', { target: btn });
     ck('the pill closes the menu again', menu.hidden, true);

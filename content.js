@@ -1345,10 +1345,10 @@ function setShareOpt(key, on) {
   refreshShares();
 }
 
-/** Every percentage on screen, recounted. */
+/** Every percentage on screen, recounted (on the bar, with the chips moving). */
 function refreshShares() {
   const hud = document.getElementById(VISOR_HUD_ID);
-  if (hud && analysis) { hudChipKey = ''; updateHUD(hud, analysis); }
+  if (hud && analysis) { hudChipsMove = true; updateHUD(hud, analysis); hudChipsMove = false; }
   syncShareMenu();
   if (document.getElementById(AWARE_PANEL_ID)) renderAwarePanel();
 }
@@ -1656,6 +1656,72 @@ function ensureHUD() {
 /** Last chip roster rendered, so the entry animation is not replayed on every
  *  scope change when the same people are still on screen with the same shares. */
 let hudChipKey = '';
+let hudChipsMove = false;   // set while the percentages are recounted, so the chips glide
+
+const reducedMotion = () => { try { return matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (_) { return false; } };
+
+/** A percentage counting from what it shows to `to`, over the bars' own time. */
+function countTo(el, to, suffix = '%') {
+  const from = parseFloat(el.textContent) || 0;
+  if (from === to || reducedMotion()) { el.textContent = `${to}${suffix}`; return; }
+  const clock = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
+  const t0 = clock(), T = 480;
+  const step = () => {
+    const k = Math.min(1, (clock() - t0) / T), e = 1 - Math.pow(1 - k, 3);
+    el.textContent = `${Math.round(from + (to - from) * e)}${suffix}`;
+    if (k < 1) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
+
+/**
+ * The same people on the bar, recounted: each chip keeps its place in the
+ * DOM until it glides to its new one (FLIP, on the `translate` property, so
+ * it doesn't fight the chips' entry animation), while its bar resizes and its
+ * percentage counts to the new figure.
+ */
+function moveHudChips(host, top) {
+  const chips = new Map([...host.querySelectorAll('.vh-chip')].map((c) => [c.getAttribute('data-id'), c]));
+  const canMeasure = [...chips.values()].every((c) => typeof c.getBoundingClientRect === 'function');
+  const first = new Map();
+  if (canMeasure) chips.forEach((c, id) => first.set(id, c.getBoundingClientRect().left));
+  // Chips that are already on screen don't play their entrance again: moving
+  // one in the page would otherwise restart it (a fade-in and a bar filling
+  // from nothing).
+  chips.forEach((chip) => chip.classList.add('is-settled'));
+  // the new order first, moving only chips that aren't in place ...
+  let at = host.firstElementChild;
+  for (const c of top) {
+    const chip = chips.get(String(c.id));
+    if (chip !== at) host.insertBefore(chip, at); else at = chip.nextElementSibling;
+  }
+  // ... then, once they've settled at their old widths, the new figures (so
+  // the bars animate: a moved element's first style change doesn't)
+  void host.offsetWidth;
+  for (const c of top) {
+    const chip = chips.get(String(c.id));
+    const pct = Math.round(c.share * 100);
+    const bar = chip.querySelector('.vh-track i');
+    if (bar) bar.style.width = `${pct}%`;
+    const num = chip.querySelector('.vh-pct');
+    if (num) countTo(num, pct);
+    const meta = chip.querySelector('.vh-meta');
+    if (meta) meta.setAttribute('title', `${pct}% of the text${shareOpts.excludeExternal || shareOpts.excludeInternal ? ', leaving out pastes' : ''} · ${fmtMins(c.activeMinutes)} active`);
+  }
+  if (!canMeasure || reducedMotion()) return;
+  chips.forEach((chip, id) => {
+    const dx = first.get(id) - chip.getBoundingClientRect().left;
+    if (!dx) return;
+    chip.style.transition = 'none';
+    chip.style.translate = `${dx}px 0`;
+  });
+  void host.offsetWidth;
+  chips.forEach((chip) => {
+    if (!chip.style.translate) return;
+    chip.style.transition = 'translate .45s cubic-bezier(.2, .7, .2, 1)';
+    chip.style.translate = '';
+  });
+}
 
 function updateHUD(hud, a) {
   const top = visorShares(a.contributors, shareOpts).slice(0, 3);
@@ -1666,12 +1732,18 @@ function updateHUD(hud, a) {
   const key = top.length
     ? top.map((c) => `${c.id}|${Math.round(c.share * 100)}|${c.activeMinutes}`).join('/')
     : '(none)';
-  if (key !== hudChipKey) {
+  const host = hud.querySelector('.vh-chips');
+  const onBar = [...host.querySelectorAll('.vh-chip')].map((c) => c.getAttribute('data-id')).sort().join('|');
+  if (key !== hudChipKey && hudChipsMove && top.length && onBar === top.map((c) => String(c.id)).sort().join('|')) {
+    // a recount with the same people on the bar: move what's there
     hudChipKey = key;
-    hud.querySelector('.vh-chips').innerHTML = !top.length
+    moveHudChips(host, top);
+  } else if (key !== hudChipKey) {
+    hudChipKey = key;
+    host.innerHTML = !top.length
       ? '<div class="vh-none">No edits recorded in this tab</div>'
       : top.map((c, i) => `
-      <div class="vh-chip" style="--c:${esc(c.color)};--d:${i * 60}ms">
+      <div class="vh-chip" data-id="${esc(String(c.id))}" style="--c:${esc(c.color)};--d:${i * 60}ms">
         <div class="vh-chip-head">
           <span class="vh-dot"></span>
           <span class="vh-name">${esc(firstName(c.name))}</span>

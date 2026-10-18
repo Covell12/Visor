@@ -139,6 +139,8 @@ function render(a) {
   renderSignal(a);
 }
 
+const SHARES_SHOWN = 8;   // rows in the overview's list; the rest are in People
+
 function renderMetrics(a) {
   const t = a.totals;
   const people = a.contributors || [];
@@ -163,19 +165,18 @@ function renderMetrics(a) {
   // Who wrote it, as a list: each person's share of the text added, recounted
   // under "what the percentages count" (shares.js), with its two switches.
   const ranked = visorShares(people, shareOpts);
-  const SHOWN = 8;
-  const rows = ranked.slice(0, SHOWN).map((c) => {
+  const rows = ranked.map((c, i) => {
     const pct = Math.round((c.share || 0) * 100);
     return `
-    <div class="v-share-row" style="--c:${esc(c.color)}">
+    <div class="v-share-row${i >= SHARES_SHOWN ? ' is-extra' : ''}" data-id="${esc(String(c.id))}" role="listitem" style="--c:${esc(c.color)}">
       <i class="v-share-dot" aria-hidden="true"></i>
       <span class="v-share-name" title="${esc(c.name)}">${esc(c.name)}</span>
       <span class="v-share-bar" aria-hidden="true"><b style="width:${pct}%"></b></span>
       <span class="v-share-pct">${pct}%</span>
     </div>`;
   }).join('');
-  const more = ranked.length > SHOWN
-    ? `<button type="button" class="v-share-more" data-goto="people">+${ranked.length - SHOWN} more in People</button>` : '';
+  const more = ranked.length > SHARES_SHOWN
+    ? `<button type="button" class="v-share-more" data-goto="people">+${ranked.length - SHARES_SHOWN} more in People</button>` : '';
   const opt = (key, on, swatch, label) => `
     <button type="button" class="v-share-opt${on ? ' is-on' : ''}" data-share-opt="${key}" role="switch" aria-checked="${on}">
       <span class="v-share-swatch ${swatch}" aria-hidden="true"></span>
@@ -498,15 +499,95 @@ $('people-list').addEventListener('click', async (e) => {
 let shareOpts = visorShareSettings();
 chrome.storage.local.get([VISOR_SHARE_EXT_KEY, VISOR_SHARE_INT_KEY], (res) => {
   shareOpts = visorShareSettings(res);
-  if (current) render(current);
+  if (current) applyShares();
 });
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local' || (!changes[VISOR_SHARE_EXT_KEY] && !changes[VISOR_SHARE_INT_KEY])) return;
   chrome.storage.local.get([VISOR_SHARE_EXT_KEY, VISOR_SHARE_INT_KEY], (res) => {
-    shareOpts = visorShareSettings(res);
-    if (current) render(current);
+    const next = visorShareSettings(res);
+    if (next.excludeExternal === shareOpts.excludeExternal && next.excludeInternal === shareOpts.excludeInternal) return;
+    shareOpts = next;
+    applyShares();   // changed on the bar in the document: the same glide here
   });
 });
+
+const reducedMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/** A percentage counting from what it shows to `to`. */
+function countTo(el, to) {
+  const from = parseFloat(el.textContent) || 0;
+  if (from === to || reducedMotion()) { el.textContent = `${to}%`; return; }
+  const clock = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
+  const t0 = clock(), T = 480;
+  const step = () => {
+    const k = Math.min(1, (clock() - t0) / T), e = 1 - Math.pow(1 - k, 3);
+    el.textContent = `${Math.round(from + (to - from) * e)}%`;
+    if (k < 1) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
+
+/**
+ * The percentages recounted, in place: each row keeps its element and glides
+ * to its new position (FLIP), its bar resizes (a CSS transition) and its
+ * figure counts to the new share; the switches slide rather than redraw.
+ * Rows moving into or out of the first eight fade in or out.
+ */
+function applyShares() {
+  if (!current) return;
+  const list = document.querySelector('#metrics .v-share-list');
+  const ranked = visorShares(current.contributors || [], shareOpts);
+  if (list) {
+    const rows = new Map([...list.querySelectorAll('.v-share-row')].map((r) => [r.dataset.id, r]));
+    const first = new Map();
+    rows.forEach((r, id) => { if (!r.classList.contains('is-extra')) first.set(id, r.getBoundingClientRect().top); });
+    const more = list.querySelector('.v-share-more');
+    // 1. the new order (a row is moved only if it isn't already in place)
+    let at = list.querySelector('.v-share-row');
+    ranked.forEach((c, i) => {
+      const r = rows.get(String(c.id));
+      if (!r) return;
+      if (r !== at) list.insertBefore(r, at || more); else at = r.nextElementSibling;
+      const extra = i >= SHARES_SHOWN;
+      if (!extra && r.classList.contains('is-extra')) r.classList.add('is-arriving');
+      r.classList.toggle('is-extra', extra);
+    });
+    // 2. let the moved rows settle at their old widths, so the new widths
+    //    below animate (a moved element's first style change doesn't)
+    void list.offsetHeight;
+    ranked.forEach((c) => {
+      const r = rows.get(String(c.id));
+      if (!r) return;
+      const pct = Math.round((c.share || 0) * 100);
+      r.querySelector('.v-share-bar b').style.width = `${pct}%`;
+      countTo(r.querySelector('.v-share-pct'), pct);
+    });
+    // 3. each row glides from where it was (FLIP)
+    if (!reducedMotion()) {
+      const moved = [];
+      rows.forEach((r, id) => {
+        if (r.classList.contains('is-extra') || !first.has(id)) return;
+        const dy = first.get(id) - r.getBoundingClientRect().top;
+        if (!dy) return;
+        r.style.transition = 'none';
+        r.style.translate = `0 ${dy}px`;
+        moved.push(r);
+      });
+      void list.offsetHeight;
+      for (const r of moved) {
+        r.style.transition = 'translate .45s cubic-bezier(.2, .7, .2, 1)';
+        r.style.translate = '';
+      }
+    }
+    requestAnimationFrame(() => list.querySelectorAll('.is-arriving').forEach((r) => r.classList.remove('is-arriving')));
+  }
+  for (const opt of document.querySelectorAll('#metrics [data-share-opt]')) {
+    const on = opt.getAttribute('data-share-opt') === 'ext' ? shareOpts.excludeExternal : shareOpts.excludeInternal;
+    opt.classList.toggle('is-on', on);
+    opt.setAttribute('aria-checked', String(on));
+  }
+  renderPeople(current);   // the People tab, in the new order
+}
 $('metrics').addEventListener('click', (e) => {
   const opt = e.target.closest && e.target.closest('[data-share-opt]');
   if (opt) {
@@ -514,7 +595,7 @@ $('metrics').addEventListener('click', (e) => {
     const key = ext ? VISOR_SHARE_EXT_KEY : VISOR_SHARE_INT_KEY;
     shareOpts = { ...shareOpts, [ext ? 'excludeExternal' : 'excludeInternal']: !(ext ? shareOpts.excludeExternal : shareOpts.excludeInternal) };
     chrome.storage.local.set({ [key]: ext ? shareOpts.excludeExternal : shareOpts.excludeInternal });
-    if (current) render(current);
+    applyShares();
     return;
   }
   const more = e.target.closest && e.target.closest('[data-goto="people"]');
