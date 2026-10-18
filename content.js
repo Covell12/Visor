@@ -32,6 +32,25 @@ function getFileId() {
   return m ? m[2] : null;
 }
 
+/**
+ * The person signed in to this Doc, from Google's account button, whose label
+ * reads "Google Account: Name (address)" (the first word changes with the
+ * language; the name and the address in brackets don't). Used only to name
+ * their own edits when Google's revision roster leaves them nameless.
+ */
+function signedInPerson() {
+  try {
+    const el = document.querySelector('a[aria-label*="@"][href*="accounts.google.com"], [aria-label^="Google Account"]');
+    const label = el && el.getAttribute('aria-label');
+    if (!label) return null;
+    const m = /:\s*([^(\n]+?)\s*\(([^)\s]+@[^)\s]+)\)/.exec(label.replace(/\s+/g, ' '));
+    if (!m) return null;
+    return { name: m[1].trim(), email: m[2].trim() };
+  } catch (_) {
+    return null;
+  }
+}
+
 // ── Access control ───────────────────────────────────────────────────────────
 //
 // Revision history is an editor-level capability. Visor mirrors that exactly:
@@ -210,6 +229,7 @@ async function runAnalysis(force = false) {
       {
         revisionHint: probeResult.revisionHint,
         liveTabs: probeResult.liveTabs,
+        me: signedInPerson(),
         onProgress: (v) => broadcast({ type: 'VISOR_PROGRESS', phase: 'fetch', value: v })
       }
     );
@@ -582,7 +602,7 @@ function resolveInjectedTheme(choice) {
 function applyInjectedTheme(theme) {
   injectedThemeChoice = ['light', 'dark', 'system'].includes(theme) ? theme : 'light';
   injectedTheme = resolveInjectedTheme(injectedThemeChoice);
-  for (const id of [VISOR_HUD_ID, VISOR_TAB_ID, 'visor-replay-overlay']) {
+  for (const id of [VISOR_HUD_ID, VISOR_TAB_ID, 'visor-replay-overlay', 'visor-aware-panel']) {
     document.getElementById(id)?.setAttribute('data-visor-theme', injectedTheme);
   }
   document.getElementById('visor-replay-frame')
@@ -1161,6 +1181,8 @@ function visorShutdown() {
   document.getElementById(VISOR_TAB_ID)?.remove();
   document.getElementById(VISOR_BTN_ID)?.remove();
   document.getElementById('visor-replay-overlay')?.remove();
+  document.getElementById('visor-aware-panel')?.remove();
+  if (awarePanelTimer) { clearInterval(awarePanelTimer); awarePanelTimer = 0; }
   awarePost({ on: false });
 }
 
@@ -1282,10 +1304,18 @@ function requestSidePanel(onFail) {
 // nothing leaves this tab: it's a window message to the page's own window.
 const AWARE_KEY = 'visor_aware';
 const AWARE_SEEN_KEY = 'visor_aware_seen';
+const AWARE_HIDDEN_KEY = 'visor_aware_hidden';   // { fileId: [userId, ...] } switched off in the panel
+const AWARE_PASTES_KEY = 'visor_aware_pastes';   // the panel's "Show pastes"
+const AWARE_MIN_KEY = 'visor_aware_min';         // the panel folded to its title
 const AWARE_CHANNEL = 'VISOR_AWARE';
+const AWARE_PANEL_ID = 'visor-aware-panel';
 let awareOn = false;
 let awareSeen = true;          // until storage says otherwise, no NEW label
 let awareSent = null;          // the analysis last sent, so the text isn't resent on every repaint
+let awareHiddenAll = {};
+let awarePastes = false;
+let awareMin = false;
+const awareHidden = () => new Set((awareHiddenAll[getFileId()] || []).map(String));
 
 function awarePost(msg) {
   try { window.postMessage({ source: AWARE_CHANNEL, ...msg }, window.location.origin); } catch (_) { /* nothing to do */ }
@@ -1297,16 +1327,21 @@ function awarePayload(tl, a) {
   const colors = [];
   const index = new Map();
   for (const c of a.contributors || []) { index.set(String(c.id), colors.length); colors.push(c.color); }
+  // People switched off in the panel are left out; pastes are marked only
+  // while "Show pastes" is on.
+  const hidden = awareHidden();
   const owners = [];
-  for (const [start, len, who] of a.ownership) {
+  for (const [start, len, who, pasted] of a.ownership) {
+    if (hidden.has(String(who))) continue;
     const c = index.get(String(who));
-    if (c != null) owners.push([start, len, c]);
+    if (c != null) owners.push([start, len, c, awarePastes && pasted ? 1 : 0]);
   }
   return { text: tl.finalText || '', owners, colors };
 }
 
 function awareSync(force = false) {
   if (getDocKind() !== 'doc') return;
+  renderAwarePanel();
   if (!awareOn || visorStopped || !analysis) {
     if (awareSent !== false) { awarePost({ on: false }); awareSent = false; }
     return;
@@ -1316,6 +1351,118 @@ function awareSync(force = false) {
   if (!payload) return;
   awareSent = analysis;
   awarePost({ on: true, ...payload });
+}
+
+// ── The AWARE panel ──
+//
+// While AWARE is on, a small panel sits beside the page, just under the
+// toolbar: everyone's colour (each can be switched off), and "Show pastes",
+// which highlights every paste in yellow. It goes when AWARE goes off.
+
+function awareStore(obj) {
+  try { chrome.storage.local.set(obj); } catch (_) { /* no-op */ }
+}
+
+function toggleAwarePerson(id) {
+  const fid = getFileId();
+  const set = awareHidden();
+  if (set.has(id)) set.delete(id); else set.add(id);
+  awareHiddenAll = { ...awareHiddenAll, [fid]: [...set] };
+  if (!awareHiddenAll[fid].length) delete awareHiddenAll[fid];
+  awareStore({ [AWARE_HIDDEN_KEY]: awareHiddenAll });
+  awareSync(true);
+}
+
+let awarePanelTimer = 0;
+let awarePanelResize = false;
+
+function renderAwarePanel() {
+  const existing = document.getElementById(AWARE_PANEL_ID);
+  const people = (analysis && analysis.contributors) || [];
+  if (!awareOn || visorStopped || !analysis || getDocKind() !== 'doc') {
+    existing?.remove();
+    if (awarePanelTimer) { clearInterval(awarePanelTimer); awarePanelTimer = 0; }
+    return;
+  }
+
+  let panel = existing;
+  if (!panel) {
+    panel = document.createElement('div');
+    panel.id = AWARE_PANEL_ID;
+    panel.className = 'visor-aware-panel';
+    panel.setAttribute('role', 'region');
+    panel.setAttribute('aria-label', 'Visor AWARE');
+    panel.addEventListener('click', (e) => {
+      const t = e.target && e.target.closest ? e.target.closest('[data-aw]') : null;
+      if (!t) return;
+      const act = t.getAttribute('data-aw');
+      if (act === 'person') toggleAwarePerson(t.getAttribute('data-id'));
+      else if (act === 'pastes') { awarePastes = !awarePastes; awareStore({ [AWARE_PASTES_KEY]: awarePastes }); awareSync(true); }
+      else if (act === 'min') { awareMin = !awareMin; awareStore({ [AWARE_MIN_KEY]: awareMin }); renderAwarePanel(); }
+      else if (act === 'off') setAware(false);
+    });
+    document.body.appendChild(panel);
+    // Docs moves its own furniture (the side panel opening, a narrower window);
+    // keep the panel beside the page.
+    if (!awarePanelResize) { awarePanelResize = true; addEventListener('resize', () => placeAwarePanel()); }
+    if (!awarePanelTimer) awarePanelTimer = setInterval(() => placeAwarePanel(), 1500);
+  }
+  panel.setAttribute('data-visor-theme', injectedTheme);
+  panel.classList.toggle('is-min', awareMin);
+
+  const hidden = awareHidden();
+  const pasteCount = (analysis.totals && analysis.totals.pasteCount) || 0;
+  panel.innerHTML = `
+    <div class="va-head">
+      <span class="va-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+      <b class="va-title">Visor <span>AWARE</span></b>
+      <button type="button" class="va-icon" data-aw="min" aria-expanded="${!awareMin}"
+              title="${awareMin ? 'Show the key' : 'Fold the panel'}" aria-label="${awareMin ? 'Show the key' : 'Fold the panel'}">${awareMin ? '▸' : '▾'}</button>
+      <button type="button" class="va-icon" data-aw="off" title="Turn AWARE off" aria-label="Turn AWARE off">×</button>
+    </div>
+    <div class="va-body">
+      <p class="va-note">Each person's text in their colour. Click someone to hide or show their colour.</p>
+      <div class="va-people">
+        ${people.map((c) => {
+          const on = !hidden.has(String(c.id));
+          return `<button type="button" class="va-person${on ? '' : ' is-off'}" data-aw="person" data-id="${esc(String(c.id))}"
+                    aria-pressed="${on}" title="${on ? 'Hide' : 'Show'} ${esc(c.name)}'s colour">
+            <span class="va-swatch" style="--c:${esc(c.color || '#888')}"></span>
+            <span class="va-name">${esc(c.name || 'Unknown')}</span>
+            <span class="va-share">${Math.round((c.share || 0) * 100)}%</span>
+          </button>`;
+        }).join('')}
+      </div>
+      <button type="button" class="va-pastes${awarePastes ? ' is-on' : ''}" data-aw="pastes" role="switch" aria-checked="${awarePastes}"
+              title="Highlight in yellow every stretch of text that arrived as a paste (including text copied or moved within the document)">
+        <span class="va-yellow" aria-hidden="true"></span>
+        <span class="va-pastes-label">Show pastes <em>${pasteCount.toLocaleString()}</em></span>
+        <span class="va-switch" aria-hidden="true"><i></i></span>
+      </button>
+      <p class="va-foot">Only on your screen. The document isn't changed.</p>
+    </div>`;
+  placeAwarePanel(panel);
+}
+
+/**
+ * Just under the toolbar, beside the page on its right when there's room
+ * before Docs' own right-hand strip; otherwise over the page's right edge.
+ */
+function placeAwarePanel(panel = document.getElementById(AWARE_PANEL_ID)) {
+  if (!panel) return;
+  try {
+    const bar = document.getElementById('docs-toolbar-wrapper') || document.querySelector('.docs-toolbar-wrapper, #docs-toolbar, #docs-chrome');
+    const top = Math.max(56, Math.round((bar ? bar.getBoundingClientRect().bottom : 112) + 12));
+    const page = document.querySelector('.kix-page-paginated, .kix-page, canvas.kix-canvas-tile-content');
+    const rail = document.querySelector('.docs-companion-app-switcher-container, .companion-app-switcher-container');
+    const railLeft = rail ? rail.getBoundingClientRect().left : innerWidth;
+    const w = panel.offsetWidth || 248;
+    const pageRight = page ? page.getBoundingClientRect().right : 0;
+    let left = pageRight + 20;
+    if (!page || left + w > railLeft - 12) left = railLeft - 16 - w;
+    panel.style.top = `${top}px`;
+    panel.style.left = `${Math.max(8, Math.round(left))}px`;
+  } catch (_) { /* leave it where it is */ }
 }
 
 function setAware(on) {
@@ -1340,17 +1487,25 @@ function applyAware(on, seen) {
 }
 
 try {
-  chrome.storage.local.get([AWARE_KEY, AWARE_SEEN_KEY], (res) => {
+  chrome.storage.local.get([AWARE_KEY, AWARE_SEEN_KEY, AWARE_HIDDEN_KEY, AWARE_PASTES_KEY, AWARE_MIN_KEY], (res) => {
     if (chrome.runtime.lastError) return;
     awareSeen = !!(res && res[AWARE_SEEN_KEY]);
+    awareHiddenAll = (res && res[AWARE_HIDDEN_KEY] && typeof res[AWARE_HIDDEN_KEY] === 'object') ? res[AWARE_HIDDEN_KEY] : {};
+    awarePastes = !!(res && res[AWARE_PASTES_KEY]);
+    awareMin = !!(res && res[AWARE_MIN_KEY]);
     applyAware(!!(res && res[AWARE_KEY]), false);
   });
   // The side panel has the same switch; follow it.
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== 'local') return;
     if (changes[AWARE_SEEN_KEY]) awareSeen = !!changes[AWARE_SEEN_KEY].newValue;
+    // the panel's settings, changed in this tab or another one on the same document
+    let panelChanged = false;
+    if (changes[AWARE_HIDDEN_KEY]) { awareHiddenAll = changes[AWARE_HIDDEN_KEY].newValue || {}; panelChanged = true; }
+    if (changes[AWARE_PASTES_KEY]) { awarePastes = !!changes[AWARE_PASTES_KEY].newValue; panelChanged = true; }
+    if (changes[AWARE_MIN_KEY]) { awareMin = !!changes[AWARE_MIN_KEY].newValue; panelChanged = true; }
     if (changes[AWARE_KEY]) applyAware(!!changes[AWARE_KEY].newValue, false);
-    else if (changes[AWARE_SEEN_KEY]) applyAware(awareOn, false);
+    else if (changes[AWARE_SEEN_KEY] || panelChanged) applyAware(awareOn, false);
   });
 } catch (_) { /* off */ }
 

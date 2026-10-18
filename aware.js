@@ -17,6 +17,14 @@
  * colours would only make a third. Switching it off removes the layers, and
  * the page is exactly as Docs drew it.
  *
+ * Pastes (when the panel's "Show pastes" is on): pasted text is highlighted
+ * in Google Docs' own light yellow, behind the author's colour. A single
+ * blend layer can't make white paper yellow and black text a colour at once,
+ * so two do it: a multiply layer by M and a screen layer by the author's
+ * colour C send every pixel p to C + p·(Y − C), i.e. paper to Y and ink to C,
+ * with the antialiasing in between kept. That needs Y ≥ C in every channel,
+ * which the light yellow is for every colour in Visor's author palette.
+ *
  * Placing a run in the document: its text is looked up in the document's text
  * (which Visor's history engine rebuilt from the revision log), walking each
  * page in reading order from an anchor run that occurs exactly once. A run
@@ -24,8 +32,9 @@
  * read the history — is left as Docs drew it. Nothing is ever guessed.
  *
  * The content script sends the document's text, who wrote each stretch of it
- * (runs of [start, length, colour index]) and the colours, over postMessage on
- * this window.
+ * (runs of [start, length, colour index, pasted]) and the colours, over
+ * postMessage on this window. People switched off in the panel are simply
+ * left out of the runs.
  * ==========================================================================*/
 
 (function () {
@@ -122,8 +131,9 @@
   }
 
   /**
-   * The authors' stretches within [at, at + len): [[from, to, colour], ...],
-   * offsets relative to `at`. `owners` is sorted [[start, length, colour]].
+   * The authors' stretches within [at, at + len): [[from, to, colour, pasted],
+   * ...], offsets relative to `at`. `owners` is sorted [[start, length,
+   * colour, pasted]].
    */
   function stretchesIn(owners, at, len) {
     const out = [];
@@ -133,9 +143,9 @@
       if (owners[mid][0] + owners[mid][1] > at) { first = mid; hi = mid - 1; } else lo = mid + 1;
     }
     for (let k = first; k < owners.length && owners[k][0] < at + len; k++) {
-      const [s, n, c] = owners[k];
+      const [s, n, c, p] = owners[k];
       const from = Math.max(s, at) - at, to = Math.min(s + n, at + len) - at;
-      if (to > from) out.push([from, to, c]);
+      if (to > from) out.push([from, to, c, p ? 1 : 0]);
     }
     return out;
   }
@@ -173,7 +183,29 @@
     return Math.max(r, g, b) <= 0x66 && Math.max(r, g, b) - Math.min(r, g, b) <= 0x30;
   }
 
-  const core = { placeRuns, stretchesIn, readingOrder, plainInk, WINDOW };
+  const PASTE_YELLOW = [255, 242, 204];     // Docs' "light yellow 3"
+
+  /** '#rrggbb' → [r, g, b], or null. */
+  function rgbOf(hex) {
+    const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || '').trim());
+    return m ? [0, 2, 4].map((i) => parseInt(m[1].slice(i, i + 2), 16)) : null;
+  }
+
+  /**
+   * The multiply colour M that, followed by a screen by `color`, turns paper
+   * into the paste yellow and ink into `color` (see the header).
+   */
+  function pasteMultiply(color) {
+    const c = rgbOf(color);
+    if (!c) return null;
+    const m = c.map((v, i) => {
+      const y = PASTE_YELLOW[i] / 255, k = v / 255;
+      return k >= 1 ? 255 : Math.round(Math.max(0, Math.min(1, (y - k) / (1 - k))) * 255);
+    });
+    return `rgb(${m.join(',')})`;
+  }
+
+  const core = { placeRuns, stretchesIn, readingOrder, plainInk, pasteMultiply, PASTE_YELLOW, WINDOW };
   if (typeof window === 'undefined') { module.exports = core; return; }   // the tests
 
   // ── In the page ────────────────────────────────────────────────────────────
@@ -249,7 +281,7 @@
 
   // ── The coloured layer over each page ──
 
-  const layers = new Map();          // page canvas → { tint, mark } overlay canvases
+  const layers = new Map();          // page canvas → { mul, scr, tint, mark } overlay canvases
   const placementWatch = new MutationObserver((list) => { for (const m of list) if (data) touch(m.target); });
   function watchPlacement(canvas) {
     try { placementWatch.observe(canvas, { attributes: true, attributeFilter: ['style', 'class'] }); } catch (_) { /* fine */ }
@@ -257,8 +289,8 @@
 
   function layerFor(page) {
     let l = layers.get(page);
-    if (l && l.tint.isConnected && l.tint.previousSibling === page && l.mark.previousSibling === l.tint) return l;
-    if (l) { l.tint.remove(); l.mark.remove(); }
+    if (l && l.mul.isConnected && l.mul.previousSibling === page && l.mark.previousSibling === l.tint) return l;
+    if (l) dropLayers(l);
     const make = (blend) => {
       const o = document.createElement('canvas');
       o.className = 'visor-aware-layer';
@@ -266,11 +298,12 @@
       o.style.cssText = `position:absolute;pointer-events:none;mix-blend-mode:${blend};margin:0;`;
       return o;
     };
-    l = { tint: make('lighten'), mark: make('normal') };
-    page.after(l.tint, l.mark);
+    l = { mul: make('multiply'), scr: make('screen'), tint: make('lighten'), mark: make('normal') };
+    page.after(l.mul, l.scr, l.tint, l.mark);
     layers.set(page, l);
     return l;
   }
+  const dropLayers = (l) => { l.mul.remove(); l.scr.remove(); l.tint.remove(); l.mark.remove(); };
 
   /** Exactly over the page canvas: same parent, same box, same pixels. */
   function place(page, o) {
@@ -288,7 +321,10 @@
 
   const measure = document.createElement('canvas').getContext('2d');
 
-  function paintRun(g, u, r, at) {
+  const yellow = `rgb(${PASTE_YELLOW.join(',')})`;
+  const mulCache = new Map();
+  function paintRun(L, r, at) {
+    const { tint: g, mark: u, mul, scr } = L;
     const stretches = stretchesIn(data.owners, at, r.t.length);
     if (!stretches.length) return;
     measure.font = r.font;
@@ -306,16 +342,26 @@
     else if (r.base === 'middle') top = r.y - (asc + desc) * r.sy / 2;
     else if (r.base === 'bottom' || r.base === 'ideographic') top = r.y - (asc + desc) * r.sy;
     const h = (asc + desc) * r.sy;
-    for (const [from, to, c] of stretches) {
+    for (const [from, to, c, pasted] of stretches) {
       const color = data.colors[c];
       if (!color) continue;
       const a = from ? measure.measureText(r.t.slice(0, from)).width : 0;
       const b = to === r.t.length ? full.width : measure.measureText(r.t.slice(0, to)).width;
-      if (r.plain) {
+      const X = x0 + a * k, Wd = (b - a) * k + .6;
+      if (r.plain && pasted) {
+        // pasted: paper to yellow, ink to the author's colour (two layers)
+        if (!mulCache.has(color)) mulCache.set(color, pasteMultiply(color));
+        mul.fillStyle = mulCache.get(color) || yellow;
+        origFillRect.call(mul, X, top, Wd, h);
+        scr.fillStyle = color;
+        origFillRect.call(scr, X, top, Wd, h);
+      } else if (r.plain) {
         g.fillStyle = color;
-        origFillRect.call(g, x0 + a * k, top, (b - a) * k + .6, h);
+        origFillRect.call(g, X, top, Wd, h);
       } else {
-        // coloured text keeps its colour; a line under it in the author's
+        // coloured text keeps its colour; a line under it in the author's,
+        // and yellow behind it if it was pasted
+        if (pasted) { mul.fillStyle = yellow; origFillRect.call(mul, X, top, Wd, h); }
         u.fillStyle = color;
         origFillRect.call(u, x0 + a * k, r.y + desc * r.sy * .45, (b - a) * k, Math.max(2, 1.6 * r.sy));
       }
@@ -332,11 +378,11 @@
       origClearRect.call(g, 0, 0, o.width, o.height);
       return g;
     };
-    const g = ctx(l.tint), u = ctx(l.mark);
+    const L = { mul: ctx(l.mul), scr: ctx(l.scr), tint: ctx(l.tint), mark: ctx(l.mark) };
     const runs = readingOrder([...p.runs.values()]);
     const at = placeRuns(runs.map((r) => r.t), data.text, hint);
     let end = hint;
-    runs.forEach((r, i) => { if (at[i] >= 0) { paintRun(g, u, r, at[i]); end = Math.max(end, at[i] + r.t.length); } });
+    runs.forEach((r, i) => { if (at[i] >= 0) { paintRun(L, r, at[i]); end = Math.max(end, at[i] + r.t.length); } });
     p.end = end;
   }
 
@@ -360,22 +406,23 @@
     dirty.clear();
     // Forget pages Docs has thrown away.
     for (const page of [...pages.keys()]) {
-      if (!page.isConnected) { const l = layers.get(page); if (l) { l.tint.remove(); l.mark.remove(); } pages.delete(page); layers.delete(page); }
+      if (!page.isConnected) { const l = layers.get(page); if (l) dropLayers(l); pages.delete(page); layers.delete(page); }
     }
   }
 
   function off() {
     data = null;
     dirty.clear();
-    for (const l of layers.values()) { l.tint.remove(); l.mark.remove(); }
+    for (const l of layers.values()) dropLayers(l);
     layers.clear();
   }
 
   window.addEventListener('message', (e) => {
     if (e.source !== window || !e.data || e.data.source !== CHANNEL) return;
     const d = e.data;
-    if (!d.on || typeof d.text !== 'string' || !Array.isArray(d.owners) || !Array.isArray(d.colors)) { off(); return; }
-    data = { text: d.text, owners: d.owners, colors: d.colors };
+    const text = typeof d.text === 'string' ? d.text : data && data.text;
+    if (!d.on || typeof text !== 'string' || !Array.isArray(d.owners) || !Array.isArray(d.colors)) { off(); return; }
+    data = { text, owners: d.owners, colors: d.colors };
     for (const page of pages.keys()) touch(page);
   });
 })();

@@ -224,6 +224,18 @@
     // very long history can come back capped.
     const sweep = await resolveMissingAuthors(fileId, kind, creds, entries, users, last);
 
+    // The person signed in: the page shows their name, and the id their own
+    // edits carry is the one the page hands the revision endpoints.
+    let namedFromPage = false;
+    if (opts.me && opts.me.name && creds.ouid) {
+      const mine = users.find((u) => u.id === String(creds.ouid));
+      if (mine && !mine.name) { mine.name = opts.me.name; mine.email = mine.email || opts.me.email || null; namedFromPage = true; }
+      else if (!mine && entries.some((e) => e.userId === String(creds.ouid))) {
+        users.push({ id: String(creds.ouid), name: opts.me.name, email: opts.me.email || null, photo: null, color: null, anonymous: false });
+        namedFromPage = true;
+      }
+    }
+
     // Tab roster, read from the same stream that carries the edits.
     const tabEvents = [];
     const tabStats  = { seen: 0, unparsed: 0 };
@@ -249,8 +261,10 @@
       rosterWithNames: users.filter((u) => u.name).length,
       rosterWithEmails: users.filter((u) => u.email).length,
       authorsInLog: sweep.authorsInLog,
-      authorsUnresolved: sweep.unresolved,
+      authorsUnresolved: Math.max(0, sweep.unresolved - (namedFromPage ? 1 : 0)),
       rosterSweeps: sweep.calls,
+      namedFromPage,
+      authorlessRows: entries.filter((e) => e.userId === '0').length,
       tabCount: tabs.length,
       tabEvents: tabEvents.length,
       tabOpsSeen: tabStats.seen,
@@ -274,33 +288,56 @@
   }
 
   /**
-   * Fill roster gaps by paging the tile index.
+   * Fill roster gaps from the tile index.
    *
-   * Returns how many distinct authors the log actually contains and how many
-   * are still nameless afterwards — the number that matters for whether people
-   * can be told apart, and the one to look at when they cannot.
+   * A tile window's roster names the people who edited inside it, so each
+   * nameless author is looked up where they first appear in the log, rather
+   * than by paging from revision 1: on a long essay, someone who joins after
+   * the first few thousand revisions used to stay "Unknown" because the pages
+   * ran out first. Then, for anyone still nameless, a few pages from the start.
+   *
+   * Returns how many distinct authors the log contains and how many are still
+   * nameless afterwards — the number that matters for whether people can be
+   * told apart, and the one to look at when they cannot.
    */
   async function resolveMissingAuthors(fileId, kind, creds, entries, users, last) {
-    const known = new Set(users.map((u) => u.id));
+    const named = () => new Set(users.filter((u) => u.name || u.anonymous).map((u) => u.id));
     const inLog = new Set();
-    for (const e of entries) if (e.userId) inLog.add(e.userId);
+    const firstRev = new Map();
+    for (const e of entries) {
+      if (!e.userId || e.userId === '0') continue;
+      inLog.add(e.userId);
+      if (!firstRev.has(e.userId)) firstRev.set(e.userId, e.rev);
+    }
 
-    let missing = [...inLog].filter((id) => !known.has(id));
+    let have = named();
+    let missing = [...inLog].filter((id) => !have.has(id));
+    const WINDOW = 1500;
+    const MAX_CALLS = Math.min(40, 12 + missing.length * 2);
     let calls = 0;
 
-    const WINDOW = 1500;
-    const MAX_CALLS = 12;
-    for (let start = 1; missing.length && start <= last && calls < MAX_CALLS; start += WINDOW) {
+    const ask = async (start) => {
       const u = new URL(tilesUrl(fileId, kind, creds, WINDOW, true));
-      u.searchParams.set('start', String(start));
+      u.searchParams.set('start', String(Math.max(1, start)));
       const json = await getJSON(u.toString());
       calls++;
-      if (!json) continue;
-
+      if (!json) return;
       absorbUsers(json, users);
-      const now = new Set(users.map((x) => x.id));
-      missing = missing.filter((id) => !now.has(id));
+      have = named();
+      missing = missing.filter((id) => !have.has(id));
+    };
+
+    // Where each one first appears (a window starting just before it).
+    const starts = [...new Set(missing.map((id) => Math.max(1, (firstRev.get(id) || 1) - 20)))].sort((a, b) => a - b);
+    let covered = -Infinity;
+    for (const st of starts) {
+      if (!missing.length || calls >= MAX_CALLS) break;
+      if (st < covered) continue;                 // inside a window already asked for
+      await ask(st);
+      covered = st + WINDOW - 50;
     }
+    // Then from the start, for whoever is left.
+    for (let start = 1; missing.length && start <= last && calls < MAX_CALLS; start += WINDOW) await ask(start);
 
     return { authorsInLog: inLog.size, unresolved: missing.length, calls };
   }
@@ -331,12 +368,15 @@
   function absorbUsers(json, users) {
     let hits = 0;
 
-    const consider = (map) => {
+    const consider = (map, arraysToo) => {
       if (!map || typeof map !== 'object') return 0;
       const keys = Array.isArray(map) ? map.map((_, i) => i) : Object.keys(map);
       let n = 0;
       for (const k of keys) {
-        const u = map[k];
+        let u = map[k];
+        // Under a key that names a roster, a record may come as a list rather
+        // than an object; read the name, address and picture out of it.
+        if (arraysToo && Array.isArray(u)) u = userFromList(u);
         if (!u || typeof u !== 'object' || Array.isArray(u)) continue;
         if (!looksLikeUser(u)) continue;
         mergeUser(users, k, u);
@@ -346,7 +386,7 @@
     };
 
     for (const key of ['userMap', 'users', 'um', 'userMapping', 'authors']) {
-      hits += consider(json[key]);
+      hits += consider(json[key], !Array.isArray(json[key]));
     }
     if (hits) return;
 
@@ -375,6 +415,21 @@
         if (v && typeof v === 'object') stack.push(v);
       }
     }
+  }
+
+  /**
+   * A roster record that came as a list: the first string that reads as a
+   * name (letters, not a link, a colour or an id), the first address, the
+   * first picture link. Null when there is no name-like string at all.
+   */
+  function userFromList(list) {
+    const strs = list.filter((v) => typeof v === 'string' && v.trim());
+    const isLink = (v) => /^(https?:)?\/\//i.test(v);
+    const email = strs.find((v) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) || null;
+    const name = strs.find((v) => v !== email && !isLink(v) && !/^#?[0-9a-f]{3,8}$/i.test(v) &&
+      /\p{L}/u.test(v) && v.length <= 80 && !/^[A-Za-z0-9_-]{16,}$/.test(v)) || null;
+    if (!name && !email) return null;
+    return { name, email, photo: strs.find(isLink) || null, anonymous: list.includes(true) && !email && /^anonymous/i.test(name || '') };
   }
 
   /** A payload object shaped like a person rather than like configuration. */
@@ -1281,8 +1336,12 @@
   ];
 
   function analyze(timeline) {
+    // A step the log carries no author for, and that changed no text (Docs'
+    // own formatting and housekeeping), is nobody's: counting it made a
+    // phantom "Unknown" contributor with nothing written.
     const steps = timeline.steps.filter(
-      (s) => !s.offTab && (s.time > 0 || s.inserted || s.deleted));
+      (s) => !s.offTab && (s.time > 0 || s.inserted || s.deleted) &&
+        !((s.userId == null || s.userId === '0') && !s.inserted && !s.deleted));
     if (!steps.length) return emptyAnalysis(timeline);
 
     // Derived first: everything downstream depends on what counts as a paste.
@@ -1447,9 +1506,7 @@
     const prov = buildProvenance(timeline, pasteThreshold);
     let provenance = prov.tally;
     // Collapsed into one merged author: every run belongs to them.
-    const ownership = collapsed
-      ? (timeline.finalText.length ? [[0, timeline.finalText.length, '0']] : [])
-      : prov.runs;
+    const ownership = ownershipRuns(prov.marks, collapsed ? '0' : null);
     if (collapsed) {
       provenance = [provenance.reduce((acc, p) => ({
         userId: '0',
@@ -1578,6 +1635,8 @@
       .filter((u) => !u.name)
       .sort((a, b) => (a.first || Infinity) - (b.first || Infinity))
       .forEach((u) => {
+        // Text the log gives no author for is not a person.
+        if (u.id === '0') { u.name = 'Unattributed edits'; u.unattributed = true; return; }
         u.name = u.anonymous ? `Anonymous ${++nAnon}` : `Unknown ${++nUnknown}`;
         u.numbered = true;
       });
@@ -1661,24 +1720,29 @@
       t[m.m] += 1;
       t.total += 1;
     }
-    return { tally: [...tally.values()].sort((a, b) => b.total - a.total), runs: ownershipRuns(marks) };
+    return { tally: [...tally.values()].sort((a, b) => b.total - a.total), marks };
   }
 
   /**
-   * Who wrote each stretch of the surviving text, as runs over the final text:
-   * [start, length, userId], in order, covering every character. Adjacent
-   * characters by the same person form one run, so a document typed by two
-   * people taking turns is a few hundred runs, not one entry per character.
-   * (AWARE mode colours the document on screen from this.)
+   * Who wrote each stretch of the surviving text, and whether it arrived as a
+   * paste, as runs over the final text: [start, length, userId, pasted (1|0)],
+   * in order, covering every character. Adjacent characters by the same person
+   * that arrived the same way form one run, so a document typed by two people
+   * taking turns is a few hundred runs, not one entry per character. (AWARE
+   * mode colours the document on screen from this.) `as` puts every run under
+   * one id, for a roster collapsed into one merged author.
    */
-  function ownershipRuns(marks) {
+  function ownershipRuns(marks, as) {
     const runs = [];
-    let start = 0, who = null;
+    let start = 0, key = null, who = null, pasted = 0;
     for (let i = 0; i <= marks.length; i++) {
-      const u = i < marks.length ? (marks[i] ? marks[i].u : '0') : null;
-      if (i === marks.length || u !== who) {
-        if (who !== null && i > start) runs.push([start, i - start, who]);
-        start = i; who = u;
+      const m = i < marks.length ? marks[i] : null;
+      const u = as != null ? String(as) : (m ? m.u : '0');
+      const p = m && m.m === 'paste' ? 1 : 0;
+      const k = i < marks.length ? `${u}|${p}` : null;
+      if (i === marks.length || k !== key) {
+        if (key !== null && i > start) runs.push([start, i - start, who, pasted]);
+        start = i; key = k; who = u; pasted = p;
       }
     }
     return runs;

@@ -76,8 +76,9 @@ const ck = (name, got, want) => {
 // ── 2. Stretches and reading order ───────────────────────────────────────────
 {
   const owners = [[0, 5, 0], [5, 3, 1], [8, 10, 0], [18, 4, 2]];
-  ck('a run is split into each author\'s stretch', aware.stretchesIn(owners, 3, 7), [[0, 2, 0], [2, 5, 1], [5, 7, 0]]);
-  ck('  a run inside one author\'s stretch is one stretch', aware.stretchesIn(owners, 9, 4), [[0, 4, 0]]);
+  ck('a run is split into each author\'s stretch', aware.stretchesIn(owners, 3, 7), [[0, 2, 0, 0], [2, 5, 1, 0], [5, 7, 0, 0]]);
+  ck('  a run inside one author\'s stretch is one stretch', aware.stretchesIn(owners, 9, 4), [[0, 4, 0, 0]]);
+  ck('  a pasted stretch says so', aware.stretchesIn([[0, 4, 0, 0], [4, 6, 1, 1]], 2, 6), [[0, 2, 0, 0], [2, 6, 1, 1]]);
   ck('  and past the end there is nothing', aware.stretchesIn(owners, 40, 5), []);
 
   const r = (t, x, y, size = 30) => ({ t, x, y, size });
@@ -104,10 +105,14 @@ const ck = (name, got, want) => {
   const tl = VisorChangelog.buildTimeline(entries, users);
   const a = VisorChangelog.analyze(tl);
   ck('the fold gives the expected text', tl.finalText, 'big world. Second voice.');
-  ck('ownership runs cover the text exactly, in order', a.ownership, [[0, 10, '1'], [10, 14, '2']]);
+  ck('ownership runs cover the text exactly, in order', a.ownership, [[0, 10, '1', 0], [10, 14, '2', 0]]);
   ck('  and every character is owned', a.ownership.reduce((n, r) => n + r[1], 0), tl.finalText.length);
   ck('runs from marks: neighbours by one person merge', VisorChangelog.ownershipRuns([{ u: 'a' }, { u: 'a' }, { u: 'b' }, null, { u: 'a' }]),
-    [[0, 2, 'a'], [2, 1, 'b'], [3, 1, '0'], [4, 1, 'a']]);
+    [[0, 2, 'a', 0], [2, 1, 'b', 0], [3, 1, '0', 0], [4, 1, 'a', 0]]);
+  ck('  a pasted stretch is a run of its own, marked', VisorChangelog.ownershipRuns([{ u: 'a', m: 'typed' }, { u: 'a', m: 'paste' }, { u: 'a', m: 'paste' }, { u: 'a', m: 'typed' }]),
+    [[0, 1, 'a', 0], [1, 2, 'a', 1], [3, 1, 'a', 0]]);
+  ck('  collapsed into one author, the pastes are still marked', VisorChangelog.ownershipRuns([{ u: 'a', m: 'typed' }, { u: 'b', m: 'paste' }], '0'),
+    [[0, 1, '0', 0], [1, 1, '0', 1]]);
 }
 
 // ── 4. The switch ────────────────────────────────────────────────────────────
@@ -129,7 +134,7 @@ function loadContent({ stored = {} } = {}) {
       totals: { finalChars: 11, finalWords: 2, mutations: 2, activeMinutes: 1, pasteCount: 0, deleted: 0, spanDays: 1 },
       growth: [{ length: 1 }, { length: 11 }], sessions: [], heatmap: [], pastes: [], deletions: [],
       behavior: { enough: false }, calendar: {}, pasteThreshold: { value: 20, source: 'floor', samples: 0 },
-      ownership: [[0, 6, '1'], [6, 5, '2']]
+      ownership: [[0, 6, '1', 0], [6, 3, '2', 1], [9, 2, '2', 0]]
     }),
     constants: {}
   };
@@ -175,22 +180,60 @@ const settle = async (h, ms = 1) => {
     ck('  the choice is stored, for the side panel and next time', [h.store.visor_aware, h.store.visor_aware_seen], [true, true]);
     const last = h.posted[h.posted.length - 1];
     ck('  the page is sent the text, who wrote what, and the colours',
-      [last.on, last.text, last.owners, last.colors], [true, 'hello there', [[0, 6, 0], [6, 5, 1]], ['#2F6FC4', '#118A7E']]);
+      [last.on, last.text, last.owners, last.colors], [true, 'hello there', [[0, 6, 0, 0], [6, 3, 1, 0], [9, 2, 1, 0]], ['#2F6FC4', '#118A7E']]);
     const sentCount = h.posted.length;
     h.run('renderHUD(analysis)');
     ck('  a repaint of the bar doesn\'t resend the whole text', h.posted.length, sentCount);
 
+    // ── the panel beside the page ──
+    const panel = () => h.document.getElementById('visor-aware-panel');
+    ck('with AWARE on, the panel is up', !!panel(), true);
+    const rows = panel().querySelectorAll('[data-aw="person"]');
+    ck('  with everyone in it, in their colours', rows.map((r) => r.getAttribute('data-id')), ['1', '2']);
+    ck('  everyone shown to begin with', rows.map((r) => r.getAttribute('aria-pressed')), ['true', 'true']);
+
+    panel().fire('click', { target: rows[1] });
+    await settle(h, 50);
+    ck('switching Sam off leaves his text uncoloured', h.posted[h.posted.length - 1].owners, [[0, 6, 0, 0]]);
+    ck('  remembered for this document', h.store.visor_aware_hidden, { DOC1: ['2'] });
+    ck('  and his row shows he is off', panel().querySelectorAll('[data-aw="person"]')[1].getAttribute('aria-pressed'), 'false');
+    panel().fire('click', { target: panel().querySelectorAll('[data-aw="person"]')[1] });
+    await settle(h, 50);
+    ck('switching him back on colours him again', h.posted[h.posted.length - 1].owners.length, 3);
+    ck('  and the document is forgotten from the list', h.store.visor_aware_hidden, {});
+
+    panel().fire('click', { target: panel().querySelector('[data-aw="pastes"]') });
+    await settle(h, 50);
+    ck('"Show pastes" marks the pasted stretch', h.posted[h.posted.length - 1].owners, [[0, 6, 0, 0], [6, 3, 1, 1], [9, 2, 1, 0]]);
+    ck('  and is remembered', h.store.visor_aware_pastes, true);
+    ck('  its switch shows on', panel().querySelector('[data-aw="pastes"]').getAttribute('aria-checked'), 'true');
+
+    panel().fire('click', { target: panel().querySelector('[data-aw="min"]') });
+    await settle(h, 50);
+    ck('the panel folds to its title', [panel().classList.contains('is-min'), h.store.visor_aware_min], [true, true]);
+    panel().fire('click', { target: panel().querySelector('[data-aw="min"]') });
+    await settle(h, 50);
+    ck('  and opens again', panel().classList.contains('is-min'), false);
+
     h.setStored({ visor_aware: false });
     await settle(h, 50);
     ck('switching it off in the side panel turns the bar\'s button off', btn.getAttribute('aria-pressed'), 'false');
+    ck('  and the panel goes', !!panel(), false);
     ck('  and tells the page to remove the colours', h.posted[h.posted.length - 1], { source: 'VISOR_AWARE', on: false });
 
     h.setStored({ visor_aware: true });
     await settle(h, 50);
     ck('switching it on in the side panel colours again', h.posted[h.posted.length - 1].on, true);
 
+    panel().fire('click', { target: panel().querySelector('[data-aw="off"]') });
+    await settle(h, 50);
+    ck('the panel\'s × turns AWARE off', [h.store.visor_aware, !!panel(), h.posted[h.posted.length - 1].on], [false, false, false]);
+
+    h.setStored({ visor_aware: true });
+    await settle(h, 50);
     h.run('visorShutdown()');
     ck('when Visor shuts down, the colours are removed', h.posted[h.posted.length - 1], { source: 'VISOR_AWARE', on: false });
+    ck('  and the panel with them', !!panel(), false);
   }
   {
     const h = loadContent({ stored: { visor_aware: true, visor_aware_seen: true } });
