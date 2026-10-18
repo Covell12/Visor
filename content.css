@@ -329,6 +329,42 @@
 [data-visor-theme="dark"] .vh-btn-play { color: #0B1220; background: var(--v-accent); }
 [data-visor-theme="dark"] .vh-btn-play:hover { background: #8CC5F8; }
 
+/* AWARE: colour the document's text by who wrote it (on this screen only).
+   A pill rather than a disc, since it carries a word; three dots in the first
+   author colours say what it does. Filled when on. The NEW badge shows until
+   it has been used once. */
+.vh-btn-aware {
+  width: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 10px 0 8px;
+  font-size: 10.5px;
+  font-weight: 750;
+  letter-spacing: .06em;
+  white-space: nowrap;
+}
+.vh-aware-dots { display: inline-flex; gap: 2px; margin-right: 1px; }
+.vh-aware-dots i { width: 5px; height: 5px; border-radius: 50%; background: #2F6FC4; }
+.vh-aware-dots i:nth-child(2) { background: #118A7E; }
+.vh-aware-dots i:nth-child(3) { background: #B4603A; }
+.vh-btn-aware.is-on { color: #FFFFFF; background: var(--v-ink); }
+.vh-btn-aware.is-on:hover { color: #FFFFFF; background: #2A3442; }
+.vh-btn-aware.is-on .vh-aware-dots i { box-shadow: 0 0 0 1px rgba(255, 255, 255, .55); }
+[data-visor-theme="dark"] .vh-btn-aware.is-on { color: #0B1220; background: var(--v-ink); }
+[data-visor-theme="dark"] .vh-btn-aware.is-on:hover { color: #0B1220; background: #FFFFFF; }
+.vh-new {
+  padding: 1px 5px;
+  border-radius: 999px;
+  font-size: 8.5px;
+  font-weight: 800;
+  letter-spacing: .08em;
+  color: #FFFFFF;
+  background: var(--v-accent);
+}
+.vh-new[hidden] { display: none; }
+[data-visor-theme="dark"] .vh-new { color: #0B1220; }
+
 
 
 /* ── Replay overlay ────────────────────────────────────────────────────────*/

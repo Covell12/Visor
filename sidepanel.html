@@ -20,12 +20,15 @@
       </div>
     </div>
     <div class="header-actions">
-    <button id="btn-theme" class="v-icon-btn lift" title="Switch theme" aria-label="Switch between light and dark theme">
+    <button id="btn-theme" class="v-icon-btn lift" title="Theme: Light" aria-label="Theme: Light. Click for Dark.">
       <svg class="v-icon-sun" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
         <path d="M12 17a5 5 0 1 1 0-10 5 5 0 0 1 0 10zm0-13.2a1 1 0 0 1-1-1V1.8a1 1 0 1 1 2 0v1a1 1 0 0 1-1 1zm0 18.4a1 1 0 0 1-1-1v-1a1 1 0 1 1 2 0v1a1 1 0 0 1-1 1zM3.8 13h-1a1 1 0 1 1 0-2h1a1 1 0 1 1 0 2zm18.4 0h-1a1 1 0 1 1 0-2h1a1 1 0 1 1 0 2zM5.6 7a1 1 0 0 1-.7-.3l-.7-.7a1 1 0 0 1 1.4-1.4l.7.7A1 1 0 0 1 5.6 7zm13.5 13.5a1 1 0 0 1-.7-.3l-.7-.7a1 1 0 1 1 1.4-1.4l.7.7a1 1 0 0 1-.7 1.7zM4.9 20.5a1 1 0 0 1-.7-1.7l.7-.7a1 1 0 1 1 1.4 1.4l-.7.7a1 1 0 0 1-.7.3zM18.4 7a1 1 0 0 1-.7-1.7l.7-.7a1 1 0 1 1 1.4 1.4l-.7.7a1 1 0 0 1-.7.3z"/>
       </svg>
       <svg class="v-icon-moon hidden" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
         <path d="M21 13.2A9 9 0 1 1 10.8 3a7 7 0 0 0 10.2 10.2z"/>
+      </svg>
+      <svg class="v-icon-system hidden" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>
       </svg>
     </button>
     <button id="btn-refresh" class="v-icon-btn lift" title="Re-read revision history" aria-label="Re-read revision history">
@@ -147,6 +150,17 @@
           <em>Watch a character-by-character replay of the document development process.</em>
         </span>
       </button>
+
+      <!-- AWARE: colour the document's own text by who wrote it, on this screen only -->
+      <div class="v-card glass v-aware" id="aware-card">
+        <span class="v-aware-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span class="v-aware-copy">
+          <strong>AWARE <span id="aware-new" class="v-new" hidden>NEW</span></strong>
+          <em>Colour the text in the document by who wrote it, in each person's colour. Only on your screen: the document itself isn't changed.</em>
+        </span>
+        <button id="aware-switch" class="v-switch" role="switch" aria-checked="false"
+                aria-label="AWARE: colour the document's text by who wrote it"><i></i></button>
+      </div>
 
       <!-- Visor Classroom: send this document's figures to a group project -->
       <h3 class="v-section">Send to Visor</h3>

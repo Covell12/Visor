@@ -1444,7 +1444,12 @@
     const collapsed = contributors.length === 1 && contributors[0].collapsed;
     const reown = (x) => (collapsed ? { ...x, userId: '0' } : x);
 
-    let provenance = buildProvenance(timeline, pasteThreshold);
+    const prov = buildProvenance(timeline, pasteThreshold);
+    let provenance = prov.tally;
+    // Collapsed into one merged author: every run belongs to them.
+    const ownership = collapsed
+      ? (timeline.finalText.length ? [[0, timeline.finalText.length, '0']] : [])
+      : prov.runs;
     if (collapsed) {
       provenance = [provenance.reduce((acc, p) => ({
         userId: '0',
@@ -1487,6 +1492,7 @@
         spanDays: first && last ? Math.max(1, Math.round((last - first) / 86_400_000)) : 0
       },
       provenance,
+      ownership,
       pasteThreshold: pt,
       heatmap: buildHeatmap(steps),
       calendar: buildCalendar(steps, pasteThreshold),
@@ -1515,7 +1521,7 @@
         internalPastes: 0, internalPastedChars: 0,
         activeMinutes: 0, firstEdit: 0, lastEdit: 0, spanDays: 0
       },
-      provenance: [], heatmap: [], growth: [],
+      provenance: [], ownership: [], heatmap: [], growth: [],
       calendar: buildCalendar([], PASTE_FLOOR),
       pasteThreshold: { value: PASTE_FLOOR, source: 'floor', samples: 0 },
       behavior: {
@@ -1655,7 +1661,27 @@
       t[m.m] += 1;
       t.total += 1;
     }
-    return [...tally.values()].sort((a, b) => b.total - a.total);
+    return { tally: [...tally.values()].sort((a, b) => b.total - a.total), runs: ownershipRuns(marks) };
+  }
+
+  /**
+   * Who wrote each stretch of the surviving text, as runs over the final text:
+   * [start, length, userId], in order, covering every character. Adjacent
+   * characters by the same person form one run, so a document typed by two
+   * people taking turns is a few hundred runs, not one entry per character.
+   * (AWARE mode colours the document on screen from this.)
+   */
+  function ownershipRuns(marks) {
+    const runs = [];
+    let start = 0, who = null;
+    for (let i = 0; i <= marks.length; i++) {
+      const u = i < marks.length ? (marks[i] ? marks[i].u : '0') : null;
+      if (i === marks.length || u !== who) {
+        if (who !== null && i > start) runs.push([start, i - start, who]);
+        start = i; who = u;
+      }
+    }
+    return runs;
   }
 
   /** Cached per-step normalisation — the fold and provenance pass share it. */
@@ -1925,6 +1951,7 @@
     buildTimeline,
     analyze,
     normalize,
+    ownershipRuns,
     constants: { IDLE_GAP_MS, SESSION_GAP_MS, PASTE_FLOOR, DELETION_FLOOR }
   };
 })(typeof self !== 'undefined' ? self : this);

@@ -391,6 +391,7 @@ setTimeout(readIfLinked, 4000);
 function compactAnalysis(a) {
   return {
     ...a,
+    ownership: undefined,   // only AWARE mode, in this tab, needs the runs
     pastes: a.pastes.slice(0, 200).map((p) => ({ ...p, text: p.text.slice(0, 600) })),
     deletions: a.deletions.slice(0, 200).map((d) => ({ ...d, text: d.text.slice(0, 600) }))
   };
@@ -567,8 +568,20 @@ function applyPageTheme() {
   document.getElementById(VISOR_BTN_ID)?.setAttribute('data-visor-theme', pageTheme);
 }
 
+// The stored choice can be 'system'; the injected UI shows what that resolves
+// to on this computer right now, and follows it when the computer changes.
+let injectedThemeChoice = 'light';
+function resolveInjectedTheme(choice) {
+  if (choice === 'dark') return 'dark';
+  if (choice === 'system') {
+    try { return matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'; } catch (_) { return 'light'; }
+  }
+  return 'light';
+}
+
 function applyInjectedTheme(theme) {
-  injectedTheme = theme === 'dark' ? 'dark' : 'light';
+  injectedThemeChoice = ['light', 'dark', 'system'].includes(theme) ? theme : 'light';
+  injectedTheme = resolveInjectedTheme(injectedThemeChoice);
   for (const id of [VISOR_HUD_ID, VISOR_TAB_ID, 'visor-replay-overlay']) {
     document.getElementById(id)?.setAttribute('data-visor-theme', injectedTheme);
   }
@@ -596,7 +609,10 @@ try {
 
 applyPageTheme();
 // Docs can switch its own appearance while open; keep the injected chrome in step.
-matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyPageTheme);
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+  if (injectedThemeChoice === 'system') applyInjectedTheme('system');
+  else applyPageTheme();
+});
 [1200, 4000].forEach((t) => setTimeout(applyPageTheme, t));
 
 // ── Launcher button ──────────────────────────────────────────────────────────
@@ -1145,6 +1161,7 @@ function visorShutdown() {
   document.getElementById(VISOR_TAB_ID)?.remove();
   document.getElementById(VISOR_BTN_ID)?.remove();
   document.getElementById('visor-replay-overlay')?.remove();
+  awarePost({ on: false });
 }
 
 /** setInterval, but recorded so it can be stopped. */
@@ -1255,7 +1272,90 @@ function requestSidePanel(onFail) {
  * Writing text into existing nodes costs nothing and never touches the filtered
  * layer, so the glass is created exactly once per document.
  */
+// ── AWARE mode ───────────────────────────────────────────────────────────────
+//
+// Colours the document's text on this screen by who wrote it. The colouring
+// itself is aware.js, in the page (it has to watch Docs paint); this side owns
+// the switch and sends it the document's text, who wrote each stretch, and
+// each author's colour (the same colours as the bar and the side panel). Only
+// for Google Docs, only for someone who can see the history (editors), and
+// nothing leaves this tab: it's a window message to the page's own window.
+const AWARE_KEY = 'visor_aware';
+const AWARE_SEEN_KEY = 'visor_aware_seen';
+const AWARE_CHANNEL = 'VISOR_AWARE';
+let awareOn = false;
+let awareSeen = true;          // until storage says otherwise, no NEW label
+let awareSent = null;          // the analysis last sent, so the text isn't resent on every repaint
+
+function awarePost(msg) {
+  try { window.postMessage({ source: AWARE_CHANNEL, ...msg }, window.location.origin); } catch (_) { /* nothing to do */ }
+}
+
+/** What aware.js needs, from the current selection's fold. */
+function awarePayload(tl, a) {
+  if (!tl || !a || !Array.isArray(a.ownership)) return null;
+  const colors = [];
+  const index = new Map();
+  for (const c of a.contributors || []) { index.set(String(c.id), colors.length); colors.push(c.color); }
+  const owners = [];
+  for (const [start, len, who] of a.ownership) {
+    const c = index.get(String(who));
+    if (c != null) owners.push([start, len, c]);
+  }
+  return { text: tl.finalText || '', owners, colors };
+}
+
+function awareSync(force = false) {
+  if (getDocKind() !== 'doc') return;
+  if (!awareOn || visorStopped || !analysis) {
+    if (awareSent !== false) { awarePost({ on: false }); awareSent = false; }
+    return;
+  }
+  if (!force && awareSent === analysis) return;
+  const payload = awarePayload(timeline, analysis);
+  if (!payload) return;
+  awareSent = analysis;
+  awarePost({ on: true, ...payload });
+}
+
+function setAware(on) {
+  try { chrome.storage.local.set({ [AWARE_KEY]: !!on, [AWARE_SEEN_KEY]: true }); } catch (_) { /* no-op */ }
+  applyAware(!!on, true);
+}
+
+function applyAware(on, seen) {
+  awareOn = !!on;
+  if (seen) awareSeen = true;
+  const btn = document.getElementById(VISOR_HUD_ID)?.querySelector('[data-act="aware"]');
+  if (btn) {
+    btn.classList.toggle('is-on', awareOn);
+    btn.setAttribute('aria-pressed', String(awareOn));
+    btn.title = awareOn
+      ? 'AWARE is on: the text is coloured by who wrote it, on your screen only. Click to turn it off.'
+      : 'AWARE: colour this document\'s text by who wrote it. Only on your screen; the document isn\'t changed.';
+    const nw = btn.querySelector('.vh-new');
+    if (nw) nw.hidden = awareSeen;
+  }
+  awareSync(true);
+}
+
+try {
+  chrome.storage.local.get([AWARE_KEY, AWARE_SEEN_KEY], (res) => {
+    if (chrome.runtime.lastError) return;
+    awareSeen = !!(res && res[AWARE_SEEN_KEY]);
+    applyAware(!!(res && res[AWARE_KEY]), false);
+  });
+  // The side panel has the same switch; follow it.
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== 'local') return;
+    if (changes[AWARE_SEEN_KEY]) awareSeen = !!changes[AWARE_SEEN_KEY].newValue;
+    if (changes[AWARE_KEY]) applyAware(!!changes[AWARE_KEY].newValue, false);
+    else if (changes[AWARE_SEEN_KEY]) applyAware(awareOn, false);
+  });
+} catch (_) { /* off */ }
+
 function renderHUD(a) {
+  awareSync();
   if (!a) return;
   // A selection with nothing recorded in it — an empty or brand-new document
   // tab — must still repaint a bar that is already up. Returning early here is
@@ -1298,6 +1398,12 @@ function ensureHUD() {
         </button>
         <div class="vh-menu" role="listbox" aria-label="Document tab"></div>
       </div>
+      <button class="vh-btn vh-btn-aware" data-act="aware" aria-pressed="false"
+              title="AWARE: colour this document's text by who wrote it. Only on your screen; the document isn't changed.">
+        <span class="vh-aware-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span class="vh-aware-label">AWARE</span>
+        <span class="vh-new" hidden>NEW</span>
+      </button>
       <button class="vh-btn vh-btn-play" data-act="replay" title="Open live replay" aria-label="Open live replay">
         <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.2v13.6L19 12z"/></svg>
       </button>
@@ -1313,7 +1419,9 @@ function ensureHUD() {
   // the postMessage carrying the replay payload throw.
   hud.querySelector('[data-act="replay"]')?.addEventListener('click', () => openReplay());
   hud.querySelector('[data-act="collapse"]')?.addEventListener('click', () => toggleHUD(false));
+  hud.querySelector('[data-act="aware"]')?.addEventListener('click', () => setAware(!awareOn));
   wireHudFilter(hud);
+  requestAnimationFrame(() => applyAware(awareOn, false));
   return hud;
 }
 
@@ -1810,6 +1918,7 @@ visorInterval(() => {
   allUsers = [];
   tabState = { tabs: [], resolvable: false, pick: PICK_CURRENT, selected: null };
   hudChipKey = '';
+  awareSync();        // the colours belonged to the document that was open
   clearFoldCache();   // a different document: nothing cached applies, and the
                       // folds are the largest thing Visor holds on this page
   document.getElementById(VISOR_HUD_ID)?.remove();

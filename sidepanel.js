@@ -1029,22 +1029,61 @@ setInterval(() => {
   if (document.visibilityState === 'visible') quietRefresh(true);
 }, PANEL_REFRESH_MS);
 
+// ── AWARE ────────────────────────────────────────────────────────────────────
+//
+// The same switch as the AWARE button on the bar in the document: both read
+// and write one stored value, and the document's content script follows it.
+// Google Docs only (Slides aren't painted the same way).
+
+const AWARE_KEY = 'visor_aware';
+const AWARE_SEEN_KEY = 'visor_aware_seen';
+
+function syncAware(on, seen) {
+  const sw = $('aware-switch');
+  sw.setAttribute('aria-checked', String(!!on));
+  sw.classList.toggle('is-on', !!on);
+  $('aware-new').hidden = !!seen;
+  $('aware-card').hidden = !!(meta && meta.kind === 'slides');
+}
+
+$('aware-switch').addEventListener('click', () => {
+  const on = $('aware-switch').getAttribute('aria-checked') !== 'true';
+  chrome.storage.local.set({ [AWARE_KEY]: on, [AWARE_SEEN_KEY]: true });
+  syncAware(on, true);
+});
+
+chrome.storage.local.get([AWARE_KEY, AWARE_SEEN_KEY], (res) => syncAware(res && res[AWARE_KEY], res && res[AWARE_SEEN_KEY]));
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== 'local' || (!changes[AWARE_KEY] && !changes[AWARE_SEEN_KEY])) return;
+  chrome.storage.local.get([AWARE_KEY, AWARE_SEEN_KEY], (res) => syncAware(res && res[AWARE_KEY], res && res[AWARE_SEEN_KEY]));
+});
+
 // ── Theme ────────────────────────────────────────────────────────────────────
 
+// Three choices, so the button shows the one in force (a sun, a moon, or a
+// screen for System) and its tooltip says what a click will change it to.
+const THEME_NAMES = { light: 'Light', dark: 'Dark', system: 'System (matches your computer)' };
+
 function syncThemeIcon() {
-  const dark = document.documentElement.getAttribute('data-theme') === 'dark';
-  // Show the destination, not the current state: a moon means "go dark".
-  document.querySelector('.v-icon-sun').classList.toggle('hidden', !dark);
-  document.querySelector('.v-icon-moon').classList.toggle('hidden', dark);
+  const choice = visorThemeChoice(document.documentElement.getAttribute('data-theme-choice'));
+  document.querySelector('.v-icon-sun').classList.toggle('hidden', choice !== 'light');
+  document.querySelector('.v-icon-moon').classList.toggle('hidden', choice !== 'dark');
+  document.querySelector('.v-icon-system').classList.toggle('hidden', choice !== 'system');
+  const next = visorNextTheme(choice);
+  const btn = $('btn-theme');
+  btn.title = `Theme: ${THEME_NAMES[choice]}. Click for ${THEME_NAMES[next].split(' (')[0]}.`;
+  btn.setAttribute('aria-label', btn.title);
 }
 
 $('btn-theme').addEventListener('click', () => {
-  visorToggleTheme();
+  const choice = visorCycleTheme();
   syncThemeIcon();
-  ask('VISOR_SET_THEME', { theme: document.documentElement.getAttribute('data-theme') });
+  ask('VISOR_SET_THEME', { theme: choice });
 });
 
 visorInitTheme().then(syncThemeIcon);
+// The choice can change from elsewhere (theme.js follows storage); keep the icon in step.
+new MutationObserver(syncThemeIcon).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme-choice'] });
 
 // ── Interaction ──────────────────────────────────────────────────────────────
 
