@@ -14,6 +14,18 @@ function set(cls, text, enabled) {
   open.disabled = !enabled;
 }
 
+// The Visor account this extension is connected to (from the site's
+// /extension/connect page), if any
+chrome.storage.local.get('visorAccount', ({ visorAccount: acc }) => {
+  const el = document.getElementById('account');
+  if (acc && acc.user && !(acc.expiresAt && acc.expiresAt <= Date.now())) {
+    document.getElementById('accDot').className = 'p-dot p-dot-ok';
+    el.textContent = `Visor account: ${acc.user.name || acc.user.email || 'connected'}`;
+  } else {
+    el.textContent = `Visor account: not connected. Connect it at ${new URL(VISOR_DEFAULT_ORIGIN).host}/extension/connect`;
+  }
+});
+
 (async () => {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
 

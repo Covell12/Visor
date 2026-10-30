@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Visor — Who Wrote What: Google Docs History",
   "short_name": "Visor",
-  "version": "3.6",
+  "version": "3.7",
   "description": "Free and unlimited. See who wrote what in any Google Doc: contributions, replay, paste detection, and recovered deleted text.",
   "minimum_chrome_version": "116",
   "permissions": [
@@ -42,6 +42,17 @@
         "content.css"
       ],
       "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://visor-ed.web.app/*",
+        "https://visor-ed.firebaseapp.com/*"
+      ],
+      "js": [
+        "config.js",
+        "site-bridge.js"
+      ],
+      "run_at": "document_start"
     }
   ],
   "action": {

@@ -26,6 +26,28 @@ once so the content script attaches.
 
 ---
 
+## Connect to a Visor account
+
+On the Visor site, open **/extension/connect** (or **Connect it** on Home)
+while signed in, and click **Connect the Visor extension**. The site asks its
+server for an extension token and hands it to `site-bridge.js`, which runs only
+on the Visor addresses listed in `config.js`. The service worker keeps the
+token and the account's name in `chrome.storage.local`; **Disconnect** on the
+site removes it. The toolbar popup shows which account is connected.
+
+The Visor addresses are listed in two places that must match exactly:
+`VISOR_WEB_ORIGINS` in `config.js`, and the `matches` of the content script
+whose `js` includes `site-bridge.js` in `manifest.json`. To use a local copy of
+the site (`npm start`), add `http://localhost:3000` to both and reload the
+extension.
+
+This version connects only. Writing sessions (locked sessions, research
+recording, the side-panel editor, one-click cite) are not in it yet, and it
+says so when the site asks; the site's server will not start a session that
+needs the extension until the extension confirms the session itself.
+
+---
+
 ## Editors only
 
 Visor shows revision history **only to users with edit access**, which is the

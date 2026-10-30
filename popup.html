@@ -72,15 +72,23 @@
 
   <button id="open" class="p-btn" disabled>Open Visor</button>
 
+  <div class="p-card glass p-account" style="margin-top:11px">
+    <div class="p-status">
+      <span id="accDot" class="p-dot p-dot-off"></span>
+      <span id="account">Visor account: not connected</span>
+    </div>
+  </div>
+
   <div class="p-card glass" style="margin-top:11px">
     <div class="p-facts">
-      <div class="p-fact"><b>✓</b> No sign-in, no Google API, no account.</div>
+      <div class="p-fact"><b>✓</b> No Google sign-in, no Google API.</div>
       <div class="p-fact"><b>✓</b> Reads only the document you have open, from its own page.</div>
       <div class="p-fact"><b>✓</b> Nothing is uploaded, stored remotely, or shared.</div>
       <div class="p-fact"><b>✓</b> Editors only — view-only access shows no history.</div>
     </div>
   </div>
 
+  <script src="config.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>
