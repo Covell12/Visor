@@ -14,6 +14,16 @@ function set(cls, text, enabled) {
   open.disabled = !enabled;
 }
 
+// The Visor account this browser is connected to (from the site's
+// /extension/connect page). Most people using Docs history have none, so
+// nothing shows until there is one.
+chrome.storage.local.get('visorAuth', ({ visorAuth: auth }) => {
+  if (!auth || !auth.token || (auth.expiresAt && auth.expiresAt <= Date.now())) return;
+  const name = auth.user && (auth.user.name || auth.user.email);
+  document.getElementById('accountName').textContent = name ? `Connected to Visor as ${name}` : 'Connected to Visor';
+  document.getElementById('account').hidden = false;
+});
+
 (async () => {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
 

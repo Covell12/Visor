@@ -75,7 +75,7 @@ function load(seed) {
   const fetches = [];
   const beat = { active: true };   // what the server's beat answers (a test may add leaseSurf)
   const ctx = {
-    chrome, console, setTimeout, clearTimeout, setInterval, clearInterval, URL, TextEncoder, crypto: require('crypto').webcrypto,
+    chrome, console, setTimeout, clearTimeout, setInterval, clearInterval, URL, TextEncoder, atob, crypto: require('crypto').webcrypto,
     fetch: async (url, init) => {
       fetches.push([url, init && init.method, init && init.body ? JSON.parse(init.body) : null]);
       const body = /session\/beat/.test(url) ? { ...beat } : { ok: true };
@@ -421,6 +421,43 @@ const CITE_OFF = 'One-click citing is turned off for this assignment.';
   op.close();
   await new Promise((done) => setTimeout(done, 3300));
   const closedSends = () => P.fetches.filter(([url, , body]) => /\/api\/ext\/research$/.test(url) && body.docId === 'd10' && body.events.some((e) => e.type === 'panel-closed')).length;
+  // An extension token runs out: the site then sees "not connected" and offers
+  // to connect again, instead of a session failing when it starts
+  {
+    const T = load();
+    await settle();
+    const tokenUntil = (exp) => `${Buffer.from(JSON.stringify({ uid: 'u1', tid: 't1', exp })).toString('base64url')}.signature`;
+    const until = Date.now() + 60000;
+    await T.send({ channel: 'visor-bridge', type: 'CONNECT', payload: { token: tokenUntil(until), user: { id: 'u1', name: 'Sam' } } }, visor);
+    r = await T.send({ channel: 'visor-bridge', type: 'PING', payload: {} }, visor);
+    ck('a token in date is connected, and its expiry is kept', [r.connected, T.chrome.storage.local.data.visorAuth.expiresAt], [true, until]);
+    await T.send({ channel: 'visor-bridge', type: 'CONNECT', payload: { token: tokenUntil(Date.now() - 1000), user: { id: 'u1', name: 'Sam' } } }, visor);
+    r = await T.send({ channel: 'visor-bridge', type: 'PING', payload: {} }, visor);
+    ck('past its date: not connected, and forgotten', [r.connected, r.user, T.chrome.storage.local.data.visorAuth], [false, null, undefined]);
+    r = await T.send({ channel: 'visor-bridge', type: 'SESSION_START', payload: { docId: 'd1', assignmentId: 'a1', sessionToken: null, settings: {} } }, visor);
+    ck('  a session then says so, without calling the server', [r.ok, r.connected, T.fetches.some(([url]) => /session\/ack/.test(url))], [false, false, false]);
+    await T.send({ channel: 'visor-bridge', type: 'CONNECT', payload: { token: 'tok', user: { id: 'u1', name: 'Sam' } } }, visor);
+    r = await T.send({ channel: 'visor-bridge', type: 'PING', payload: {} }, visor);
+    ck('a token that can\'t be read stays connected; the server decides', r.connected, true);
+  }
+
+  // The toolbar popup names the connected account, and says nothing without one
+  {
+    const popupWith = (visorAuth) => {
+      const els = {};
+      const el = (id) => els[id] || (els[id] = { hidden: id === 'account', textContent: '', className: '', disabled: false, addEventListener() {} });
+      const c = { chrome: {
+        storage: { local: { get: (k, cb) => cb(visorAuth ? { visorAuth } : {}) } },
+        tabs: { query: async () => [], sendMessage() {} }, runtime: {}
+      }, document: { getElementById: el } };
+      vm.runInNewContext(fs.readFileSync(path.join(DIR, 'popup.js'), 'utf8'), c, { filename: 'popup.js' });
+      return [el('account').hidden, el('accountName').textContent];
+    };
+    ck('popup: no account, no line', popupWith(null), [true, '']);
+    ck('popup: connected', popupWith({ token: 't', user: { name: 'Sam' } }), [false, 'Connected to Visor as Sam']);
+    ck('popup: run out', popupWith({ token: 't', user: { name: 'Sam' }, expiresAt: Date.now() - 1 }), [true, '']);
+  }
+
   ck('open session: closing the panel changes nothing', [((await sessionOf(P)).researchQueue || []).some((e) => e.type === 'panel-closed'), closedSends(), callsOf(P.calls, 'tabs.sendMessage').length], [false, 0, 0]);
 
   console.log(out.every(Boolean) ? `\nall passed (${out.length} checks)` : `\n${out.filter((x) => !x).length} FAILED`);

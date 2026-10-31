@@ -47,9 +47,24 @@ async function patchState(fn) {
   await setState(out);
   return out;
 }
+// The token is "<base64url JSON>.<signature>"; the JSON carries exp (ms).
+function tokenExpiry(token) {
+  try {
+    const body = token.slice(0, token.lastIndexOf('.')).replace(/-/g, '+').replace(/_/g, '/');
+    const exp = JSON.parse(atob(body)).exp;
+    return typeof exp === 'number' ? exp : null;
+  } catch (_) { return null; }
+}
 async function getAuth() {
   const got = await chrome.storage.local.get(AUTH_KEY);
-  return got[AUTH_KEY] || null;
+  const auth = got[AUTH_KEY] || null;
+  // Past its date the server will refuse the token. Not connected, so the site
+  // offers to connect again rather than failing when a session starts.
+  if (auth && auth.expiresAt && auth.expiresAt <= Date.now()) {
+    await chrome.storage.local.remove(AUTH_KEY);
+    return null;
+  }
+  return auth;
 }
 
 // Kept in memory only so syncPanel (background.js) can answer without
@@ -454,7 +469,7 @@ async function handleBridge(msg, sender) {
     }
     case 'CONNECT': {
       if (!p.token) return { ok: false, error: 'no token' };
-      await chrome.storage.local.set({ [AUTH_KEY]: { token: String(p.token), user: p.user || null, origin: sender.origin, connectedAt: new Date().toISOString() } });
+      await chrome.storage.local.set({ [AUTH_KEY]: { token: String(p.token), user: p.user || null, origin: sender.origin, expiresAt: tokenExpiry(String(p.token)), connectedAt: new Date().toISOString() } });
       await chrome.storage.session.remove('visorLinked');
       return { ok: true };
     }
