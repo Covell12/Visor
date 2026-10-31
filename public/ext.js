@@ -67,7 +67,7 @@ VisorRouter.add('/extension/connect', async el => {
       ${!p.installed ? `
         <p>The Visor Chrome extension isn’t installed in this browser, or it’s turned off.</p>
         <ol class="small" style="line-height:1.8;">
-          <li>Install <b>Visor — Writing Sessions &amp; Google Docs History</b> from the Chrome Web Store (or ask your school; many install it for every student).</li>
+          <li>Install <a href="https://chromewebstore.google.com/detail/mienldgcindjfiinlbmjibgmemnapkog" target="_blank" rel="noopener"><b>Visor — Writing Sessions &amp; Google Docs History</b></a> from the Chrome Web Store (or ask your school; many install it for every student).</li>
           <li>Make sure it’s turned on at <span class="mono">chrome://extensions</span>.</li>
           <li>Reload this page.</li>
         </ol>
