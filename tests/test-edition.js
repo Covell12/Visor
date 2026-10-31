@@ -42,6 +42,24 @@ ck('  it says it is the Docs edition', /VISOR_EDITION = 'docs'/.test(read('editi
 ck('  the side panel doesn\'t load Visor Classroom\'s config', /config\.js/.test(read('sidepanel.html')), false);
 ck('  and hides the Send to Visor box', read('sidepanel.html').match(/class="[^"]*classroom-only[^"]*"/g).length, 2);
 
+// ── The Web Store release: both, without the dev address ─────────────────────
+{
+  const { build: buildRelease } = require('../tools/build-release.js');
+  const REL = fs.mkdtempSync(path.join(os.tmpdir(), 'visor-release-'));
+  buildRelease(REL);
+  const rel = (f) => fs.readFileSync(path.join(REL, f), 'utf8');
+  const rm = JSON.parse(rel('manifest.json'));
+  ck('the release is the Classroom edition', /VISOR_EDITION = 'classroom'/.test(rel('edition.js')), true);
+  ck('  with the writing-session code in it', ['session-bg.js', 'lockdown.js', 'research.js', 'cite.js', 'site-bridge.js', 'sessionpanel.html', 'blocked.html', 'permission.html'].filter((f) => !fs.existsSync(path.join(REL, f))), []);
+  ck('  and AWARE', rm.content_scripts.flatMap((cs) => cs.js).includes('aware.js'), true);
+  ck('  the bridge runs on the Visor site only', rm.content_scripts.find((cs) => cs.js.includes('site-bridge.js')).matches, ['https://visor-ed.web.app/*', 'https://visor-ed.firebaseapp.com/*']);
+  ck('  and localhost isn\'t trusted as Visor', /localhost/.test(rel('config.js')), false);
+  ck('  no tests, docs or tools in it', ['tests', 'docs', 'tools', 'SETUP.md', 'STORE-LISTING.md'].filter((f) => fs.existsSync(path.join(REL, f))), []);
+  ck('  the summary fits the store\'s 132 characters', rm.description.length <= 132, true);
+  ck('  and the name is the one the connect page tells students to install', rm.name, 'Visor — Writing Sessions & Google Docs History');
+  fs.rmSync(REL, { recursive: true, force: true });
+}
+
 // ── 2. The service worker, with only the v3.6 permissions ────────────────────
 {
   const imported = [];

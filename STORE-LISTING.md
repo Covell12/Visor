@@ -64,11 +64,11 @@ of the trademark exposure.
 **Already applied to `manifest.json`.** Pre-fills the dashboard from there.
 
 ```
-Visor Classroom companion: records research in writing sessions, cites pages in one click, shows who wrote what in Google Docs.
+See who wrote what in any Google Doc: replay, paste detection, color by author. Plus the companion to Visor Classroom sessions.
 ```
 
-Leads with the exact-match phrase, then the four things people search for by
-feature. No filler adjectives — every word is a term someone might type.
+Leads with what most people search for, then says what else it is, so the
+Classroom features aren't a surprise to a reviewer or a Docs user.
 
 ## Description  *(16,000 max — this is ~4,100)*
 
@@ -101,6 +101,13 @@ SEE WHO WROTE WHAT
 Attribution is per character. Every surviving character is traced back to the edit that inserted it, so each contributor's share is counted, not estimated. For every author: characters written, characters deleted, active writing time, and typing speed in words per minute.
 
 If two people worked on a document at once, you can see exactly which parts each of them wrote.
+
+
+AWARE MODE — COLOR THE DOCUMENT BY AUTHOR
+
+Turn on AWARE and the text inside the Google Doc itself takes each author's color, on your screen only. Nothing in the document changes and nobody else sees it. A panel beside the page lists everyone in their color: hide or show anyone with a click, highlight text pasted from outside the document in yellow, and text pasted from within it in light blue.
+
+Percentages leave out pasted text by default, so they show who wrote the document rather than who brought text into it. Each kind of paste has its own switch.
 
 
 REPLAY THE DOCUMENT BEING WRITTEN
@@ -336,8 +343,13 @@ Since 4.0.0, tick what writing sessions send to the Visor web app:
 - ☑ **Website content** — the title, author and date of a page the student cites.
 - ☑ **Authentication information** — the token that connects the extension to the student's Visor account.
 
-Nothing is collected outside a writing session, except a report a user chooses
-to send to a Visor project (figures only, never document text).
+- ☑ **Personally identifiable information** — the names and email addresses of a Doc's editors, as shown in its history, in a report sent to a Visor project.
+
+Nothing is collected outside a writing session, except reports to a Visor
+project: one a user chooses to send, or, for a Doc linked to their group
+project, sent automatically when a connected student opens it. Reports carry
+names, addresses and counted figures, never document text. AWARE, the
+percentage settings and everything else on Docs stay on the user's computer.
 
 Then tick all three certifications:
 
@@ -355,7 +367,35 @@ https://visor-ed.web.app/privacy
 
 ---
 
-# 3. Distribution tab
+# 3. Test instructions tab
+
+Reviewers can't see writing sessions without an account, and an item they can't
+test gets rejected. Make one teacher and one student account on the live site
+with email and password, join the student to a class with a published locked
+assignment, then fill in the details below. Use throwaway addresses and
+passwords used nowhere else; they stay valid until the review is done.
+
+```
+Visor has two parts.
+
+GOOGLE DOCS HISTORY (no account needed)
+Open any Google Doc you can edit that has some edit history, click the Visor button or the bar at the bottom, and open the side panel. Turn on AWARE on the bar to color the text by author.
+
+VISOR CLASSROOM WRITING SESSIONS (test account below)
+1. Go to https://visor-ed.web.app and sign in with email and password:
+   Student: [STUDENT EMAIL] / [STUDENT PASSWORD]
+2. Open https://visor-ed.web.app/extension/connect and click Connect the Visor extension.
+3. Open the class [CLASS NAME], then the assignment [ASSIGNMENT NAME], then Open the editor, then Start writing session. Allow research recording when asked.
+4. The Visor icon shows REC. Open a site that isn't on the allowed list, such as https://example.com: it shows Visor's "not allowed" page. Open https://chatgpt.com: it's blocked too.
+5. Right-click a page and choose Cite this page with Visor, or press Alt+Shift+C.
+6. End the session: the block is lifted, and nothing is recorded any more.
+
+To see what the teacher sees: [TEACHER EMAIL] / [TEACHER PASSWORD].
+```
+
+---
+
+# 4. Distribution tab
 
 | Field | Value |
 |---|---|
@@ -365,7 +405,7 @@ https://visor-ed.web.app/privacy
 
 ---
 
-# 4. After it is live — the part that actually moves ranking
+# 5. After it is live — the part that actually moves ranking
 
 The listing gets you into the result set. These decide your position in it:
 

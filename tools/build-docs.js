@@ -82,8 +82,8 @@ function build(OUT = OUT_DEFAULT, ZIP = ZIP_DEFAULT) {
   return OUT;
 }
 
-/** Every file the manifest and the pages name is in the build, and nothing of Visor Classroom is. */
-function check(OUT = OUT_DEFAULT) {
+/** The files the manifest, the pages and the service worker name that aren't in the build. */
+function missingFiles(OUT) {
   const m = JSON.parse(fs.readFileSync(path.join(OUT, 'manifest.json'), 'utf8'));
   const named = new Set([m.background.service_worker, m.action.default_popup, ...Object.values(m.icons || {}), ...Object.values(m.action.default_icon || {})]);
   if (m.side_panel) named.add(m.side_panel.default_path);
@@ -95,7 +95,12 @@ function check(OUT = OUT_DEFAULT) {
   }
   const bg = fs.readFileSync(path.join(OUT, m.background.service_worker), 'utf8');
   for (const [, list] of bg.matchAll(/^importScripts\(([^)]*)\)/gm)) for (const [, f] of list.matchAll(/'([^']+)'/g)) named.add(f);
-  const missing = [...named].filter((f) => !fs.existsSync(path.join(OUT, f)));
+  return [...named].filter((f) => !fs.existsSync(path.join(OUT, f)));
+}
+
+/** Every file named is in the build, and nothing of Visor Classroom is. */
+function check(OUT = OUT_DEFAULT) {
+  const missing = missingFiles(OUT);
   if (missing.length) throw new Error(`the build is missing ${missing.join(', ')}`);
   const leaked = ['session-bg.js', 'lockdown.js', 'research.js', 'research-capture.js', 'cite.js', 'sessionpanel.html', 'permission.html', ...CLASSROOM_ONLY]
     .filter((f) => fs.existsSync(path.join(OUT, f)));
@@ -109,4 +114,4 @@ if (require.main === module) {
   console.log(`permissions: ${m.permissions.join(', ')}; hosts: ${m.host_permissions.join(', ')}`);
 }
 
-module.exports = { build, check, VERSION, PERMISSIONS };
+module.exports = { build, check, missingFiles, VERSION, PERMISSIONS };

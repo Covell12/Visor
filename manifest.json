@@ -2,8 +2,8 @@
   "manifest_version": 3,
   "name": "Visor — Writing Sessions & Google Docs History",
   "short_name": "Visor",
-  "version": "4.2.1",
-  "description": "Visor Classroom companion: records research in writing sessions, cites pages in one click, shows who wrote what in Google Docs.",
+  "version": "4.3.0",
+  "description": "See who wrote what in any Google Doc: replay, paste detection, color by author. Plus the companion to Visor Classroom sessions.",
   "minimum_chrome_version": "116",
   "permissions": [
     "storage",

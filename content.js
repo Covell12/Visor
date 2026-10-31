@@ -377,12 +377,15 @@ function docMeta() {
  */
 function exportReport() {
   const strip = (list) => (list || []).map(({ text, ...rest }) => rest);
+  // AWARE's map of who wrote each stretch and Visor's own diagnostics stay on
+  // this computer: the site reads the counted figures and nothing else.
+  const { ownership, diagnostics, ...figures } = analysis;
   return {
     schema: 'visor-export/1',
     meta: docMeta(),
     scope: selectionLabel(),
     exportedAt: new Date().toISOString(),
-    analysis: { ...analysis, pastes: strip(analysis.pastes).slice(0, 300), deletions: strip(analysis.deletions).slice(0, 300) }
+    analysis: { ...figures, pastes: strip(figures.pastes).slice(0, 300), deletions: strip(figures.deletions).slice(0, 300) }
   };
 }
 
@@ -1471,12 +1474,12 @@ function renderAwarePanel() {
       </button>
     </div>
     <div class="va-body">
-      <p class="va-note">Each person's text in their colour. Click someone to hide or show their colour.</p>
+      <p class="va-note">Each person's text in their color. Click someone to hide or show their color.</p>
       <div class="va-people">
         ${people.map((c) => {
           const on = !hidden.has(String(c.id));
           return `<button type="button" class="va-person${on ? '' : ' is-off'}" data-aw="person" data-id="${esc(String(c.id))}"
-                    aria-pressed="${on}" title="${on ? 'Hide' : 'Show'} ${esc(c.name)}'s colour">
+                    aria-pressed="${on}" title="${on ? 'Hide' : 'Show'} ${esc(c.name)}'s color">
             <span class="va-swatch" style="--c:${esc(c.color || '#888')}"></span>
             <span class="va-name">${esc(c.name || 'Unknown')}</span>
             <span class="va-share">${Math.round((c.share || 0) * 100)}%</span>
@@ -1528,8 +1531,8 @@ function applyAware(on, seen) {
     btn.classList.toggle('is-on', awareOn);
     btn.setAttribute('aria-pressed', String(awareOn));
     btn.title = awareOn
-      ? 'AWARE is on: the text is coloured by who wrote it, on your screen only. Click to turn it off.'
-      : 'AWARE: colour this document\'s text by who wrote it. Only on your screen; the document isn\'t changed.';
+      ? 'AWARE is on: the text is colored by who wrote it, on your screen only. Click to turn it off.'
+      : 'AWARE: color this document\'s text by who wrote it. Only on your screen; the document isn\'t changed.';
     const nw = btn.querySelector('.vh-new');
     if (nw) nw.hidden = awareSeen;
   }
@@ -1628,7 +1631,7 @@ function ensureHUD() {
         <div class="vh-menu" role="listbox" aria-label="Document tab"></div>
       </div>
       <button class="vh-btn vh-btn-aware" data-act="aware" aria-pressed="false"
-              title="AWARE: colour this document's text by who wrote it. Only on your screen; the document isn't changed.">
+              title="AWARE: color this document's text by who wrote it. Only on your screen; the document isn't changed.">
         <span class="vh-aware-dots" aria-hidden="true"><i></i><i></i><i></i></span>
         <span class="vh-aware-label">AWARE</span>
         <span class="vh-new" hidden>NEW</span>

@@ -205,6 +205,8 @@ const settle = async (h, ms = 1) => {
     const sentCount = h.posted.length;
     h.run('renderHUD(analysis)');
     ck('  a repaint of the bar doesn\'t resend the whole text', h.posted.length, sentCount);
+    ck('a report for Visor leaves out AWARE\'s map of who wrote what, and the diagnostics',
+      h.run('(() => { analysis.diagnostics = { rows: 1 }; const r = exportReport().analysis; return ["ownership" in r, "diagnostics" in r, "contributors" in r]; })()'), [false, false, true]);
 
     // ── the panel beside the page ──
     const panel = () => h.document.getElementById('visor-aware-panel');
