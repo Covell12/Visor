@@ -158,7 +158,7 @@ The Docs history uses no Google API, no OAuth flow and no API key. It reads the 
 
 PRIVACY
 
-Docs history: the analysis happens in the tab and is discarded when you close it; nothing leaves the browser unless you choose Send to Visor (or your group's linked Doc sends its figures, never its text, to your project). Writing sessions: research is sent only to the Visor Classroom account you connected, only during a session, and only for assignments that record research. No keystrokes on other sites, no passwords, no page contents, no telemetry, no analytics. Visor never labels writing as AI-generated. Full policy: https://visor-ed.web.app/privacy
+Docs history: the analysis happens in the tab and is discarded when you close it; nothing leaves the browser unless you choose Send to Visor (or your group's linked Doc sends its figures, never its text, to your project). Writing sessions: research is sent only to the Visor Classroom account you connected, only during a session, and only for assignments that record research. No keystrokes on other sites, no passwords, no page contents beyond what a student copies or cites, no telemetry, no analytics. Visor never labels writing as AI-generated. Full policy: https://visor-ed.web.app/privacy
 
 
 EDITORS ONLY
@@ -243,7 +243,7 @@ feed ranking.
 ## Single purpose description
 
 ```
-Visor has one purpose: to show how a piece of student writing was made.
+Visor has one purpose: to show how a piece of writing was made.
 
 It does that in two places. For a Google Docs or Google Slides file the user can already edit, it reads the document's revision history and shows who wrote what and when, in a side panel. For an essay written in Visor Classroom (the Visor web app), it is the writing session's companion: while the session runs it records the research the student does for it, keeps a locked in-class session on the sites the teacher allowed, keeps the essay in the side panel, and adds citations. Outside a session those features are off.
 
@@ -261,7 +261,7 @@ Stores the user's display preferences (light, dark or matching the computer; whe
 ### `scripting`
 
 ```
-During a Visor writing session that records research, registers a small script on websites that notices when the student copies text (so a later paste into their essay can show where it came from); it is unregistered when the session ends. When the student clicks "Cite this page", it reads that page's title, author and date to build the citation.
+During a Visor writing session that records research, registers a small script on websites that notices when the student copies text (so a later paste into their essay can show where it came from); it is unregistered when the session ends. When the student clicks "Cite this page", it reads that page's title, author and date to build the citation and shows a short note on the page.
 ```
 
 ### `webNavigation`
@@ -279,7 +279,7 @@ Adds "Cite this page with Visor" to the right-click menu, only while a writing s
 ### `declarativeNetRequest`
 
 ```
-In a locked (in-class) writing session, shows Visor's "This site isn't allowed during your Visor session" page instead of sites the teacher didn't allow and AI sites. The rules are installed when the session starts and removed when it ends.
+In a locked (in-class) writing session, shows Visor's "This site isn't allowed during your Visor session" page instead of sites the teacher didn't allow and AI sites. In a session where the teacher chose to block AI sites, it does the same for AI sites only. The rules are installed when the session starts and removed when it ends.
 ```
 
 ### `alarms`
@@ -294,12 +294,6 @@ Once a minute during a writing session, sends the queued research events to the 
 Lets the Alt+Shift+C shortcut and the right-click item read the citation details (title, author, date) of the page the student is on when they ask to cite it.
 ```
 
-### Optional host permission — `<all_urls>`
-
-```
-Requested once, from a click, when a student starts their first writing session that records research. It is needed to record research on the sites the student visits during the session and to enforce a locked session's allowed sites. If declined, research isn't recorded. Visor never reads page content, keystrokes or form fields on other sites.
-```
-
 ### `sidePanel`
 
 ```
@@ -309,17 +303,22 @@ Visor's interface is a Chrome side panel: the Docs history panel beside a Google
 ### `tabs`
 
 ```
-Used to read the URL of the active tab so Visor can tell whether it is a Google Docs or Google Slides document, and therefore whether to enable its side panel and which tab to send messages to. The URL is matched against https://docs.google.com/document/ and https://docs.google.com/presentation/ and used for nothing else.
+Reads the address of the active tab so Visor can tell whether it is a Google Docs or Google Slides document, turn on its side panel there and message the right tab. Also finds an open Visor site tab when connecting, and opens the Chrome Web Store listing when the user clicks Rate Visor.
 
-Visor does not read browsing history, does not inspect the contents of other tabs, and does not observe anything outside the document being analysed. The permission is also used to open the Chrome Web Store listing in a new tab when the user clicks the "Rate Visor" button.
+During a Visor writing session it also keeps the session panel on every tab, records each page's address and title for the research log, sends tabs on sites a locked session doesn't allow to Visor's "not allowed" page, and returns the student to their essay. Outside a session, Visor keeps no record of the pages the user visits.
 ```
 
-### Host permission — `https://docs.google.com/document/*` and `https://docs.google.com/presentation/*`
+### Host permissions — one box for all of them
+
+The dashboard has a single box covering the two Google paths, the Visor site's
+content script and the optional `<all_urls>`.
 
 ```
-Visor's function is to analyse the writing history of a Google Docs or Google Slides file. To do that, its content script has to run on the document page and read that page's own revision history from the same origin — https://docs.google.com/document/<id>/revisions/... — using the session the user is already signed in to. Google returns that history only to users with edit access, and Visor enforces the same rule.
+Google Docs and Slides (docs.google.com/document/* and /presentation/*): Visor's content script runs on the document page and reads that page's own revision history from the same origin, using the user's existing sign-in. Google returns it only to users with edit access. The analysis is computed in the tab; only names, email addresses and counted figures, never document text, go to the user's own Visor project.
 
-The permission is scoped to the two URL paths where documents live. It is not requested for any other site, and not for the rest of docs.google.com. Visor makes no request to any host other than the document the user has open, and no data leaves the browser: the analysis is computed in the tab and discarded when the tab closes.
+Visor website (visor-ed.web.app, visor-ed.firebaseapp.com): a small script lets the site connect the extension to the user's account and start writing sessions.
+
+All sites (<all_urls>, optional): requested once, from a click, at a student's first session that records research. It records research on the sites they visit and enforces a locked session's allowed sites, and is not used outside a session. It reads page addresses and titles, text the student copies, and citation details, never keystrokes or form fields. If declined, research isn't recorded.
 ```
 
 ### Are you using remote code?
@@ -339,8 +338,8 @@ All extension code ships inside the package. Visor loads no script from any remo
 Since 4.0.0, tick what writing sessions send to the Visor web app:
 
 - ☑ **Web history** — pages visited and searches made during a writing session.
-- ☑ **User activity** — when the student copies text on a page during a session (length, a hash and the first 140 characters), and time on each page.
-- ☑ **Website content** — the title, author and date of a page the student cites.
+- ☑ **User activity** — when the student copies text on a page during a session, and time on each page.
+- ☑ **Website content** — text the student copies during a session (its length, a hash and the first 140 characters), and the title, author and date of a page they cite.
 - ☑ **Authentication information** — the token that connects the extension to the student's Visor account.
 
 - ☑ **Personally identifiable information** — the names and email addresses of a Doc's editors, as shown in its history, in a report sent to a Visor project.
