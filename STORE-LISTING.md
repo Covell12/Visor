@@ -70,25 +70,13 @@ See who wrote what in any Google Doc: replay, paste detection, color by author. 
 Leads with what most people search for, then says what else it is, so the
 Classroom features aren't a surprise to a reviewer or a Docs user.
 
-## Description  *(16,000 max — this is ~4,100)*
+## Description  *(16,000 max — this is ~6,000)*
 
 The first two lines are what shows in search previews, so they repeat the core
 phrase and answer "what is this" immediately.
 
 ```
-Visor is the companion to Visor Classroom, where students write essays in writing sessions their teacher starts, and it shows the full revision history of any Google Doc: who wrote what, when, what was pasted in, and what was deleted along the way.
-
-
-FOR VISOR CLASSROOM WRITING SESSIONS
-
-Connect the extension to your Visor account once. Then, only while a writing session is running (the Visor icon shows a red REC):
-
-• Your essay sits in Chrome's side panel next to the pages you're researching.
-• Cite this page (or Alt+Shift+C) reads the page's author, title and date and adds an MLA, APA or Chicago citation to your essay and its Works Cited.
-• The research you do for the essay is recorded for your teacher: your searches, the pages you visit and how long, and text you copy, so a paste can show where it came from.
-• In a locked, in-class session, sites your teacher didn't allow (and AI sites) show a "not allowed" page instead.
-
-Outside a session, none of that runs. Group projects: if your teacher linked your group's Google Doc, opening it sends its history (never its text) to your group's project.
+See the full revision history of any Google Doc: who wrote what, when, what was pasted in, and what was deleted along the way. Visor is also the companion to Visor Classroom, where students write essays in writing sessions their teacher starts.
 
 
 GOOGLE DOCS HISTORY
@@ -151,6 +139,18 @@ Visor reports one counted quantity: the share of characters that arrived from ou
 Treat what you see as evidence to discuss, never as a verdict on a person.
 
 
+FOR VISOR CLASSROOM WRITING SESSIONS
+
+Connect the extension to your Visor account once. Then, only while a writing session is running (the Visor icon shows a red REC):
+
+• Your essay sits in Chrome's side panel next to the pages you're researching.
+• Cite this page (or Alt+Shift+C) reads the page's author, title and date and adds an MLA, APA or Chicago citation to your essay and its Works Cited.
+• If the assignment records research, the research you do for the essay is recorded for your teacher: your searches, the pages you visit and how long, and text you copy, so a paste can show where it came from.
+• In a locked, in-class session, sites your teacher didn't allow (and AI sites) show a "not allowed" page instead.
+
+Outside a session, none of that runs. Group projects: if your teacher linked your group's Google Doc, opening it sends its figures and its editors' names and email addresses, never its text, to your group's project.
+
+
 NO API, NO SIGN-IN FOR DOCS HISTORY
 
 The Docs history uses no Google API, no OAuth flow and no API key. It reads the document you already have open, using the session you are already signed in to, and computes everything locally.
@@ -166,7 +166,7 @@ EDITORS ONLY
 Visor shows revision history only to people with edit access — the same rule Google Docs applies to its own version history. With view-only access the panel shows a locked state and performs no analysis.
 
 
-Light and dark themes included. Works on Google Docs and Google Slides.
+Light, dark and system themes included. Works on Google Docs and Google Slides.
 ```
 
 ### The search terms this covers, and where
