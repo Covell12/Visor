@@ -222,6 +222,41 @@ function presence(on) {
 }
 document.addEventListener('visibilitychange', sendVisibility);
 
+// ── This page's reliability grade (source-grade.js) ────────────────────────
+// The tab in front, graded from its address, updated as the student moves
+// between pages. Not for Visor itself, extension pages or a blank tab.
+let gradeUrl = null;
+const gradeOf = (src) => { try { return VisorSourceGrade.grade(src); } catch (_) { return null; } };
+function gradeNotes(g) {
+  const mark = { 1: '+', '-1': '−', 0: '•' };
+  return `<p>${esc(g.why)}</p>${g.notes.length ? `<ul>${g.notes.map((n) => `<li><i class="e${n.effect}">${mark[n.effect]}</i>${esc(n.text)}</li>`).join('')}</ul>` : ''}
+    <p class="sp-grade-how">Visor grades a page by the kind of site it’s on. It doesn’t read the page or check its facts: it’s a place to start, and you decide whether to trust it. Citing it can add the author and date.</p>`;
+}
+async function updateGrade() {
+  const card = $('sp-grade');
+  let tab = null;
+  try { [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true }); } catch (_) {}
+  const url = (tab && tab.url) || '';
+  const g = state && /^https?:/i.test(url) && !VisorConfig.isVisorOrigin(url) ? gradeOf({ type: 'webpage', url, authors: [] }) : null;
+  if (!g) { card.hidden = true; gradeUrl = null; return; }
+  if (url === gradeUrl && !card.hidden) return;
+  gradeUrl = url;
+  card.hidden = false;
+  card.className = `sp-card sp-grade g-${g.letter}`;
+  $('sp-grade-letter').textContent = g.letter;
+  $('sp-grade-word').textContent = `This page: ${g.letter} · ${g.word}`;
+  $('sp-grade-label').textContent = `${g.label}${g.host ? ` · ${g.host}` : ''}`;
+  $('sp-grade-more').innerHTML = gradeNotes(g);
+}
+$('sp-grade-btn').addEventListener('click', () => {
+  const more = $('sp-grade-more'), open = more.hidden;
+  more.hidden = !open;
+  $('sp-grade-btn').setAttribute('aria-expanded', String(open));
+});
+chrome.tabs.onActivated.addListener(() => { updateGrade(); });
+chrome.tabs.onUpdated.addListener((id, info) => { if (info.url) updateGrade(); });
+chrome.windows.onFocusChanged.addListener(() => { updateGrade(); });
+
 // The cite button (formatting and insertion happen in the editor)
 $('sp-cite').addEventListener('click', async () => {
   const btn = $('sp-cite');
@@ -232,7 +267,8 @@ $('sp-cite').addEventListener('click', async () => {
   btn.disabled = false;
   if (!r || !r.ok) { status.className = 'sp-cite-status warn'; status.textContent = (r && r.error) || 'Couldn’t read this page.'; return; }
   status.className = 'sp-cite-status ok';
-  status.textContent = r.message || `Cited: ${r.meta && r.meta.title ? r.meta.title : 'this page'}`;
+  const cg = r.meta ? gradeOf(r.meta) : null;
+  status.textContent = (r.message || `Cited: ${r.meta && r.meta.title ? r.meta.title : 'this page'}`) + (cg ? ` · Reliability ${cg.letter} (${cg.word})` : '');
   setTimeout(() => { if (status.textContent.startsWith('Cited')) status.textContent = ''; }, 6000);
 });
 
@@ -254,7 +290,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   return false;
 });
 
-chrome.storage.onChanged.addListener((changes, area) => { if (area === 'session' && changes.visorSession) render().then(updateDocLink); });
+chrome.storage.onChanged.addListener((changes, area) => { if (area === 'session' && changes.visorSession) render().then(updateDocLink).then(updateGrade); });
 setInterval(tick, 1000);
 setInterval(render, 30000);
-render().then(updateDocLink);
+render().then(updateDocLink).then(updateGrade);

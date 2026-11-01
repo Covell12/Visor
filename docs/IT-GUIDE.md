@@ -4,7 +4,7 @@ This guide is for the person who manages Chromebooks or Chrome browsers at a sch
 
 ## What the extension does
 
-Visor Classroom is a web app (`https://visor-ed.web.app`, or your school's own copy). Students write essays in its editor during a **writing session** that their teacher starts. The Visor Chrome extension is the session's companion:
+Visor Classroom is a web app (`https://visor-ed.com`, also at `https://visor-ed.web.app`, or your school's own copy). Students write essays in its editor during a **writing session** that their teacher starts. The Visor Chrome extension is the session's companion:
 
 - **Only during an active session**, and with a red **REC** badge on its toolbar icon, it records the student's research: searches, pages visited and for how long, text copied (a hash, the length and the first 140 characters), visits to AI sites, and citations added.
 - In a **locked** session (an in-class essay) it keeps the student on the sites the teacher allowed and sends everything else to a "This site isn't allowed during your Visor session" page.
@@ -29,7 +29,7 @@ A force-installed extension can't be turned off or removed by the student.
 
 Recording research and enforcing the allowed-sites list need the extension's optional permission to see the sites a student visits (`<all_urls>`). Students are asked for it once, in a small Visor window, the first time they start a research-recorded session. To skip that prompt, allow it by policy for the extension (Admin console → the extension → **Permissions and URL access**, or the `ExtensionSettings` policy with `runtime_allowed_hosts: ["*://*/*"]`). A locked session won't start until the permission is granted, because Chrome only lets an extension redirect pages on sites it may see.
 
-### If your Visor address isn't visor-ed.web.app
+### If your Visor address isn't visor-ed.com or visor-ed.web.app
 
 The extension only talks to the Visor addresses listed in two places that must match: `config.js` (`VISOR_WEB_ORIGINS`) and the `matches` of the `site-bridge.js` content script in `manifest.json`. A school running its own copy at another domain needs a build of the extension with that domain in both places (see `SETUP.md`).
 

@@ -460,8 +460,8 @@ async function handleBridge(msg, sender) {
       const s = await getState();
       return {
         ok: true, installed: true, version: chrome.runtime.getManifest().version,
-        connected: !!(auth && auth.token && auth.origin === sender.origin),
-        user: auth && auth.origin === sender.origin ? auth.user : null,
+        connected: !!(auth && auth.token && VisorConfig.sameVisorSite(auth.origin, sender.origin)),
+        user: auth && VisorConfig.sameVisorSite(auth.origin, sender.origin) ? auth.user : null,
         hasHostPermission: await hasHostPermission(),
         lockActive: !!(s && s.lockActive),
         session: s && s.active ? { docId: s.docId, assignmentId: s.assignmentId, researchMode: !!s.researchMode, panelOpen: panelVisible() } : null

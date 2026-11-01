@@ -52,8 +52,9 @@ ck('  and hides the Send to Visor box', read('sidepanel.html').match(/class="[^"
   ck('the release is the Classroom edition', /VISOR_EDITION = 'classroom'/.test(rel('edition.js')), true);
   ck('  with the writing-session code in it', ['session-bg.js', 'lockdown.js', 'research.js', 'cite.js', 'site-bridge.js', 'sessionpanel.html', 'blocked.html', 'permission.html'].filter((f) => !fs.existsSync(path.join(REL, f))), []);
   ck('  and AWARE', rm.content_scripts.flatMap((cs) => cs.js).includes('aware.js'), true);
-  ck('  the bridge runs on the Visor site only', rm.content_scripts.find((cs) => cs.js.includes('site-bridge.js')).matches, ['https://visor-ed.web.app/*', 'https://visor-ed.firebaseapp.com/*']);
+  ck('  the bridge runs on the Visor site only', rm.content_scripts.find((cs) => cs.js.includes('site-bridge.js')).matches, ['https://visor-ed.com/*', 'https://visor-ed.web.app/*', 'https://visor-ed.firebaseapp.com/*']);
   ck('  and localhost isn\'t trusted as Visor', /localhost/.test(rel('config.js')), false);
+  ck('  and config.js lists the same addresses', rel('config.js').match(/VISOR_WEB_ORIGINS = \[([^\]]*)\]/)[1].match(/https:[^']+/g).map((o) => `${o}/*`), rm.content_scripts.find((cs) => cs.js.includes('site-bridge.js')).matches);
   ck('  no tests, docs or tools in it', ['tests', 'docs', 'tools', 'SETUP.md', 'STORE-LISTING.md'].filter((f) => fs.existsSync(path.join(REL, f))), []);
   ck('  the summary fits the store\'s 132 characters', rm.description.length <= 132, true);
   ck('  and the name is the one the connect page tells students to install', rm.name, 'Visor — Writing Sessions & Google Docs History');

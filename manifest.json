@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Visor — Writing Sessions & Google Docs History",
   "short_name": "Visor",
-  "version": "4.3.1",
+  "version": "4.4.1",
   "description": "See who wrote what in any Google Doc: replay, paste detection, color by author. Plus the companion to Visor Classroom sessions.",
   "minimum_chrome_version": "116",
   "permissions": [
@@ -67,6 +67,7 @@
     {
       "matches": [
         "http://localhost:3000/*",
+        "https://visor-ed.com/*",
         "https://visor-ed.web.app/*",
         "https://visor-ed.firebaseapp.com/*"
       ],

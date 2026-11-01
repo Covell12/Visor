@@ -421,6 +421,25 @@ const CITE_OFF = 'One-click citing is turned off for this assignment.';
   op.close();
   await new Promise((done) => setTimeout(done, 3300));
   const closedSends = () => P.fetches.filter(([url, , body]) => /\/api\/ext\/research$/.test(url) && body.docId === 'd10' && body.events.some((e) => e.type === 'panel-closed')).length;
+  // Visor's public addresses are one site: a connection made on one holds on the
+  // others, and the bridge answers on each. A local server keeps its own.
+  {
+    const S = load();
+    const site = (origin) => ({ origin, url: `${origin}/extension/connect`, tab: { id: 5, windowId: 1 } });
+    const ping = (origin) => S.send({ channel: 'visor-bridge', type: 'PING', payload: {} }, site(origin));
+    await S.send({ channel: 'visor-bridge', type: 'CONNECT', payload: { token: 'tok', user: { id: 'u1', name: 'Sam' } } }, site('https://visor-ed.web.app'));
+    for (const origin of ['https://visor-ed.com', 'https://visor-ed.web.app', 'https://visor-ed.firebaseapp.com']) {
+      const r = await ping(origin);
+      ck(`connected on visor-ed.web.app: ${origin} sees it`, [r.connected, r.user && r.user.name], [true, 'Sam']);
+    }
+    const local = await ping('http://localhost:3000');
+    ck('  a local server doesn\'t', [local.installed, local.connected, local.user], [true, false, null]);
+    const lookalike = await ping('https://visor-ed.com.evil.example');
+    ck('  and a lookalike address gets no answer', [lookalike.ok, lookalike.connected], [false, undefined]);
+    await S.send({ channel: 'visor-bridge', type: 'CONNECT', payload: { token: 'tok2', user: { id: 'u1', name: 'Sam' } } }, site('https://visor-ed.com'));
+    ck('connecting on visor-ed.com works, and is kept on the web.app address too', [(await ping('https://visor-ed.com')).connected, (await ping('https://visor-ed.web.app')).connected], [true, true]);
+  }
+
   // An extension token runs out: the site then sees "not connected" and offers
   // to connect again, instead of a session failing when it starts
   {

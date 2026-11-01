@@ -316,7 +316,7 @@ content script and the optional `<all_urls>`.
 ```
 Google Docs and Slides (docs.google.com/document/* and /presentation/*): Visor's content script runs on the document page and reads that page's own revision history from the same origin, using the user's existing sign-in. Google returns it only to users with edit access. The analysis is computed in the tab; only names, email addresses and counted figures, never document text, go to the user's own Visor project.
 
-Visor website (visor-ed.web.app, visor-ed.firebaseapp.com): a small script lets the site connect the extension to the user's account and start writing sessions.
+Visor website (visor-ed.com, visor-ed.web.app, visor-ed.firebaseapp.com): a small script lets the site connect the extension to the user's account and start writing sessions.
 
 All sites (<all_urls>, optional): requested once, from a click, at a student's first session that records research. It records research on the sites they visit and enforces a locked session's allowed sites, and is not used outside a session. It reads page addresses and titles, text the student copies, and citation details, never keystrokes or form fields. If declined, research isn't recorded.
 ```

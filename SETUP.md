@@ -548,7 +548,7 @@ The extension talks only to the Visor addresses it lists, in **two places that m
 1. `config.js` → `VISOR_WEB_ORIGINS` (and `VISOR_DEFAULT_ORIGIN`, used to format a citation when not connected).
 2. `manifest.json` → the `matches` of the content script whose `js` is `site-bridge.js`.
 
-The source lists `http://localhost:3000` (for local testing), `https://visor-ed.web.app` and `https://visor-ed.firebaseapp.com`. The Web Store build made by `node tools/build-release.js` removes the localhost entry from both places; upload that build, never the source folder. For another address (a custom domain, a school's own copy), add it to both, raise the version, and reload or republish. `DEFAULT_AI_SITES` in `config.js` is a copy of the web app's `lib/sites.js`; keep them the same.
+The source lists `http://localhost:3000` (for local testing), `https://visor-ed.com`, `https://visor-ed.web.app` and `https://visor-ed.firebaseapp.com`. The last three are the same site, so a connection made on one holds on the others. The Web Store build made by `node tools/build-release.js` removes the localhost entry from both places; upload that build, never the source folder. For another address (a custom domain, a school's own copy), add it to both, raise the version, and reload or republish. `DEFAULT_AI_SITES` in `config.js` is a copy of the web app's `lib/sites.js`; keep them the same.
 
 ### Permissions, and why (for the Chrome Web Store)
 

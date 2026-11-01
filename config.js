@@ -19,6 +19,7 @@
 (function (root) {
   const VISOR_WEB_ORIGINS = [
     'http://localhost:3000',
+    'https://visor-ed.com',
     'https://visor-ed.web.app',
     'https://visor-ed.firebaseapp.com'
   ];
@@ -40,5 +41,11 @@
     try { return VISOR_WEB_ORIGINS.includes(new URL(url).origin); } catch (_) { return false; }
   }
 
-  root.VisorConfig = { VISOR_WEB_ORIGINS, VISOR_DEFAULT_ORIGIN, DEFAULT_AI_SITES, isVisorOrigin };
+  // Visor's public addresses are one site with one server, so a connection made
+  // on any of them holds on all of them. A local test server stays on its own.
+  function sameVisorSite(a, b) {
+    return a === b || [a, b].every((o) => VISOR_WEB_ORIGINS.includes(o) && o.startsWith('https:'));
+  }
+
+  root.VisorConfig = { VISOR_WEB_ORIGINS, VISOR_DEFAULT_ORIGIN, DEFAULT_AI_SITES, isVisorOrigin, sameVisorSite };
 })(typeof self !== 'undefined' ? self : this);
