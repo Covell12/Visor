@@ -945,7 +945,7 @@ async function writerFlush({ unload = false } = {}) {
       else if (e.status === 401) wsLost(e.message);
       // The server won't take these edits however often they're sent: start again from its copy
       else if (e.status === 400 || e.status === 413) await writerRejected(e);
-      else { writerSetSaved('unsaved'); toast(e.message, 'err'); writerRetrySoon(); }
+      else { writerSetSaved('unsaved'); if (!(e.status >= 500)) toast(e.message, 'err'); writerRetrySoon(); } // a server hiccup: the header says unsaved, and it keeps trying
     } finally { flushing = null; }
   })();
   return flushing;

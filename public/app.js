@@ -38,7 +38,7 @@ async function api(path, { method = 'GET', body } = {}) {
   const r = await fetch(path, { method, headers: body ? { 'Content-Type': 'application/json' } : undefined, body: body ? JSON.stringify(body) : undefined });
   let data = {};
   try { data = await r.json(); } catch {}
-  if (!r.ok) { const e = new Error(localWhen(data.error) || `Request failed (${r.status})`); e.status = r.status; e.data = data; throw e; }
+  if (!r.ok) { const e = new Error(localWhen(data.error) || (r.status >= 500 ? 'Visor couldn’t do that just now. Please try again in a moment.' : `Request failed (${r.status})`)); e.status = r.status; e.data = data; throw e; }
   return data;
 }
 
