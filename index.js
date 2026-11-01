@@ -23,6 +23,12 @@ const { defineSecret } = require('firebase-functions/params');
 // Stored in Google Secret Manager: firebase functions:secrets:set GEMINI_API_KEY
 const GEMINI_API_KEY = defineSecret('GEMINI_API_KEY');
 
+// The password for the email account that sends password resets (lib/mail.js).
+// Stored the same way: firebase functions:secrets:set MAIL_PASSWORD
+// Until that secret exists these stay off, because a deploy fails on a missing
+// one. Then: uncomment the next line, add MAIL_PASSWORD to api's secrets, deploy.
+// const MAIL_PASSWORD = defineSecret('MAIL_PASSWORD');
+
 // us-central1 matches the "nam5 (United States)" Firestore location and the
 // free tier of Cloud Storage. maxInstances caps how far traffic can scale (and cost).
 setGlobalOptions({ region: 'us-central1', maxInstances: 10 });

@@ -42,6 +42,8 @@ const citeLookup = require('./lib/cite-lookup');
 const sourceGrade = require('./lib/source-grade');
 const processLib = require('./lib/process');
 const discussionLib = require('./lib/discussion');
+const mail = require('./lib/mail');
+const throttle = require('./lib/throttle');
 // The document format shared with the editor (a copy of public/doc-format.js)
 const docFormat = require('./lib/doc-format.js');
 
@@ -178,8 +180,11 @@ app.use('/api/extension', (req, res, next) => {
 });
 
 function currentUser(req, core) {
-  return req.session?.userId ? core.users[req.session.userId] || null : null;
+  const u = req.session?.userId ? core.users[req.session.userId] || null : null;
+  // A password reset ends every sign-in made before it, on every device
+  return u && (u.sessionEpoch || 0) === (req.session.ep || 0) ? u : null;
 }
+const signIn = (req, u) => { req.session.userId = u.id; req.session.ep = u.sessionEpoch || 0; };
 function requireAuth(req, res, next) {
   if (!req.session?.userId) return res.status(401).json({ error: 'not signed in' });
   next();
@@ -221,6 +226,7 @@ app.get('/api/config', (req, res) => {
     google: googleReady() ? { ...GOOGLE } : null,
     googleSignIn: googleSignInReady() ? GOOGLE.clientId : null,
     geminiReady: geminiReady(),
+    passwordReset: mail.ready(),
     // Google Classroom roster import: needs the Google client and the flag
     classroomImport: CLASSROOM_IMPORT_READY(),
     // Visor Classroom: writing assignment presets and the default AI-site list
@@ -346,12 +352,16 @@ app.post('/api/auth/signup', ah(async (req, res) => {
 
 app.post('/api/auth/login', ah(async (req, res) => {
   const { email, password } = req.body || {};
+  const em = String(email || '').trim().toLowerCase().slice(0, 200);
+  const tries = `login:${req.ip}:${em}`;
+  if (!throttle.allow(tries, LOGIN_TRIES, THROTTLE_MS)) return res.status(429).json({ error: 'Too many tries. Wait a few minutes, or reset your password.' });
   const core = await repo.readCore();
-  const user = Object.values(core.users).find(u => u.email === String(email || '').trim().toLowerCase());
+  const user = Object.values(core.users).find(u => u.email === em);
   if (user && !user.passwordHash && user.googleSub) return res.status(401).json({ error: 'This account uses Sign in with Google. Use the Google button instead.' });
   if (!user || typeof password !== 'string' || password.length > 200 || !verifyPassword(password, user)) return res.status(401).json({ error: 'Wrong email or password' });
+  throttle.clear(tries);
   await joinInvitesIfAny(core, user);
-  req.session.userId = user.id;
+  signIn(req, user);
   res.json({ user: publicUser(user, core) });
 }));
 
@@ -362,6 +372,97 @@ async function joinInvitesIfAny(core, user) {
 }
 
 app.post('/api/auth/logout', (req, res) => { req.session = null; res.json({ ok: true }); });
+
+// ---- Forgot password ----
+//
+// A reset link is good for one hour and one use. Only the token's hash is kept
+// (a 'pwreset' record whose id is that hash), so reading the database gives no
+// one a working link. Asking for a link answers the same way, in about the same
+// time, whether or not the address has an account. Setting a new password ends
+// every other sign-in and disconnects the extension.
+const LOGIN_TRIES = 10, THROTTLE_MS = 15 * 60 * 1000;
+const RESET_MS = 60 * 60 * 1000, RESETS_PER_HOUR = 3, FORGOT_PER_IP = 30, FORGOT_MIN_MS = 1500;
+const resetId = token => crypto.createHash('sha256').update(String(token)).digest('hex');
+const siteUrl = () => process.env.PUBLIC_URL || (IS_FIREBASE ? 'https://visor-ed.web.app' : `http://localhost:${PORT}`);
+const contactEmail = () => process.env.CONTACT_EMAIL || 'visor.edu.ai@gmail.com';
+const escHtml = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+function emailHtml(paragraphs, button, closing = []) {
+  const para = t => `<p style="margin:0 0 16px;font-size:15px;line-height:1.55;color:#12303B;">${escHtml(t)}</p>`;
+  const p = paragraphs.map(para).join('');
+  const b = button ? `<p style="margin:24px 0;"><a href="${escHtml(button.url)}" style="display:inline-block;padding:11px 20px;border-radius:8px;background:#127C9F;color:#ffffff;font-size:15px;font-weight:600;text-decoration:none;">${escHtml(button.label)}</a></p>` : '';
+  return `<div style="max-width:480px;margin:0 auto;padding:28px 24px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;"><img src="${escHtml(siteUrl())}/logo.png" alt="Visor" width="48" style="display:block;margin-bottom:20px;" />${p}${b}${closing.map(para).join('')}<p style="margin:24px 0 0;font-size:13px;color:#527280;">Visor Classroom</p></div>`;
+}
+
+async function sendResetEmail(u) {
+  const hourAgo = Date.now() - RESET_MS;
+  const mine = await repo.listRecords('pwreset', { studentId: u.id });
+  const recent = mine.filter(r => Date.parse(r.createdAt) > hourAgo);
+  for (const r of mine) if (!recent.includes(r)) await repo.deleteRecord('pwreset', r.id);
+  if (recent.length >= RESETS_PER_HOUR) return;
+  const hi = `Hi ${u.firstName || 'there'},`;
+  const token = crypto.randomBytes(32).toString('base64url');
+  // Kept for an account with no password too, so it counts toward the limit
+  await repo.putRecord('pwreset', { id: resetId(token), studentId: u.id, createdAt: now(), expiresAt: new Date(Date.now() + RESET_MS).toISOString(), usable: !!u.passwordHash });
+  if (!u.passwordHash) {
+    const lines = [hi, 'Someone asked to reset the password for your Visor account, but it signs in with Google, so it has no password to reset. Use the Continue with Google button on the sign-in page.', 'If this wasn’t you, you can ignore this email.'];
+    return mail.send({ to: u.email, subject: 'Signing in to Visor', text: lines.join('\n\n'), html: emailHtml(lines) });
+  }
+  const url = `${siteUrl()}/reset?token=${token}`;
+  const before = [hi, 'Someone asked to reset the password for your Visor account. Use this button to choose a new one. The link works for one hour, and only once.'];
+  const after = 'If this wasn’t you, you can ignore this email. Your password stays the same.';
+  await mail.send({ to: u.email, subject: 'Reset your Visor password', text: [...before, url, after].join('\n\n'), html: emailHtml(before, { url, label: 'Choose a new password' }, [after]) });
+}
+
+// { email } -> always { ok: true } once the address is well formed
+app.post('/api/auth/forgot', ah(async (req, res) => {
+  const started = Date.now();
+  const email = String(req.body?.email || '').trim().toLowerCase().slice(0, 200);
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: 'Enter a valid email address' });
+  if (!mail.ready()) return res.status(503).json({ error: `Password reset isn’t available yet. Email ${contactEmail()} and we’ll help you get back in.` });
+  if (!throttle.allow(`forgot:${req.ip}`, FORGOT_PER_IP, THROTTLE_MS)) return res.status(429).json({ error: 'Too many requests. Wait a few minutes and try again.' });
+  const core = await repo.readCore();
+  const u = Object.values(core.users).find(x => x.email === email);
+  if (u) await sendResetEmail(u).catch(err => console.error('password reset email:', err.message));
+  const wait = FORGOT_MIN_MS - (Date.now() - started);
+  if (wait > 0) await new Promise(r => setTimeout(r, wait));
+  res.json({ ok: true });
+}));
+
+async function usableReset(token) {
+  if (typeof token !== 'string' || !/^[\w-]{20,100}$/.test(token)) return null;
+  const rec = await repo.getRecord('pwreset', resetId(token));
+  return rec && rec.usable && !rec.usedAt && Date.parse(rec.expiresAt) > Date.now() ? rec : null;
+}
+
+// Is this link still good? The page asks before showing the form.
+app.post('/api/auth/reset/check', ah(async (req, res) => {
+  res.json({ valid: !!(await usableReset(req.body?.token)) });
+}));
+
+// { token, password }: sets the password and signs in
+app.post('/api/auth/reset', ah(async (req, res) => {
+  const { token, password } = req.body || {};
+  if (typeof password !== 'string' || password.length < 6) return res.status(400).json({ error: 'Password needs at least 6 characters' });
+  if (password.length > 200) return res.status(400).json({ error: 'That password is too long' });
+  const gone = () => new HttpError(400, 'This link has expired or was already used. Ask for a new one.');
+  const rec = await usableReset(token);
+  if (!rec) throw gone();
+  const { hash, salt } = hashPassword(password);
+  // One use, even from two tabs at once
+  await repo.updateRecord('pwreset', rec.id, r => { if (r.usedAt) throw gone(); r.usedAt = now(); });
+  const out = await repo.withCore(core => {
+    const u = own(core.users, rec.studentId);
+    if (!u) throw gone();
+    u.passwordHash = hash; u.passwordSalt = salt;
+    u.sessionEpoch = (u.sessionEpoch || 0) + 1;
+    return { user: publicUser(u, core), id: u.id, ep: u.sessionEpoch };
+  });
+  await repo.deleteRecords('exttoken', { studentId: out.id });
+  await repo.deleteRecords('pwreset', { studentId: out.id });
+  req.session = { userId: out.id, ep: out.ep };
+  res.json({ user: out.user });
+}));
 
 // Sign in with Google: verify the credential, then either sign the existing
 // account in or, for a first-time email, ask the frontend to finish signup
@@ -385,7 +486,7 @@ app.post('/api/auth/google', ah(async (req, res) => {
     });
   }
   await joinInvitesIfAny(core, user);
-  req.session.userId = user.id;
+  signIn(req, user);
   res.json({ user: publicUser(user, core) });
 }));
 
@@ -3566,7 +3667,7 @@ if (process.env.VISOR_DEV_LOGIN === '1' && !IS_PROD) {
     const u = Object.values(core.users).find(x => x.email === String(req.query.email || '').toLowerCase());
     if (!u) return res.status(404).send('no such user');
     await joinInvitesIfAny(core, u);
-    req.session.userId = u.id;
+    signIn(req, u);
     res.redirect('/');
   }));
 }

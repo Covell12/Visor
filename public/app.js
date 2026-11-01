@@ -150,8 +150,11 @@ function showAuth(which) {
   $('authView').classList.remove('hidden'); $('appView').classList.add('hidden');
   $('signinForm').classList.toggle('hidden', which !== 'signin');
   $('signupForm').classList.toggle('hidden', which !== 'signup');
-  $('signinError').classList.add('hidden'); $('signupError').classList.add('hidden');
-  document.title = `${which === 'signup' ? 'Create an account' : 'Sign in'} · Visor`;
+  $('forgotForm').classList.toggle('hidden', which !== 'forgot');
+  $('resetForm').classList.toggle('hidden', which !== 'reset');
+  for (const id of ['signinError', 'signupError', 'forgotError', 'resetError']) $(id).classList.add('hidden');
+  if (which === 'forgot') { $('forgotAsk').classList.remove('hidden'); $('forgotDone').classList.add('hidden'); $('fpEmail').value = $('siEmail').value; setTimeout(() => $('fpEmail').focus(), 0); }
+  document.title = `${{ signup: 'Create an account', forgot: 'Reset your password', reset: 'Choose a new password' }[which] || 'Sign in'} · Visor`;
   if (which !== 'signup') exitGoogleSignupMode();
 }
 
@@ -282,6 +285,46 @@ async function doSignin() {
     me = r.user; enterApp();
   } catch (e) { formError('signinError', e.message); }
 }
+async function doForgot() {
+  formError('forgotError', '');
+  const email = $('fpEmail').value.trim();
+  if (!email) return formError('forgotError', 'Enter your email address.');
+  $('fpGo').disabled = true;
+  try {
+    await api('/api/auth/forgot', { method: 'POST', body: { email } });
+    $('forgotAsk').classList.add('hidden'); $('forgotDone').classList.remove('hidden');
+  } catch (e) { formError('forgotError', e.message); }
+  $('fpGo').disabled = false;
+}
+// /reset?token=…: the token comes out of the address straight away, so it isn't
+// left in the history or passed on to another page
+let resetToken = null;
+async function openResetPage() {
+  resetToken = new URLSearchParams(location.search).get('token') || '';
+  history.replaceState(null, '', '/reset');
+  showAuth('reset');
+  let valid = false;
+  try { valid = (await api('/api/auth/reset/check', { method: 'POST', body: { token: resetToken } })).valid; } catch {}
+  $('resetAsk').classList.toggle('hidden', !valid);
+  $('resetAgain').classList.toggle('hidden', valid);
+  if (valid) $('rpPassword').focus();
+  else formError('resetError', 'This link has expired or was already used. Ask for a new one.');
+}
+async function doReset() {
+  formError('resetError', '');
+  const password = $('rpPassword').value;
+  if (password !== $('rpConfirm').value) return formError('resetError', 'Those two passwords don’t match.');
+  $('rpGo').disabled = true;
+  try {
+    const r = await api('/api/auth/reset', { method: 'POST', body: { token: resetToken, password } });
+    resetToken = null; $('rpPassword').value = ''; $('rpConfirm').value = '';
+    history.replaceState(null, '', '/');
+    me = r.user; enterApp();
+    toast('Password changed');
+  } catch (e) { formError('resetError', e.message); }
+  $('rpGo').disabled = false;
+}
+
 async function signOut() {
   await api('/api/auth/logout', { method: 'POST' });
   me = null; project = null; projectLoad++;
@@ -292,7 +335,7 @@ async function signOut() {
   if (window.resetPortal) resetPortal(); // and the pages forget what they loaded
   if (location.pathname !== '/') history.pushState(null, '', '/');
   // Nothing of the last person's sign-in or sign-up stays in the forms
-  for (const id of ['siEmail', 'siPassword', 'suEmail', 'suFirst', 'suLast', 'suPassword', 'suClassCode']) { const el = $(id); if (el) el.value = ''; }
+  for (const id of ['siEmail', 'siPassword', 'suEmail', 'suFirst', 'suLast', 'suPassword', 'suClassCode', 'fpEmail']) { const el = $(id); if (el) el.value = ''; }
   if ($('suOver13')) $('suOver13').checked = false;
   selectedRole = null; document.querySelectorAll('.role-card').forEach(c => c.classList.remove('selected'));
   $('suStudentExtras')?.classList.add('hidden');
@@ -304,6 +347,8 @@ document.addEventListener('keydown', e => {
   if (e.key !== 'Enter' || !e.target.matches?.('input') || e.target.closest('.school-picker')) return;
   if (!$('signinForm').classList.contains('hidden') && $('signinForm').contains(document.activeElement)) doSignin();
   else if (!$('signupForm').classList.contains('hidden') && $('signupForm').contains(document.activeElement)) doSignup();
+  else if (!$('forgotForm').classList.contains('hidden') && $('forgotForm').contains(document.activeElement)) doForgot();
+  else if (!$('resetForm').classList.contains('hidden') && $('resetForm').contains(document.activeElement)) doReset();
 });
 
 /* ====================== shell ====================== */
@@ -318,6 +363,7 @@ async function boot() {
     await Promise.all([configReady, scriptsReady]);
     // Visor Classroom: the extension's side panel embeds the editor without a cookie
     if (window.VisorRouter && VisorRouter.isEmbed()) return VisorRouter.startEmbed();
+    if (location.pathname === '/reset') { await openResetPage(); mountSchoolPicker('suSchoolPicker', null); initGoogleSignIn(); return; }
     const r = await api('/api/me');
     if (r.signedIn) { me = r.user; if (!r.geminiReady && me.role === 'teacher') toast('AI features are unavailable: this server has no Gemini access set up. Everything else works.', 'err'); enterApp(); }
     else showAuth('signin');

@@ -51,9 +51,35 @@
         <div id="googleSigninBtn" class="google-btn-mount hidden"></div>
         <div id="signinDivider" class="auth-divider"><span>or</span></div>
         <div class="field"><label for="siEmail">Email</label><input id="siEmail" class="input" type="email" autocomplete="email" placeholder="you@school.org" /></div>
-        <div class="field"><label for="siPassword">Password</label><input id="siPassword" class="input" type="password" autocomplete="current-password" /></div>
+        <div class="field"><div class="field-head"><label for="siPassword">Password</label><button type="button" class="linklike" onclick="showAuth('forgot')">Forgot password?</button></div><input id="siPassword" class="input" type="password" autocomplete="current-password" /></div>
         <button class="btn btn-primary btn-lg" style="width:100%;justify-content:center;" onclick="doSignin()">Sign in</button>
         <div class="auth-switch">New here? <button onclick="showAuth('signup')">Create an account</button></div>
+      </div>
+
+      <!-- Forgot password -->
+      <div id="forgotForm" class="hidden">
+        <h2>Reset your password</h2>
+        <p class="sub">Enter your email and we’ll send you a link to choose a new one.</p>
+        <div id="forgotError" class="form-error hidden"></div>
+        <div id="forgotAsk">
+          <div class="field"><label for="fpEmail">Email</label><input id="fpEmail" class="input" type="email" autocomplete="email" placeholder="you@school.org" /></div>
+          <button class="btn btn-primary btn-lg" id="fpGo" style="width:100%;justify-content:center;" onclick="doForgot()">Send reset link</button>
+        </div>
+        <div id="forgotDone" class="callout hidden" role="status">If an account uses that email, a reset link is on its way. It works for one hour. Check your spam folder if you don’t see it in a few minutes.</div>
+        <div class="auth-switch"><button onclick="showAuth('signin')">Back to sign in</button></div>
+      </div>
+
+      <!-- Choose a new password -->
+      <div id="resetForm" class="hidden">
+        <h2>Choose a new password</h2>
+        <p class="sub">You’ll be signed in, and signed out everywhere else.</p>
+        <div id="resetError" class="form-error hidden"></div>
+        <div id="resetAsk">
+          <div class="field"><label for="rpPassword">New password</label><input id="rpPassword" class="input" type="password" autocomplete="new-password" placeholder="At least 6 characters" /></div>
+          <div class="field"><label for="rpConfirm">Type it again</label><input id="rpConfirm" class="input" type="password" autocomplete="new-password" /></div>
+          <button class="btn btn-primary btn-lg" id="rpGo" style="width:100%;justify-content:center;" onclick="doReset()">Save password</button>
+        </div>
+        <div class="auth-switch" id="resetAgain"><button onclick="showAuth('forgot')">Ask for a new link</button></div>
       </div>
 
       <!-- Create account -->
