@@ -51,10 +51,18 @@ exports.transcribe = onDocumentCreated(
 // ── Research retention (Visor Classroom) ──────────────────────────────────
 // Once a day: delete research the extension recorded during writing sessions
 // once it's older than its class's retention period (180 days by default).
-const { onSchedule } = require('firebase-functions/v2/scheduler');
-exports.sweep = onSchedule({ schedule: 'every 24 hours', memory: '512MiB', timeoutSeconds: 540, maxInstances: 1 }, async () => {
-  await app.runRetentionSweep();
-});
+//
+// PAUSED since 2026-11-01. Google refuses this function's deploy and its runs
+// (it needs Cloud Run Admin on the project), and it hasn't run since 2026-10-30.
+// While it's paused nothing deletes old research, and the privacy policy says
+// it's deleted, so resume it before anything comes due (April 2027 at the
+// default 180 days, sooner for a class with a shorter period). To resume: put
+// these lines back, then deploy functions:visor:sweep.
+//
+// const { onSchedule } = require('firebase-functions/v2/scheduler');
+// exports.sweep = onSchedule({ schedule: 'every 24 hours', memory: '512MiB', timeoutSeconds: 540, maxInstances: 1 }, async () => {
+//   await app.runRetentionSweep();
+// });
 
 // ── Spending cut-off ────────────────────────────────────────────────────
 // A Google Cloud budget can post its running total to a Pub/Sub topic. When
