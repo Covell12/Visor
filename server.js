@@ -309,8 +309,11 @@ function verifyPassword(password, user) {
 function publicUser(u, core) {
   if (!u) return null;
   const org = core ? core.orgs[u.orgId] : null;
-  return { id: u.id, email: u.email, firstName: u.firstName, lastName: u.lastName, name: `${u.firstName} ${u.lastName}`.trim(), role: u.role, orgId: u.orgId, org: publicOrg(org), avatarColor: u.avatarColor || null, tutorialSeen: !!u.tutorialSeen };
+  return { id: u.id, email: u.email, firstName: u.firstName, lastName: u.lastName, name: `${u.firstName} ${u.lastName}`.trim(), role: u.role, orgId: u.orgId, org: publicOrg(org), avatarColor: u.avatarColor || null, ...avatarField(u), tutorialSeen: !!u.tutorialSeen };
 }
+
+// Someone's picture, for anything that shows them. Only there if they chose one.
+const avatarField = u => (u?.avatar?.id ? { avatarUrl: `/api/users/${u.id}/avatar?v=${u.avatar.id}` } : {});
 
 // Students: Visor is for schools, so a student either confirms they're 13 or
 // older, or was signed up by their school (a teacher invited their email to a
@@ -550,6 +553,44 @@ app.patch('/api/me', requireAuth, ah(async (req, res) => {
   res.json({ user });
 }));
 
+// ---- Your picture ----
+// POST   the picture's bytes as the body (PNG, JPEG or WebP; the page crops and shrinks it first)
+// DELETE back to your icon color
+// GET    the picture, for anyone signed in who was given its address. v is random
+//        and new with each picture, so a replaced or removed picture stops working.
+// POST and DELETE answer { user }. A replaced picture is deleted.
+const AVATAR_MAX_BYTES = 512 * 1024;
+async function setAvatar(req, avatar) {
+  let old = null;
+  const user = await repo.withCore(core => {
+    const u = currentUser(req, core);
+    if (!u) throw new HttpError(401, 'not signed in');
+    old = u.avatar || null;
+    if (avatar) u.avatar = avatar; else delete u.avatar;
+    return publicUser(u, core);
+  });
+  if (old) await imageStorage.deleteImage(old.stored);
+  return user;
+}
+app.post('/api/me/avatar', requireAuth, (req, res, next) => imageBody(req, res, next), ah(async (req, res) => {
+  const buf = Buffer.isBuffer(req.body) ? req.body : null;
+  if (buf && buf.length > AVATAR_MAX_BYTES) return res.status(413).json({ error: 'That picture is too large. Use one under 512 KB.' });
+  const mime = imageStorage.sniffImage(buf);
+  if (!BG_TYPES.includes(mime)) throw new HttpError(400, 'Use a PNG, JPEG or WebP picture.');
+  const id = crypto.randomBytes(16).toString('hex');
+  const stored = await imageStorage.putImage({ docId: `avatar-${req.session.userId}`, id, mime, buf });
+  try { res.json({ user: await setAvatar(req, { id, mime, stored }) }); }
+  catch (err) { await imageStorage.deleteImage(stored); throw err; }
+}));
+app.delete('/api/me/avatar', requireAuth, ah(async (req, res) => {
+  res.json({ user: await setAvatar(req, null) });
+}));
+app.get('/api/users/:id/avatar', requireAuth, ah(async (req, res) => {
+  const a = own((await repo.readCore()).users, req.params.id)?.avatar;
+  if (!a?.stored || a.id !== req.query.v) return res.status(404).json({ error: 'not found' });
+  await imageStorage.streamImage(a.stored, a.mime, res);
+}));
+
 // Students a teacher can add to a project: students at the teacher's school
 // whose name or email matches (2+ letters), plus any student whose full email
 // address is typed exactly, so students without a school can be added too.
@@ -777,12 +818,12 @@ function projectTeacherIds(core, project) {
 }
 // Everyone who could be a voice in a project's recording, a class's advisors too
 function projectPeople(core, project) {
-  const list = project.studentIds.map(id => core.users[id]).filter(Boolean).map(u => ({ id: u.id, name: `${u.firstName} ${u.lastName}`, role: 'student', avatarColor: u.avatarColor || null }));
+  const list = project.studentIds.map(id => core.users[id]).filter(Boolean).map(u => ({ id: u.id, name: `${u.firstName} ${u.lastName}`, role: 'student', avatarColor: u.avatarColor || null, ...avatarField(u) }));
   const cls = project.classId ? own(core.classes, project.classId) : null;
   const listed = projectTeacherIds(core, project);
   for (const id of new Set([...listed, ...(cls ? classes.staffIdsOf(cls) : [])])) {
     const t = own(core.users, id);
-    if (t) list.push({ id: t.id, name: `${t.firstName} ${t.lastName}`, role: listed.includes(id) ? 'teacher' : 'advisor', avatarColor: t.avatarColor || null });
+    if (t) list.push({ id: t.id, name: `${t.firstName} ${t.lastName}`, role: listed.includes(id) ? 'teacher' : 'advisor', avatarColor: t.avatarColor || null, ...avatarField(t) });
   }
   return list;
 }
@@ -1420,11 +1461,11 @@ async function classSummary(cls, isTeacher, meId, loaded = {}) {
 // A class's teachers, owner first: [{ id, name, avatarColor, owner }], with
 // each one's email when withEmail (the class's own teachers only)
 // A teacher as a student sees them: a name and a colour, no email
-const nameOnly = u => (u ? { id: u.id, name: fullName(u), avatarColor: u.avatarColor || null } : null);
+const nameOnly = u => (u ? { id: u.id, name: fullName(u), avatarColor: u.avatarColor || null, ...avatarField(u) } : null);
 
 function publicTeachers(core, cls, withEmail = false) {
   return classes.teacherIdsOf(cls).map(id => own(core.users, id)).filter(Boolean).map(u => {
-    const t = { id: u.id, name: fullName(u), avatarColor: u.avatarColor || null, owner: u.id === cls.teacherId };
+    const t = { id: u.id, name: fullName(u), avatarColor: u.avatarColor || null, ...avatarField(u), owner: u.id === cls.teacherId };
     if (classes.staffRole(cls, u.id) === 'assistant') t.assistant = true;
     if (withEmail) t.email = u.email;
     return t;
@@ -1432,7 +1473,7 @@ function publicTeachers(core, cls, withEmail = false) {
 }
 // Advisors aren't listed as teachers, so only the class's staff get these
 const publicAdvisors = (core, cls) => (cls.advisorIds || []).map(id => own(core.users, id)).filter(Boolean)
-  .map(u => ({ id: u.id, name: fullName(u), email: u.email, avatarColor: u.avatarColor || null }));
+  .map(u => ({ id: u.id, name: fullName(u), email: u.email, avatarColor: u.avatarColor || null, ...avatarField(u) }));
 
 // teacher: the owner. teachers: everyone listed as teaching it. isTeacher: anyone
 // on the staff, advisors included.
@@ -1664,7 +1705,7 @@ app.get('/api/classes/:id/school-people', requireAuth, ah(async (req, res) => {
   const core = await repo.readCore();
   const got = teacherClass(req, core);
   const out = classes.schoolPeople(core, got.cls, got.me, { role: String(req.query.role || 'student'), q: String(req.query.q || '').slice(0, 120) });
-  res.json({ school: publicOrg(core.orgs[got.me.orgId]), people: out.people.map(({ user: u, inClass }) => ({ id: u.id, name: `${u.firstName} ${u.lastName}`.trim(), email: u.email, role: u.role, avatarColor: u.avatarColor || null, inClass })), total: out.total, more: out.more });
+  res.json({ school: publicOrg(core.orgs[got.me.orgId]), people: out.people.map(({ user: u, inClass }) => ({ id: u.id, name: `${u.firstName} ${u.lastName}`.trim(), email: u.email, role: u.role, avatarColor: u.avatarColor || null, ...avatarField(u), inClass })), total: out.total, more: out.more });
 }));
 
 app.post('/api/classes/:id/school-people', requireAuth, ah(async (req, res) => {
@@ -2095,7 +2136,7 @@ function newUpdate(cls, me, body, pinned = false) {
 // What the page sees of an update (the author's name and colour, no email)
 function publicUpdate(core, u) {
   const author = own(core.users, u.authorId);
-  return { id: u.id, classId: u.classId, body: u.body, pinned: !!u.pinned, createdAt: u.createdAt, editedAt: u.editedAt || null, author: { id: u.authorId, name: fullName(author), avatarColor: author?.avatarColor || null } };
+  return { id: u.id, classId: u.classId, body: u.body, pinned: !!u.pinned, createdAt: u.createdAt, editedAt: u.editedAt || null, author: { id: u.authorId, name: fullName(author), avatarColor: author?.avatarColor || null, ...avatarField(author) } };
 }
 
 const newestFirst = (x, y) => Date.parse(y.createdAt) - Date.parse(x.createdAt) || (x.id < y.id ? 1 : x.id > y.id ? -1 : 0);

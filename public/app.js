@@ -20,10 +20,18 @@ const colorClass = i => `c${i % 8}`;
 const PALETTE = ['#1E9BC4', '#4CA35C', '#E39B2E', '#7C5CD6', '#D9534F', '#2A9D8F', '#B5179E', '#6C757D'];
 // Dark enough for white initials
 const AVATAR_TONES = ['#0E7BAB', '#2E8549', '#2F5DA8', '#A5620C', '#4E6878'];
-// Avatar circle: uses the person's chosen color, otherwise one picked from their name
+// White initials, or dark ones on a light color someone chose
+function avatarInk(hex) {
+  const n = parseInt(String(hex).slice(1), 16), [r, g, b] = [n >> 16, (n >> 8) & 255, n & 255];
+  return 0.299 * r + 0.587 * g + 0.114 * b > 165 ? '#14293A' : '#fff';
+}
+// Avatar circle: the person's picture, or their chosen color, or one picked from
+// their name. The initials stay under the picture, in case it can't load.
 function avatarHtml(person, size = '') {
   const hash = [...(person?.name || '')].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7);
-  return `<span class="avatar ${size}" style="background:${person?.avatarColor || AVATAR_TONES[hash % AVATAR_TONES.length]}">${esc(initials(person?.name))}</span>`;
+  const bg = person?.avatarColor || AVATAR_TONES[hash % AVATAR_TONES.length];
+  const img = person?.avatarUrl ? `<img src="${esc(person.avatarUrl)}" alt="" loading="lazy" onerror="this.remove()">` : '';
+  return `<span class="avatar ${size}" style="background:${bg};color:${avatarInk(bg)}">${esc(initials(person?.name))}${img}</span>`;
 }
 // Color for a person in charts/scripts: their chosen color, else a palette slot
 function personColor(person, i) { return person?.avatarColor || PALETTE[i % 8]; }
@@ -388,13 +396,15 @@ function enterApp() {
 }
 
 /* ====================== profile settings ====================== */
+const AVATAR_SWATCHES = ['#0E7BAB', '#2F5DA8', '#6246BE', '#9C2A87', '#C2366E', '#B83F3B', '#C9622B', '#A5620C', '#2E8549', '#1F7F73', '#4E6878', '#14293A'].map(c => c.toLowerCase());
+let prof = null; // what's chosen so far: { color, image (its address), blob (a new one), tab }
 function openProfile() {
-  const color = me.avatarColor || '#4dbedc';
-  openModal({ title: 'Profile settings', sub: 'How you appear to everyone in your projects.', body: `
-    <div style="display:flex;align-items:center;gap:18px;margin-bottom:20px;">
-      <span id="profPreview" class="avatar avatar-lg" style="background:${esc(color)};width:64px;height:64px;font-size:22px;">${initials(me.name)}</span>
+  prof = { color: me.avatarColor || '', image: me.avatarUrl || null, blob: null, tab: me.avatarUrl ? 'image' : 'color' };
+  openModal({ title: 'Profile settings', sub: 'How you appear in Visor.', body: `
+    <div class="prof-head">
+      <span id="profPreview"></span>
       <div>
-        <div style="font-weight:700;font-size:16px;" id="profPreviewName">${esc(me.name)}</div>
+        <div class="prof-name" id="profPreviewName">${esc(me.name)}</div>
         <div class="muted small">${esc(me.email)} · ${esc(me.role)}${me.org ? ' · ' + esc(me.org.name) : ''}</div>
       </div>
     </div>
@@ -403,30 +413,85 @@ function openProfile() {
       <div class="field"><label>Last name</label><input id="profLast" class="input" value="${esc(me.lastName)}" oninput="profPreview()" /></div>
     </div>
     <div class="field">
-      <label>Icon color</label>
-      <div style="display:flex;align-items:center;gap:12px;">
-        <input id="profColor" type="color" value="${esc(color)}" oninput="profPreview()" style="width:56px;height:40px;border:1.5px solid var(--line);border-radius:10px;padding:2px;background:#fff;cursor:pointer;" />
-        <span class="mono small muted" id="profColorText">${esc(color)}</span>
-        <button class="btn btn-ghost btn-sm" onclick="$('profColor').value='#4dbedc';profPreview()">Reset</button>
+      <label>Icon</label>
+      <div class="seg prof-tabs" role="group" aria-label="Icon">
+        <button type="button" id="profTabColor" onclick="profTab('color')">Color</button>
+        <button type="button" id="profTabImage" onclick="profTab('image')">Image</button>
       </div>
-      <div class="hint">This color shows on your icon, your name in transcripts, and your bar in the analysis.</div>
+      <div id="profIcon"></div>
     </div>
     <div class="field"><label>School <span class="label-note">optional</span></label><div id="profSchoolPicker" class="school-picker"></div></div>
     <div id="profExtras" class="prof-extras"></div>
     <div id="profErr" class="form-error hidden"></div>`,
     footer: `<button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="saveProfile()">Save</button>` });
+  profDrawIcon();
   mountSchoolPicker('profSchoolPicker', me.org);
   if (window.profileExtras) profileExtras($('profExtras')); // Visor Classroom: extension + "Download my data" (ext.js)
 }
+function profTab(tab) { prof.tab = tab; profDrawIcon(); }
+function profDrawIcon() {
+  const file = `<input class="sr-only" type="file" accept="image/png,image/jpeg,image/webp" onchange="profPickImage(this.files[0])" />`;
+  $('profIcon').innerHTML = prof.tab === 'color' ? `
+    <div class="swatches">
+      ${AVATAR_SWATCHES.map(c => `<button type="button" class="swatch" data-color="${c}" style="--sw:${c}" aria-label="Color ${c}" onclick="profSetColor('${c}')">${I.check}</button>`).join('')}
+      <label class="swatch custom" title="Pick any color"><input id="profColor" type="color" aria-label="Pick any color" value="${esc(prof.color || '#0e7bab')}" oninput="profSetColor(this.value)" /></label>
+    </div>
+    <div class="hint">Your color also marks you in transcripts and project charts. <button type="button" class="linklike" onclick="profSetColor('')">Use an automatic color</button></div>`
+    : prof.image ? `
+    <div class="btn-row"><label class="btn btn-ghost btn-sm prof-file">Choose another image${file}</label><button type="button" class="btn btn-ghost btn-sm" onclick="profRemoveImage()">Remove image</button></div>
+    <div class="hint">Everyone who sees your name in Visor can see this.</div>`
+    : `
+    <label class="prof-drop" ondragover="event.preventDefault();this.classList.add('over')" ondragleave="this.classList.remove('over')" ondrop="event.preventDefault();this.classList.remove('over');profPickImage(event.dataTransfer.files[0])">
+      <b>Drop an image here, or click to choose one</b><span>PNG, JPEG or WebP. It’s cropped to a square.</span>${file}
+    </label>
+    <div class="hint">Everyone who sees your name in Visor can see this.</div>`;
+  profPreview();
+}
+function profSetColor(c) { prof.color = c; profPreview(); }
+async function profPickImage(file) {
+  if (!file) return;
+  $('profErr').classList.add('hidden');
+  try { prof.blob = await squareImage(file); prof.image = URL.createObjectURL(prof.blob); profDrawIcon(); }
+  catch (e) { $('profErr').textContent = e.message; $('profErr').classList.remove('hidden'); }
+}
+function profRemoveImage() { prof.image = null; prof.blob = null; profDrawIcon(); }
+// A picture as a square JPEG: cropped around its middle (a little higher on a tall
+// photo, where a face usually is) and redrawn, which leaves out a photo's location
+async function squareImage(file, size = 320) {
+  let bmp;
+  try { bmp = await createImageBitmap(file); } catch { throw new Error('That image couldn’t be read. Try a PNG or JPEG.'); }
+  const side = Math.min(bmp.width, bmp.height), cv = document.createElement('canvas');
+  cv.width = cv.height = size;
+  const g = cv.getContext('2d');
+  g.fillStyle = '#fff'; g.fillRect(0, 0, size, size);
+  g.drawImage(bmp, (bmp.width - side) / 2, (bmp.height - side) * 0.3, side, side, 0, 0, size, size);
+  bmp.close();
+  return new Promise(r => cv.toBlob(r, 'image/jpeg', 0.88));
+}
 function profPreview() {
-  const c = $('profColor').value; $('profPreview').style.background = c; $('profColorText').textContent = c;
-  const n = `${$('profFirst').value.trim()} ${$('profLast').value.trim()}`.trim(); $('profPreview').textContent = initials(n || me.name); $('profPreviewName').textContent = n || me.name;
+  const n = `${$('profFirst').value.trim()} ${$('profLast').value.trim()}`.trim() || me.name;
+  $('profPreview').innerHTML = avatarHtml({ name: n, avatarColor: prof.color || null, avatarUrl: prof.tab === 'image' ? prof.image : null }, 'avatar-xl');
+  $('profPreviewName').textContent = n;
+  $('profTabColor').setAttribute('aria-pressed', prof.tab === 'color');
+  $('profTabImage').setAttribute('aria-pressed', prof.tab === 'image');
+  const custom = !!prof.color && !AVATAR_SWATCHES.includes(prof.color.toLowerCase());
+  document.querySelectorAll('.swatch[data-color]').forEach(b => b.setAttribute('aria-pressed', b.dataset.color === prof.color.toLowerCase()));
+  const pick = document.querySelector('.swatch.custom');
+  if (pick) { pick.classList.toggle('on', custom); pick.style.setProperty('--sw', prof.color || 'transparent'); }
+}
+// The icon first, so the answer to the last call carries all of it
+async function saveProfileIcon() {
+  if (prof.tab === 'image' && prof.blob) {
+    const r = await fetch('/api/me/avatar', { method: 'POST', headers: { 'Content-Type': 'image/jpeg' }, body: prof.blob });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'That picture couldn’t be saved.');
+  } else if (me.avatarUrl && (prof.tab === 'color' || !prof.image)) await api('/api/me/avatar', { method: 'DELETE' });
 }
 async function saveProfile() {
   try {
     const sc = schoolChoice('profSchoolPicker');
     const school = sc.schoolId ? { id: sc.schoolId } : sc.schoolName ? { name: sc.schoolName } : null;
-    const r = await api('/api/me', { method: 'PATCH', body: { firstName: $('profFirst').value, lastName: $('profLast').value, avatarColor: $('profColor').value, school } });
+    await saveProfileIcon();
+    const r = await api('/api/me', { method: 'PATCH', body: { firstName: $('profFirst').value, lastName: $('profLast').value, avatarColor: prof.color, school } });
     me = r.user; closeModal(); toast('Profile saved');
     $('topSchool').textContent = me.org?.name || '';
     $('userBtn').innerHTML = `${avatarHtml(me, 'avatar-sm')}<span><div class="n">${esc(me.name)}</div><div class="r">${esc(me.role)}</div></span>`;

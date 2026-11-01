@@ -381,7 +381,7 @@ function renderHome() {
     ${homeKpis()}
     ${teacher ? happeningBoxHtml(home.data.dash.happeningNow) : nextUpHtml()}
     <div class="home-grid">
-      <div class="home-main"><div class="home-h-row"><h2 class="home-h">${home.view === 'activity' ? 'Activity' : 'Classes'}</h2>${teacher && home.view !== 'activity' ? statusLegend() : ''}</div><div id="homeBody"></div></div>
+      <div class="home-main"><h2 class="home-h">${home.view === 'activity' ? 'Activity' : 'Classes'}</h2><div id="homeBody"></div></div>
       <aside class="home-right" aria-label="To do">${teacher ? teacherHomeRight() : studentHomeRight()}</aside>
     </div>
   </div>`;
@@ -403,18 +403,15 @@ function dashboardHtml() {
 }
 
 function courseTile(c) {
-  const cell = (v, k, tone = '') => `<span class="ct-cell ${tone}"><b>${esc(String(v))}</b>${esc(k)}</span>`;
   const next = (c.upcoming || []).find(u => Date.parse(u.dueAt) >= Date.now());
-  const cells = c.isTeacher
-    ? [cell(c.assignmentCount || 0, 'Assignments'), cell(c.toReview || 0, 'To review', c.toReview ? 'amber' : ''), cell(c.activeSessions || 0, 'Writing', c.activeSessions ? 'green' : '')]
-    : [cell(c.assignmentCount || 0, 'Assignments'), cell(c.submitted || 0, 'Handed in'), cell(c.upcomingCount || 0, 'Upcoming', c.upcomingCount ? 'amber' : '')];
-  const progress = c.isTeacher && c.expected ? `<span class="ct-bar">${stackBar(classParts(c.returned, c.handedIn - c.returned, c.inProgress), c.expected)}<b>${Math.round(100 * c.handedIn / c.expected)}%</b></span>` : '';
+  const flags = [c.archived ? '<span class="ct-flag">Archived</span>' : '',
+    c.activeSessions ? `<span class="ct-flag"><i class="live-dot"></i>${c.activeSessions} writing</span>` : '',
+    c.toReview ? `<span class="ct-flag">${c.toReview} to review</span>` : ''].join('');
   return `<a class="course-tile cc-${courseColor(c)} ${c.archived ? 'archived' : ''}" href="/class/${c.id}" data-link>
     ${courseArt(c)}
-    ${c.archived ? '<span class="pill pill-gray ct-flag">Archived</span>' : ''}
-    <span class="ct-body"><span class="ct-name">${esc(c.name)}</span><span class="ct-sub">${c.isTeacher ? vcPlural(c.studentCount, 'student') + (teachersOf(c).length > 1 ? ` · ${vcPlural(teachersOf(c).length, 'teacher')}` : '') : esc(teacherNames(c))}</span>
-      <span class="ct-cells">${cells.join('')}</span>${progress}
-      <span class="ct-next ${next ? relTone(next.dueAt) : ''}">${next ? `<span>Next due</span><b>${esc(next.title)}</b><em>${esc(vcRelative(next.dueAt))}</em>` : '<span>Nothing due</span>'}</span></span>
+    ${flags ? `<span class="ct-flags">${flags}</span>` : ''}
+    <span class="ct-body"><span class="ct-name">${esc(c.name)}</span>
+      <span class="ct-next ${next ? relTone(next.dueAt) : ''}">${next ? `<b>${esc(next.title)}</b><em>Due ${esc(vcRelative(next.dueAt))}</em>` : 'Nothing due'}</span></span>
   </a>`;
 }
 
@@ -835,7 +832,7 @@ function materialsHtml() {
     ? `<header class="course-head"><div style="min-width:0;flex:1;">${crumbsDrop([['Assignments', `/class/${c.id}`, ''], ...trail.slice(0, -1).map(f => [f.name, `/class/${c.id}?folder=${f.id}`, f.id]), [folder.name]])}
         <h1><span class="mat-ic t-folder ${folder.color ? 'fc-' + folder.color : ''}" style="width:auto;height:auto;vertical-align:-5px;margin-right:6px;" aria-hidden="true">${PI.folder}</span>${esc(folder.name)}</h1></div>
         <div class="head-actions">${c.isTeacher ? folderMenuHtml(folder, 'Head') : ''}${addMenu}</div></header>`
-    : `<header class="course-head"><div style="min-width:0;flex:1;"><h1>Assignments</h1><div class="course-sub">${vcPlural(cp.assignments.filter(a => c.isTeacher || a.publishedAt).length, 'assignment')}${c.isTeacher && cp.assignments.some(a => !a.publishedAt) ? ` (${cp.assignments.filter(a => !a.publishedAt).length} unpublished)` : ''}</div></div>
+    : `<header class="course-head"><div style="min-width:0;flex:1;"><h1>Assignments</h1><div class="course-sub">${vcPlural(cp.assignments.filter(a => c.isTeacher || a.publishedAt).length, 'assignment')}${c.isTeacher && cp.assignments.some(a => !a.publishedAt) ? ` (${cp.assignments.filter(a => !a.publishedAt).length} unpublished)` : ''}</div>${c.isTeacher ? statusLegend() : ''}</div>
         ${addMenu ? `<div class="head-actions">${addMenu}</div>` : ''}</header>`;
   const desc = folder?.description ? `<div class="folder-desc">${esc(folder.description).replace(/\n/g, '<br>')}</div>` : '';
   const archived = c.archived ? `<div class="callout amber" style="margin-bottom:12px;">This class is archived. ${c.isTeacher ? 'Restore it in Settings to post announcements again.' : ''}</div>` : '';
