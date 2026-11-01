@@ -2850,7 +2850,7 @@ app.get('/api/review/:docId', ah(async (req, res) => {
     doc: { ...docView(doc), feedback: doc.feedback || null },
     student: publicUser(core.users[doc.studentId]),
     assignment: { id: a.id, title: a.title, writing: a.writing, instructions: a.instructions },
-    class: { id: cls.id, name: cls.name },
+    class: { id: cls.id, name: cls.name, color: cls.color },
     nav: { prev: navOf(order[i - 1]), next: navOf(order[i + 1]), position: i + 1, of: order.length },
     sessions: sessions.map(s => ({ ...sessionsLib.clientView(s, Date.now()), pauses: s.pauses, events: s.events, extension: s.extension, opsFrom: s.opsFrom, opsTo: s.opsTo })),
     report,

@@ -43,14 +43,22 @@ const VisorRouter = (() => {
     document.querySelector('#appView > .shell')?.classList.remove('hidden');
   }
 
-  // The top bar: Home, Classes (any class or assignment page) or Calendar
-  function setNav(path) {
-    const section = path === '/' ? 'home' : /^\/(class|a|review|write)\//.test(path) ? 'courses' : /^\/calendar\/?$/.test(path) ? 'calendar' : '';
-    document.querySelectorAll('.topnav [data-nav]').forEach(a => {
-      const on = a.dataset.nav === section;
-      a.classList.toggle('active', on);
-      if (a.tagName === 'A') { if (on) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current'); }
+  // The sidebar: Home, Calendar, or the class or project the page belongs to.
+  // An assignment or review page marks its class once it has loaded.
+  const here = { nav: '', class: null, project: null };
+  function paintNav() {
+    document.querySelectorAll('#vnav .vnav-item').forEach(a => {
+      const on = a.dataset.nav ? a.dataset.nav === here.nav : a.dataset.class ? a.dataset.class === here.class : a.dataset.project === here.project;
+      a.classList.toggle('active', !!on);
+      if (on) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
     });
+  }
+  function setNav(path) {
+    here.nav = path === '/' ? 'home' : /^\/calendar\/?$/.test(path) ? 'calendar' : '';
+    here.class = /^\/class\/([^/]+)/.exec(path)?.[1] || null;
+    here.project = /^\/project\/([^/]+)/.exec(path)?.[1] || null;
+    paintNav();
+    if (window.toggleNav) toggleNav(false);
   }
 
   async function render() {
@@ -107,6 +115,8 @@ const VisorRouter = (() => {
     // The current navigation's number: a page that awaits something checks it
     // is still current before it draws (VisorRouter.seq() !== mine → leave it)
     seq: () => seq,
+    paintNav,
+    markClass(id) { here.class = id; paintNav(); },
     // Called by app.js once someone is signed in
     start() { started = true; render(); },
     // Signed out: end the current page (its timers and listeners)

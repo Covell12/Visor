@@ -17,7 +17,7 @@ let rv = null;
 VisorRouter.add('/review/:docId', async (el, { docId }, query) => {
   el.innerHTML = `<div class="page"><div class="loading-row"><span class="spinner"></span></div></div>`;
   const data = await api(`/api/review/${docId}`);
-  rv = { data, tab: query.get('tab') || 'document', colored: false, filter: 'all', stop: null, quill: null };
+  rv = { data, tab: query.get('tab') || 'document', colored: true, filter: 'all', stop: null, quill: null };
   rvRender();
   return () => { if (rv?.stop) rv.stop(); rv = null; };
 });
@@ -31,8 +31,10 @@ function rvTab(tab) {
 
 function rvRender() {
   const { doc, student, assignment: a, class: cls, nav, report } = rv.data;
-  $('routeView').innerHTML = `<div class="page review">
-    ${crumbs([['Home', '/'], [cls.name, `/class/${cls.id}`], [a.title, `/a/${a.id}?tab=submissions`], [student.name]])}
+  VisorRouter.markClass(cls.id);
+  $('routeView').innerHTML = `<div class="course compact no-right review cc-${courseColor(cls)}">
+    <header class="course-bar">${courseSmall(cls)}${crumbs([[cls.name, `/class/${cls.id}`], [a.title, `/a/${a.id}?tab=submissions`], [student.name]])}</header>
+    <div class="course-body"><div class="course-main">
     <div class="page-head">
       <div><h1>${esc(student.name)}</h1>
         <div class="head-meta"><span>${esc(a.title)}</span>${statusPillDoc(doc.status)}<span class="muted small">${vcPlural(report.totals.studentWords, 'word')}${report.totals.studentWords !== report.totals.words ? ` (${report.totals.words} with the starter text)` : ''}</span>${doc.submittedAt ? `<span class="muted small">Submitted ${esc(vcDateTime(doc.submittedAt))}</span>` : ''}</div></div>
@@ -45,6 +47,7 @@ function rvRender() {
     </div>
     ${pageTabs([['document', 'Document'], ['replay', 'Replay'], ['process', 'Process'], ['research', 'Research', report.research.events.length || null], ['feedback', 'Feedback']], rv.tab, 'rvTab')}
     <div id="rvBody"></div>
+    </div></div>
   </div>
   <div id="printArea" class="print-area" aria-hidden="true"></div>`;
   const body = $('rvBody');
@@ -152,15 +155,17 @@ function rvLegend(surv) {
 function rvDocument(body) {
   const { doc, report } = rv.data;
   const surv = report.survival || {};
-  body.innerHTML = `<div class="rv-doc-tools">
-      <button class="btn btn-ghost btn-sm" aria-pressed="${rv.colored}" onclick="rv.colored=!rv.colored;rvDocument($('rvBody'))">${rv.colored ? 'Hide sources' : 'Color by source'}</button>
-      ${rv.colored ? rvLegend(surv) : ''}
-    </div>
-    <div class="rv-canvas">
-      <div class="rv-page rv-essay ${rvStyleClass()}${rv.colored ? ' rv-colored' : ''}"><div id="rvQuill"></div></div>
-      ${rvWorksCited() === 'page' ? rvBibHtml() : ''}
-    </div>
-    ${rvSourcesCardHtml()}`;
+  body.innerHTML = `<div class="rv-split"><div class="rv-split-main">
+      <div class="rv-doc-tools">
+        <button class="btn btn-ghost btn-sm" aria-pressed="${rv.colored}" onclick="rv.colored=!rv.colored;rvDocument($('rvBody'))">${rv.colored ? 'Hide sources' : 'Color by source'}</button>
+        ${rv.colored ? rvLegend(surv) : ''}
+      </div>
+      <div class="rv-canvas">
+        <div class="rv-page rv-essay ${rvStyleClass()}${rv.colored ? ' rv-colored' : ''}"><div id="rvQuill"></div></div>
+        ${rvWorksCited() === 'page' ? rvBibHtml() : ''}
+      </div>
+      ${rvSourcesCardHtml()}
+    </div>${rvSideHtml(surv)}</div>`;
   const q = rvReadOnlyQuill($('rvQuill'), rv.colored ? ['srccat'] : []);
   let d = rvDelta(doc);
   if (rv.colored) d = d.compose(rvSourceDelta(doc.text || '', surv.runs));
@@ -168,6 +173,20 @@ function rvDocument(body) {
   rv.quill = q;
   // Color isn't the only signal: a pattern for each source, and its name on hover
   if (rv.colored) q.root.addEventListener('mouseover', rvSourceTitle);
+}
+// Beside the essay: what the Process tab says at more length
+const rvNoteList = () => (rv.data.report.notes.length ? `<ul>${rv.data.report.notes.map(n => `<li>${esc(n.text)}</li>`).join('')}</ul>` : '<p class="muted small" style="margin:0;">Nothing stood out: typed in the editor, no long absences, no pastes from outside.</p>');
+const rvSourceBar = surv => `<div class="src-bar" role="img" aria-label="${esc(SRC_ORDER.filter(k => surv.chars?.[k]).map(k => `${SRC_LABEL[k]} ${surv.pct[k]}%`).join(', '))}">${SRC_ORDER.filter(k => surv.chars?.[k]).map(k => `<i class="src-bar-${k}" style="width:${(100 * surv.chars[k] / Math.max(1, surv.total)).toFixed(2)}%" title="${esc(SRC_LABEL[k])}: ${surv.pct[k]}%"></i>`).join('')}</div>`;
+function rvSideHtml(surv) {
+  const sessions = rv.data.report.sessions || [];
+  return `<aside class="rv-side" aria-label="About this essay">
+    <section class="side-box rv-notes"><div class="side-box-h"><span>Notes for the teacher</span></div>
+      <p class="side-note">Measured facts, written by rules (not AI). Your judgment decides what they mean.</p>${rvNoteList()}</section>
+    <section class="side-box"><div class="side-box-h"><span>Where the text came from</span></div>${rvSourceBar(surv)}
+      <div class="rv-side-rows">${SRC_ORDER.filter(k => k !== 'image' && surv.chars?.[k]).map(k => `<div class="side-stat"><span>${esc(SRC_LABEL[k])}</span><b>${surv.pct[k] ?? 0}%</b></div>`).join('')}</div></section>
+    ${sessions.length ? `<section class="side-box"><div class="side-box-h"><span>Sessions</span><a href="#" onclick="event.preventDefault();rvTab('replay')">Replay</a></div>
+      <div class="rv-side-rows">${sessions.map(s => `<div class="side-stat"><span>Session ${s.n} · ${esc(vcDate(s.startedAt))}</span><b>${vcDur(s.durationMs)}</b></div>`).join('')}</div></section>` : ''}
+  </aside>`;
 }
 function rvSourceTitle(e) {
   const el = e.target.closest?.('[class*="src-"]');
@@ -183,18 +202,17 @@ function rvProcess(body) {
   const surv = report.survival;
   // Pictures aren't text, so they're a count, not a share of the characters
   const imagesRow = surv.images ? `<tr><td><span class="src-key src-image"><i></i>${esc(SRC_LABEL.image)}</span></td><td class="mono">—</td><td class="mono muted">${esc(vcPlural(surv.images, 'image'))}</td></tr>` : '';
-  const bar = SRC_ORDER.filter(k => surv.chars[k]).map(k => `<i class="src-bar-${k}" style="width:${(100 * surv.chars[k] / Math.max(1, surv.total)).toFixed(2)}%" title="${esc(SRC_LABEL[k])}: ${surv.pct[k]}%"></i>`).join('');
   body.innerHTML = `
     <div class="card card-pad rv-notes">
       <div class="rv-notes-head"><h3 class="section-title">Notes for the teacher</h3><span class="tiny muted">Measured facts, written by rules (not AI). Your judgment decides what they mean.</span></div>
-      ${report.notes.length ? `<ul>${report.notes.map(n => `<li>${esc(n.text)}</li>`).join('')}</ul>` : '<p class="muted small" style="margin:0;">Nothing stood out: typed in the editor, no long absences, no pastes from outside.</p>'}
+      ${rvNoteList()}
     </div>
     <div class="stat-grid rv-tiles">
       ${[['Words', t.studentWords.toLocaleString(), t.words !== t.studentWords ? `${t.words} with starter text` : ''], ['Sessions', t.sessions, ''], ['Active writing', fmtMins(t.activeMs / 60000), 'time with edits less than 2 min apart'], ['Time away', vcDur(t.awayMs), vcPlural(t.pauses, 'pause')], ['Pastes', t.pastes, ''], ['Typing', ty.wpm ? `${ty.wpm}<small> wpm</small>` : '—', `revised ${Math.round(ty.revisionRatio * 100)}% of what was written`]]
         .map(([k, v, d]) => `<div class="card stat"><div class="kicker">${k}</div><div class="v">${v}</div>${d ? `<div class="d">${esc(d)}</div>` : ''}</div>`).join('')}
     </div>
     <h3 class="section-title rv-h">How the final text arrived</h3>
-    <div class="card card-pad"><div class="src-bar" role="img" aria-label="${esc(SRC_ORDER.filter(k => surv.chars[k]).map(k => `${SRC_LABEL[k]} ${surv.pct[k]}%`).join(', '))}">${bar}</div>
+    <div class="card card-pad">${rvSourceBar(surv)}
       <table class="rv-table"><tbody>${SRC_ORDER.filter(k => k !== 'image').map(k => `<tr><td><span class="src-key src-${k}"><i></i>${esc(SRC_LABEL[k])}</span></td><td class="mono">${surv.pct[k] ?? 0}%</td><td class="mono muted">${(surv.chars[k] || 0).toLocaleString()} characters</td></tr>`).join('')}${imagesRow}</tbody></table>
       <div class="tiny muted">Characters still in the final essay, not counting spaces${surv.images ? ' or pictures' : ''}.</div></div>
     <h3 class="section-title rv-h">Sessions</h3>

@@ -19,14 +19,19 @@ let lb = null; // { data, rows, filter, sort, timer, el }
 function renderLiveBoard(el, data) {
   lb = { data, rows: [], filter: 'all', sort: 'name', el, serverOffset: 0, error: null };
   el.innerHTML = `<div class="live">
+    <section class="live-glance" aria-label="At a glance">
+      <div class="live-glance-h"><h3>At a glance</h3>
+        <button class="btn btn-ghost btn-sm" onclick="liveBulk('pause-all')">Pause everyone</button>
+        <button class="btn btn-ghost btn-sm" onclick="liveBulk('resume-all')">Resume everyone</button>
+        <button class="btn btn-danger btn-sm" onclick="liveBulk('end-all-submit')">End all and submit</button>
+      </div>
+      <div id="liveGlance" class="glance-cols"></div>
+    </section>
     <div class="live-tools">
+      <h3>Students</h3><span id="liveTag"></span>
+      <span style="flex:1"></span>
       <div class="seg" role="group" aria-label="Show">${[['all', 'Everyone'], ['attention', 'Needs attention'], ['writing', 'Writing'], ['not-started', 'Not started'], ['submitted', 'Submitted']].map(([k, l]) => `<button data-f="${k}" aria-pressed="${k === 'all'}" onclick="liveFilter('${k}')">${l}</button>`).join('')}</div>
       <label class="small muted">Sort <select class="input input-sm" onchange="liveSort(this.value)" aria-label="Sort students"><option value="name">Name</option><option value="status">Status</option><option value="words">Words</option><option value="away">Time away</option><option value="activity">Last activity</option></select></label>
-      <span style="flex:1"></span>
-      <button class="btn btn-ghost btn-sm" onclick="liveBulk('pause-all')">Pause everyone</button>
-      <button class="btn btn-ghost btn-sm" onclick="liveBulk('resume-all')">Resume everyone</button>
-      <button class="btn btn-ghost btn-sm" onclick="liveExtendAll()">Extend all</button>
-      <button class="btn btn-danger btn-sm" onclick="liveBulk('end-all-submit')">End all and submit</button>
     </div>
     <div id="liveLate"></div>
     <div id="liveTable" class="card live-card"><div class="loading-row"><span class="spinner"></span></div></div>
@@ -49,6 +54,27 @@ async function livePoll() {
     lb.serverOffset = Date.parse(r.serverNow) - Date.now();
   } catch (e) { if (lb) lb.error = e.message; }
   liveRender();
+}
+
+// At a glance: the board in sentences. Counts, and the server's own reasons a
+// row needs attention (lib rules, not AI); nothing here is a judgment.
+function liveGlanceHtml() {
+  const rows = lb.rows, count = s => rows.filter(r => s.includes(r.status)).length;
+  const writing = count(['writing']), away = count(['left', 'offline']), done = count(['submitted', 'returned']);
+  const waiting = rows.filter(r => r.status === 'not-started');
+  const left = Math.max(0, ...rows.filter(r => r.status === 'writing' && r.timeLeftMs != null).map(r => r.timeLeftMs));
+  const soFar = [`${writing} of ${vcPlural(rows.length, 'student')} ${writing === 1 ? 'is' : 'are'} writing.`,
+    away ? `${away} ${away === 1 ? 'is' : 'are'} away right now.` : '', done ? `${done} ${done === 1 ? 'has' : 'have'} submitted.` : '',
+    left ? `${vcClock(left)} left in the session.` : ''].filter(Boolean);
+  const flagged = rows.filter(r => r.attention.length);
+  const look = flagged.slice(0, 3).map(r => `${r.student.name}: ${r.attention.join(', ')}.`);
+  if (flagged.length > 3) look.push(`And ${flagged.length - 3} more under Needs attention.`);
+  const names = waiting.slice(0, 3).map(r => r.student.name).join(', ') + (waiting.length > 3 ? ` and ${waiting.length - 3} more` : '');
+  const list = items => `<ul>${items.map(t => `<li>${esc(t)}</li>`).join('')}</ul>`;
+  return `<div><span class="pill pill-green">So far</span>${list(soFar)}</div>
+    <div><span class="pill pill-amber">Worth a look</span>${list(look.length ? look : ['Nothing stands out right now.'])}</div>
+    <div><span class="pill pill-blue">Next step</span>${list([waiting.length ? `Not started: ${names}.` : 'Everyone has started.'])}
+      <button class="btn btn-soft btn-sm" onclick="liveExtendAll()">Add extra time</button></div>`;
 }
 
 function liveFilter(f) { lb.filter = f; lb.el.querySelectorAll('.seg button').forEach(b => b.setAttribute('aria-pressed', b.dataset.f === f)); liveRender(); }
@@ -80,10 +106,14 @@ function liveRender() {
   $('liveLate').innerHTML = lb.error ? `<div class="callout red live-banner">Couldn’t refresh: ${esc(lb.error)}</div>`
     : late.length ? `<div class="callout amber live-banner" role="status">${late.length === 1 ? `${esc(late[0].student.name)}’s page hasn’t` : `${late.length} students’ pages haven’t`} checked in for over 30 seconds (closed laptop, lost connection, or the page was closed).</div>` : '';
   if (!lb.rows.length && !lb.fetchedAt) return;
+  // Only when it changed, so a click on its button is never swallowed
+  const glance = liveGlanceHtml(), box = $('liveGlance');
+  if (box._html !== glance) { box._html = glance; box.innerHTML = glance; }
+  $('liveTag').innerHTML = lb.rows.some(r => ['writing', 'left', 'offline', 'paused'].includes(r.status)) ? '<span class="live-tag"><i></i>LIVE</span>' : '';
   const mode = lb.data.assignment.writing?.mode;
   const yes = (v, label) => (v == null ? '<span class="muted">—</span>' : v ? `<span class="ok-mark" title="${label}: yes">✓<span class="sr-only">${label}: yes</span></span>` : `<span class="no-mark" title="${label}: no">✗<span class="sr-only">${label}: no</span></span>`);
   $('liveTable').innerHTML = rows.length ? `<table class="roster live-table">
-    <thead><tr><th>Student</th><th>Status</th><th>Session</th><th>Time left</th><th>Words</th><th>Pastes</th><th>Away</th><th>Extension</th>${mode === 'locked' ? '<th>Lock</th>' : ''}<th>Last activity</th><th><span class="sr-only">Actions</span></th></tr></thead>
+    <thead><tr><th>Student</th><th>Status</th><th>Session</th><th>Time left</th><th>Words</th><th>Pastes</th><th>Away</th><th>Extension</th>${mode === 'locked' ? '<th>Lock</th>' : ''}<th><span class="sr-only">Actions</span></th></tr></thead>
     <tbody>${rows.map(r => {
       const [label, pill] = LIVE_STATUS[r.status] || [r.status, 'pill-gray'];
       const paused = r.pausedMs != null ? r.pausedMs + since : null;
@@ -95,7 +125,7 @@ function liveRender() {
       const tl = r.timeLeftMs != null ? Math.max(0, r.timeLeftMs - (r.status === 'writing' || r.status === 'left' || r.status === 'offline' ? since : 0)) : null;
       const sess = r.sessionMs != null ? r.sessionMs + (['writing', 'left', 'offline', 'paused'].includes(r.status) ? since : 0) : null;
       return `<tr class="${r.attention.length ? 'attn' : ''}">
-        <td><div class="roster-name">${avatarHtml(r.student, 'avatar-sm')}<span><b>${esc(r.student.name)}</b>${r.attention.length ? `<div class="tiny attn-text">${I.alert}${esc(r.attention.join(' · '))}</div>` : ''}</span></div></td>
+        <td><div class="roster-name">${avatarHtml(r.student, 'avatar-sm')}<span><b>${esc(r.student.name)}</b>${r.attention.length ? `<div class="tiny attn-text">${I.alert}${esc(r.attention.join(' · '))}</div>` : r.lastActivity ? `<div class="tiny muted">Active ${esc(timeAgo(r.lastActivity))}</div>` : ''}</span></div></td>
         <td><span class="pill ${pill}" ${r.status === 'left' || r.status === 'offline' ? `data-tick="${r.status}" data-base="${paused}"` : ''}>${esc(statusText)}</span>${reason}${where}</td>
         <td class="mono" ${sess != null && (live || r.status === 'paused') ? `data-tick="up" data-base="${sess}"` : ''}>${sess != null ? vcClock(sess) : '—'}</td>
         <td class="mono ${tl != null && tl < 300000 ? 'low' : ''}" ${tl != null && live ? `data-tick="down" data-base="${tl}"` : ''}>${tl != null ? vcClock(tl) : '—'}</td>
@@ -104,17 +134,18 @@ function liveRender() {
         <td class="mono" ${r.status === 'left' || r.status === 'offline' ? `data-tick="dur" data-base="${r.awayMs}"` : ''}>${r.awayMs ? vcDur(r.awayMs + (r.status === 'left' || r.status === 'offline' ? since : 0)) : '—'}</td>
         <td>${r.status === 'writing' || r.status === 'left' || r.status === 'offline' || r.status === 'paused' ? yes(r.ext, 'Extension') : '<span class="muted">—</span>'}</td>
         ${mode === 'locked' ? `<td>${r.lock == null ? '<span class="muted">—</span>' : yes(r.lock, 'Lockdown')}</td>` : ''}
-        <td class="small">${r.lastActivity ? esc(timeAgo(r.lastActivity)) : '—'}</td>
         <td class="row-actions">${r.sessionId ? `<div class="live-acts">
-          <button class="btn btn-ghost btn-sm" onclick="liveAct('${r.student.id}','${r.teacherPaused ? 'resume' : 'pause'}')">${r.teacherPaused ? 'Resume' : 'Pause'}</button>
-          <button class="btn btn-ghost btn-sm" onclick="liveAddTime('${r.student.id}')">+ time</button>
-          <button class="btn btn-ghost btn-sm" onclick="liveMessage('${r.student.id}')">Message</button>
-          <button class="btn btn-ghost btn-sm" onclick="liveAct('${r.student.id}','end')">End</button></div>`
+          ${liveActBtn(r.teacherPaused ? 'Resume' : 'Pause', r.teacherPaused ? PI.play : PI.pause, `liveAct('${r.student.id}','${r.teacherPaused ? 'resume' : 'pause'}')`, r.student.name)}
+          ${liveActBtn('Add time', PI.clockPlus, `liveAddTime('${r.student.id}')`, r.student.name)}
+          ${liveActBtn('Message', I.chat, `liveMessage('${r.student.id}')`, r.student.name)}
+          ${liveActBtn('End', PI.stop, `liveAct('${r.student.id}','end')`, r.student.name)}</div>`
           : r.docId && ['submitted', 'returned', 'ended'].includes(r.status) ? `<a class="btn btn-ghost btn-sm" href="/review/${r.docId}" data-link>Review</a>` : ''}</td>
       </tr>`;
     }).join('')}</tbody></table>`
     : `<div class="empty"><h4>${lb.filter === 'attention' ? 'Nobody needs attention' : 'No students here'}</h4></div>`;
 }
+
+const liveActBtn = (label, icon, onclick, name) => `<button class="live-act" onclick="${onclick}" title="${label}" aria-label="${esc(`${label}: ${name}`)}">${icon}</button>`;
 
 async function liveAct(studentId, action, extra = {}) {
   try { await api(`/api/assignments/${lb.data.assignment.id}/live/action`, { method: 'POST', body: { action, studentIds: [studentId], ...extra } }); livePoll(); }

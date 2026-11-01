@@ -4,8 +4,6 @@
 
 /* ---------- shell ---------- */
 a.btn { text-decoration: none; }
-.topbar .brand { text-decoration: none; color: inherit; }
-.route-view { min-height: calc(100vh - 68px); }
 .page { max-width: 1100px; margin: 0 auto; padding: 26px 24px 70px; }
 .page h1 { font-size: 26px; margin: 0 0 2px; }
 .page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 20px; }
@@ -28,7 +26,7 @@ select.input { appearance: auto; }
    toolbar, outline and find panel: docs-editor.css gives those their own
    (the :where keeps this rule's weight as it was for everything else). */
 .route-view :is(a, button, select, input, textarea):focus-visible:where(:not([class*="dui-"], .dx-menubar-slot [class*="dui-"] *, .dx-toolbar-slot [class*="dui-"] *, .dx-outline *, .dui-find *)),
-.modal button:focus-visible, .modal a:focus-visible, .topnav a:focus-visible, .topnav button:focus-visible, .brand:focus-visible, .dd-menu :is(a, button):focus-visible, .collapse .ch:focus-visible {
+.modal button:focus-visible, .modal a:focus-visible, .brand:focus-visible, .dd-menu :is(a, button):focus-visible, .collapse .ch:focus-visible {
   outline: 3px solid var(--brand); outline-offset: 2px;
 }
 
@@ -111,15 +109,15 @@ details.more[open] summary { margin-bottom: 12px; }
    is doc-format.css (.doc-style-mla / .doc-style-docs); the menus, toolbar,
    find panel and outline are docs-editor.css. */
 body.writing { background: #F9FBFD; }
-/* The site's bar scrolls away above the editor; while a session runs the
-   editor has the whole window (writer.js adds .writing-focus) and the bar
-   slides up out of the way, as Docs has no site bar */
-body.writing #appView > .topbar { position: relative; top: 0; margin-bottom: 8px; transition: margin-top .35s var(--ease, ease), visibility 0s; }
-body.writing.writing-focus #appView > .topbar { margin-top: -76px; visibility: hidden; transition: margin-top .35s var(--ease, ease), visibility 0s .35s; }
-body.writing .route-view { min-height: 100vh; }
+/* The editor has the whole window: no sidebar, no sheet. An arrow leads back
+   to the assignment, and during a session (writer.js adds .writing-focus) the
+   editor shows its own icon and avatar menu instead. */
+body.writing #appView:not(.hidden), body.embed #appView:not(.hidden) { display: block; }
+body.writing .vbar, body.writing .vnav, body.writing .vnav-scrim, body.embed .vbar, body.embed .vnav, body.embed .vnav-scrim { display: none; }
+body.writing .route-view, body.embed .route-view { margin: 0; min-height: 100vh; background: none; border-radius: 0; box-shadow: none; }
 /* The editor's own avatar menu only while the site's bar is away */
 body:not(.writing-focus) .wr-user { display: none; }
-/* Outside a session the site's bar is there, so the editor's own icon isn't */
+/* Outside a session the arrow is enough */
 body:not(.writing-focus) .wr-logo { display: none; }
 /* ...an arrow back to the assignment takes its place */
 body.writing-focus .wr-back, .wr-embed .wr-back { display: none; }
@@ -128,8 +126,6 @@ body.writing-focus .wr-back, .wr-embed .wr-back { display: none; }
 .wr-back svg { width: 20px; height: 20px; }
 a.wr-cls { text-decoration: none; transition: border-color .15s, color .15s; }
 a.wr-cls:hover { border-color: var(--brand); color: var(--brand); }
-body.embed #appView > .topbar { display: none; }
-body.embed .route-view { min-height: 100vh; }
 /* Scrolling to the caret keeps it clear of the sticky header and toolbar */
 html:has(body.writing), body.writing { scroll-padding-top: calc(var(--dx-sticky-h, 120px) + 16px); scroll-padding-bottom: 32px; }
 .wr { --dx-canvas: #F9FBFD; --dx-page-shadow: 0 1px 3px 1px rgba(60,64,67,.15), 0 1px 2px rgba(60,64,67,.12); padding: 0 0 80px; }
@@ -389,21 +385,49 @@ html:has(body.writing), body.writing { scroll-padding-top: calc(var(--dx-sticky-
 .seg button[aria-pressed="true"] { background: #fff; color: var(--ink); box-shadow: 0 1px 3px rgba(18,48,59,0.14), 0 0 0 1px rgba(18,48,59,0.05); }
 
 /* ---------- live board ---------- */
+.live-glance { padding-bottom: 20px; margin-bottom: 18px; border-bottom: 1px solid var(--line); }
+.live-glance-h { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+.live-glance-h h3, .live-tools h3 { margin: 0; font-size: 16px; font-weight: 700; letter-spacing: -0.01em; }
+.live-glance-h h3 { flex: 1; }
+.glance-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 24px; }
+.glance-cols ul { display: flex; flex-direction: column; gap: 6px; margin: 8px 0 0; padding-left: 18px; font-size: 14px; }
+.glance-cols .btn { margin-top: 10px; }
+.live-tag { display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px; border-radius: var(--r-pill); background: var(--green-soft); color: #256B3B; font-size: 12px; font-weight: 700; letter-spacing: .02em; }
+.live-tag i { width: 7px; height: 7px; border-radius: 50%; background: var(--green-deep); }
 .live-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
 .live-tools label { display: inline-flex; align-items: center; gap: 6px; }
 .live-banner { margin-bottom: 10px; }
 .live-card { overflow-x: auto; position: relative; }
+.live-table th { background: var(--surface-2); color: var(--ink-2); padding: 9px 12px; }
+.live-table td { padding: 8px 12px; }
+.live-table th:first-child, .live-table td:first-child { padding-left: 16px; }
 .live-table th, .live-table td { white-space: nowrap; }
-.live-table tr.attn { background: #FFFBF3; }
+.live-table td.mono { font-family: inherit; font-variant-numeric: tabular-nums; }
+.live-table tr.attn { background: #FEF8EE; }
 .live-table td.low { color: var(--red); font-weight: 700; }
-.attn-text { color: #9a6212; display: flex; align-items: center; gap: 4px; }
+.attn-text { color: #8A5A0B; display: flex; align-items: center; gap: 4px; }
 .attn-text svg { width: 12px; height: 12px; }
 .ok-mark { color: var(--green-deep); font-weight: 800; }
 .no-mark { color: var(--red); font-weight: 800; }
-.live-acts { display: flex; gap: 4px; justify-content: flex-end; }
+.live-acts { display: flex; gap: 2px; justify-content: flex-end; }
+.live-act { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border: 0; border-radius: 50%; background: none; color: var(--ink-2); transition: background-color .15s, color .15s; }
+.live-act:hover { background: var(--surface); color: var(--ink); }
+.live-act svg { width: 16px; height: 16px; }
 
 /* ---------- review ---------- */
 .btn.disabled { opacity: .45; pointer-events: none; }
+/* The essay with its notes beside it */
+.review .course-bar { flex-wrap: nowrap; gap: 10px; }
+.review .course-bar .crumbs { margin: 0; min-width: 0; }
+.review .page-head h1 { font-size: 24px; }
+.rv-split { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 28px; align-items: start; margin-top: 16px; }
+.rv-side { min-width: 0; }
+.side-note { margin: 0 0 8px; font-size: 13px; color: var(--ink-2); }
+.rv-notes ul { font-size: 14px; }
+.rv-side .src-bar { height: 12px; }
+.rv-side-rows { margin-top: 8px; }
+.rv-side .side-stat { padding: 6px 0; }
+@media (max-width: 1180px) { .rv-split { grid-template-columns: minmax(0, 1fr); } }
 .rv-doc-tools { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
 .rv-paper { max-width: 760px; margin: 0 auto; border-radius: var(--r); }
 .rv-paper .ql-toolbar { display: none; }
@@ -486,8 +510,9 @@ html:has(body.writing), body.writing { scroll-padding-top: calc(var(--dx-sticky-
 .print-area { display: none; }
 @media print {
   body.printing { background: #fff !important; }
-  body.printing #appView > .topbar, body.printing #appView > .shell, body.printing #routeView > .page, body.printing #modalRoot, body.printing #toastRoot, body.printing #authView { display: none !important; }
-  body.printing #routeView { min-height: 0; }
+  body.printing .vbar, body.printing .vnav, body.printing #appView > .shell, body.printing #routeView > .course, body.printing #modalRoot, body.printing #toastRoot, body.printing #authView { display: none !important; }
+  body.printing #appView:not(.hidden) { display: block; }
+  body.printing #routeView { min-height: 0; margin: 0; border-radius: 0; box-shadow: none; }
   body.printing .print-area { display: block !important; }
   .print-essay .ql-editor, .print-essay .ql-editor p, .print-essay .ql-editor li { line-height: 2; }
   .print-essay { font-family: "Iowan Old Style", Georgia, serif; font-size: 12pt; line-height: 2; color: #000; }
@@ -509,7 +534,7 @@ html:has(body.writing), body.writing { scroll-padding-top: calc(var(--dx-sticky-
 .dx-print { display: none; }
 @media print {
   body.dx-printing { background: #fff !important; }
-  body.dx-printing #appView > .topbar, body.dx-printing #appView > .shell, body.dx-printing #modalRoot, body.dx-printing #toastRoot, body.dx-printing #authView, body.dx-printing .wr > :not(.dx-print) { display: none !important; }
+  body.dx-printing .vbar, body.dx-printing .vnav, body.dx-printing #appView > .shell, body.dx-printing #modalRoot, body.dx-printing #toastRoot, body.dx-printing #authView, body.dx-printing .wr > :not(.dx-print) { display: none !important; }
   body.dx-printing #routeView { min-height: 0; }
   body.dx-printing .wr { padding: 0; }
   body.dx-printing .dx-print { display: block !important; color: #000; }

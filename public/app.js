@@ -298,8 +298,9 @@ function enterApp() {
   $('newProjectBtn').classList.toggle('hidden', me.role !== 'teacher');
   $('emptyMainText').textContent = me.role === 'teacher' ? 'Create a project on the left to add students and resources.' : 'Your teacher adds you to projects. They will show up on the left.';
   // Visor Classroom: pages come from the address bar (router.js); the project
-  // view is the /project/:id route.
+  // view is the /project/:id route. The sidebar lists classes and projects.
   if (window.VisorRouter) VisorRouter.start(); else loadProjects();
+  if (window.navRefresh) navRefresh();
   if (!me.tutorialSeen) setTimeout(openTutorial, 400);
 }
 
@@ -399,10 +400,9 @@ async function loadProjects(selectId) {
 
 function renderProjectList() {
   $('projectList').innerHTML = projects.map(p => `
-    <button class="proj-item ${project?.id === p.id ? 'active' : ''}" onclick="selectProject('${p.id}')">
-      <div class="n">${esc(p.name)}</div>
-      <div class="m">${p.students?.length ?? 0} student${(p.students?.length ?? 0) !== 1 ? 's' : ''} · ${p.resourceCount ?? 0} resource${(p.resourceCount ?? 0) !== 1 ? 's' : ''}</div>
-    </button>`).join('') || `<div class="muted small" style="padding:8px;">No projects yet.</div>`;
+    <a class="vnav-item" href="/project/${p.id}" data-link data-project="${p.id}" title="${p.students?.length ?? 0} student${(p.students?.length ?? 0) !== 1 ? 's' : ''} · ${p.resourceCount ?? 0} resource${(p.resourceCount ?? 0) !== 1 ? 's' : ''}"><span class="vlens" aria-hidden="true"></span><span class="vnav-t">${esc(p.name)}</span></a>`).join('') || (me?.role === 'teacher' ? '<div class="vnav-empty">No projects yet.</div>' : '');
+  $('navProjectsHead').classList.toggle('hidden', !projects.length && me?.role !== 'teacher');
+  window.VisorRouter?.paintNav();
 }
 
 function showEmptyMain() { $('emptyMain').classList.remove('hidden'); $('projectView').classList.add('hidden'); }

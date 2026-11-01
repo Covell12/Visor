@@ -99,7 +99,7 @@
    print only, so other prints keep the browser's paper size and margins */
 @media print {
   body.printing { background: #fff !important; }
-  body.printing #appView > .topbar, body.printing #appView > .shell, body.printing #routeView > .page, body.printing #modalRoot, body.printing #toastRoot, body.printing #authView { display: none !important; }
+  body.printing .vbar, body.printing .vnav, body.printing #appView > .shell, body.printing #routeView > .course, body.printing #modalRoot, body.printing #toastRoot, body.printing #authView { display: none !important; }
   body.printing #routeView { min-height: 0; padding: 0; margin: 0; }
   body.printing .print-area { display: block !important; }
   /* Highlights, text colours, table borders and the source patterns print as they look */

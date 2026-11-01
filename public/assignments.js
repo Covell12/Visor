@@ -368,7 +368,7 @@ function autoGroups() {
 }
 
 /* ====================== assignment page ======================
-   Inside the course frame (classes.js): the class's sidebar on the left,
+   Inside the course frame (classes.js): the class's bar across the top,
    the assignment in the middle, and on the overview a right-hand column
    with the student's own work or the teacher's submission counts. */
 let ap = null; // { data, tab }

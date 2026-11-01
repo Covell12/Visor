@@ -1,5 +1,5 @@
-/* Visor Classroom — Home (the course dashboard and its right-hand column),
-   the top bar's Classes menu, and the class pages: the sidebar frame,
+/* Visor Classroom — the sidebar's lists, Home (the greeting, classes and
+   right-hand column), and the class pages: the course frame,
    Assignments (folders and assignments in the teacher's order), People and
    Settings. Announcements and Home's Activity are updates.js; the
    assignment page (inside the same frame) is assignments.js.
@@ -71,7 +71,12 @@ const PI = {
   eyeOff: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.9 17.9A10 10 0 0 1 12 20c-6.5 0-10-8-10-8a18 18 0 0 1 5.1-6"/><path d="M9.9 4.2A9 9 0 0 1 12 4c6.5 0 10 8 10 8a18 18 0 0 1-2.2 3.2M14.1 14.1a3 3 0 1 1-4.2-4.2M2 2l20 20"/></svg>',
   send: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4z"/><path d="M22 2 11 13"/></svg>',
   book: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V3H6.5A2.5 2.5 0 0 0 4 5.5z"/><path d="M4 19.5A2.5 2.5 0 0 0 6.5 22H20v-5"/></svg>',
-  live: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="2"/><path d="M16.2 7.8a6 6 0 0 1 0 8.4M7.8 16.2a6 6 0 0 1 0-8.4M19.1 4.9a10 10 0 0 1 0 14.2M4.9 19.1a10 10 0 0 1 0-14.2"/></svg>'
+  live: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="2"/><path d="M16.2 7.8a6 6 0 0 1 0 8.4M7.8 16.2a6 6 0 0 1 0-8.4M19.1 4.9a10 10 0 0 1 0 14.2M4.9 19.1a10 10 0 0 1 0-14.2"/></svg>',
+  arrow: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>',
+  pause: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5v14M15 5v14"/></svg>',
+  play: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 5v14l11-7z"/></svg>',
+  clockPlus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 0-9 9"/><path d="M12 7v5l3 2M19 16v6M16 19h6"/></svg>',
+  stop: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>'
 };
 const TYPE_ICON = { writing: I.edit, group: I.users, discussion: I.chat };
 const typeIcon = (t, extra = '') => `<span class="mat-ic t-${esc(t)} ${extra}" aria-hidden="true">${TYPE_ICON[t] || I.doc}</span>`;
@@ -200,48 +205,51 @@ function resetPortal() {
   ddClose();
   cp = null; ap = null; af = null; upd = null; act = null; cal = null; coursesCache = null;
   updSeen.clear();
-  home = { projectsOpen: null, data: null, view: 'dashboard', showArchived: false, upcoming: null };
+  home = { data: null, view: 'dashboard', showArchived: false, upcoming: null };
   if ($('routeView')) $('routeView').innerHTML = '';
-  if ($('coursesMenu')) $('coursesMenu').innerHTML = '';
+  if ($('navClasses')) $('navClasses').innerHTML = '';
+  if ($('projectList')) $('projectList').innerHTML = '';
 }
 
-/* ====================== the top bar's Classes menu ====================== */
+/* ====================== the sidebar ======================
+   Home and Calendar are in index.html. Classes are listed here and projects
+   in app.js (renderProjectList); router.js marks the current one. On a phone
+   the sidebar is a drawer behind the menu button. */
 let coursesCache = null; // { at, list }
-const forgetCourses = () => { coursesCache = null; };
+const forgetCourses = () => { coursesCache = null; navRefresh(); };
 async function loadCourses(force = false) {
   if (!force && coursesCache && Date.now() - coursesCache.at < 20000) return coursesCache.list;
   const r = await api('/api/classes');
   coursesCache = { at: Date.now(), list: r.classes };
   return r.classes;
 }
-async function toggleCoursesMenu() {
-  const btn = $('coursesBtn'), menu = $('coursesMenu');
-  const opening = ddOpen?.menu !== menu;
-  ddToggle('coursesMenu', btn);
-  if (!opening) return;
-  if (!coursesCache) menu.innerHTML = '<div class="cm-empty"><span class="spinner"></span></div>';
-  else menu.innerHTML = coursesMenuHtml(coursesCache.list);
-  try {
-    const list = await loadCourses();
-    if (ddOpen?.menu !== menu) return;
-    const i = ddItems(menu).indexOf(document.activeElement);
-    menu.innerHTML = coursesMenuHtml(list);
-    if (i >= 0) ddItems(menu)[Math.min(i, ddItems(menu).length - 1)]?.focus();
-  }
-  catch (e) { menu.innerHTML = `<div class="cm-empty">${esc(e.message)}</div>`; }
-}
-function coursesMenuHtml(list) {
-  const active = list.filter(c => !c.archived), archived = list.length - active.length;
+// A class's letter in the sidebar: the first letter or digit of its name
+const courseLetter = c => [...String(c?.name || '')].find(ch => /[\p{L}\p{N}]/u.test(ch))?.toUpperCase() || '?';
+const courseSmall = c => `<span class="vtile cc-${courseColor(c)}" aria-hidden="true">${esc(courseLetter(c))}</span>`;
+function navPaint(list) {
   const teacher = me.role === 'teacher';
-  return `<div class="cm-head"><b>My classes</b>${archived ? `<a class="tiny" href="/?archived=1" data-link onclick="ddClose()">Archived (${archived})</a>` : ''}</div>
-    ${active.length ? `<div class="cm-grid">${active.map(c => `<a class="cm-item" href="/class/${c.id}" data-link onclick="ddClose()">${courseArt(c, 'cm-thumb')}<span class="cm-text"><span class="cm-name">${esc(c.name)}</span><span class="cm-sub">${c.isTeacher ? vcPlural(c.studentCount, 'student') + (teachersOf(c).length > 1 ? ` · ${vcPlural(teachersOf(c).length, 'teacher')}` : '') : esc(teacherNames(c))}</span></span></a>`).join('')}</div>`
-      : `<div class="cm-empty">${archived ? 'All your classes are archived.' : teacher ? 'You haven’t made a class yet.' : 'You’re not in a class yet. Ask your teacher for the class code.'}</div>`}
-    <div class="cm-foot">${teacher ? `<button class="btn btn-primary btn-sm" onclick="ddClose();openCreateClass()">${I.plusSm}Create class</button>` : `<button class="btn btn-primary btn-sm" onclick="ddClose();openJoinClass()">${I.plusSm}Join a class</button>`}
-      <a class="btn btn-ghost btn-sm" href="/" data-link onclick="ddClose()">All classes</a></div>`;
+  const active = list.filter(c => !c.archived), archived = list.length - active.length;
+  $('navClasses').innerHTML = active.map(c => `<a class="vnav-item" href="/class/${c.id}" data-link data-class="${c.id}">${courseSmall(c)}<span class="vnav-t">${esc(c.name)}</span>${c.activeSessions ? `<i class="live-dot" title="${vcPlural(c.activeSessions, 'student')} writing now"></i>` : ''}</a>`).join('')
+    + (!active.length ? `<div class="vnav-empty">${archived ? 'All your classes are archived.' : teacher ? 'You haven’t made a class yet.' : 'You’re not in a class yet.'}</div>` : '')
+    + (archived ? `<a class="vnav-more" href="/?archived=1" data-link>Archived (${archived})</a>` : '');
+  const add = $('navAddClass');
+  add.textContent = teacher ? '+ Add' : '+ Join';
+  add.onclick = teacher ? openCreateClass : openJoinClass;
+  VisorRouter.paintNav();
 }
+async function navRefresh() {
+  if (!me) return;
+  try { navPaint(await loadCourses()); } catch {}
+  try { projects = (await api('/api/projects')).projects; renderProjectList(); } catch {}
+}
+function toggleNav(open = !document.body.classList.contains('nav-open')) {
+  document.body.classList.toggle('nav-open', open);
+  $('vnavBtn')?.setAttribute('aria-expanded', String(open));
+}
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && document.body.classList.contains('nav-open')) { toggleNav(false); $('vnavBtn')?.focus(); } });
 
 /* ====================== home ====================== */
-let home = { projectsOpen: null, data: null, view: 'dashboard', showArchived: false, upcoming: null };
+let home = { data: null, view: 'dashboard', showArchived: false, upcoming: null };
 const homeViewKey = () => `visor.homeView.${me?.id || ''}`;
 
 VisorRouter.add('/', async (el, params, query) => {
@@ -252,17 +260,22 @@ VisorRouter.add('/', async (el, params, query) => {
   home.showArchived = query.get('archived') === '1';
   el.innerHTML = `<div class="portal"><div class="loading-row"><span class="spinner"></span></div></div>`;
   const mine = VisorRouter.seq();
-  const [cls, dash, projs] = await Promise.all([api('/api/classes'), api('/api/dashboard'), api('/api/projects')]);
+  const [cls, dash] = await Promise.all([api('/api/classes'), api('/api/dashboard')]);
   if (mine !== VisorRouter.seq()) return;
   coursesCache = { at: Date.now(), list: cls.classes };
-  home.data = { classes: cls.classes, dash, projects: projs.projects };
+  navPaint(cls.classes);
+  home.data = { classes: cls.classes, dash };
   home.upcoming = null;
   renderHome();
   loadHomeUpcoming();
   const t = setInterval(async () => {
-    // Keep "Happening now" fresh while the page is open
+    // Keep "Live now" fresh while the page is open
     if (me.role !== 'teacher' || document.hidden) return;
-    try { const d = await api('/api/dashboard'); home.data.dash = d; const box = $('happeningBox'); if (box) box.outerHTML = happeningBoxHtml(d.happeningNow); } catch {}
+    try {
+      const d = await api('/api/dashboard'); home.data.dash = d;
+      const box = $('happeningBox'); if (box) box.outerHTML = happeningBoxHtml(d.happeningNow);
+      if ($('homeSummary')) $('homeSummary').textContent = homeSummary();
+    } catch {}
   }, 20000);
   return () => clearInterval(t);
 });
@@ -274,27 +287,63 @@ function homeView(view) {
   renderHome();
 }
 
+// "Good morning, Priya"
+function homeHello() {
+  const h = new Date().getHours();
+  return `${h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening'}, ${me.firstName || me.name}`;
+}
+// Today, and what's waiting: a count from the dashboard, never a judgment
+function homeSummary() {
+  const today = new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
+  const d = home.data.dash;
+  if (me.role === 'teacher') {
+    const live = d.happeningNow?.length || 0, read = d.needsReview?.length || 0;
+    const parts = [live ? `${vcPlural(live, 'session')} ${live === 1 ? 'is' : 'are'} live` : '', read ? `${vcPlural(read, 'essay')} ${read === 1 ? 'is' : 'are'} ready to read` : ''].filter(Boolean);
+    return `${today}. ${parts.length ? `${parts.join(' and ')}.` : 'Nothing is waiting for you.'}`;
+  }
+  const now = Date.now();
+  const due = (d.todo || []).filter(t => t.dueAt && !isDone(t.status) && Date.parse(t.dueAt) >= now && Date.parse(t.dueAt) < now + 7 * 864e5).length;
+  return `${today}. ${due ? `You have ${vcPlural(due, 'thing')} due this week.` : 'Nothing is due this week.'}`;
+}
+// A student's next piece of work: the soonest not done, then any without a date
+function nextUpHtml() {
+  const todo = (home.data.dash.todo || []).filter(t => !isDone(t.status));
+  const t = todo.find(x => x.dueAt && Date.parse(x.dueAt) >= Date.now()) || todo.find(x => !x.dueAt);
+  if (!t) return '';
+  const label = t.status === 'in-progress' ? 'Keep writing' : 'Open the assignment';
+  return `<section class="next-up" aria-label="Next up">
+    <div class="next-up-t"><span class="next-up-k">Next up · ${esc(t.className)}</span><h2>${esc(t.title)}</h2><p>${esc(TYPE_LABEL[t.type] || '')} · ${esc(vcDue(t.dueAt))}</p></div>
+    <a class="btn next-up-btn" href="/a/${t.assignmentId}" data-link>${label}${PI.arrow}</a>
+  </section>`;
+}
+
 function renderHome() {
   const el = $('routeView');
   const teacher = me.role === 'teacher';
-  const head = `<div class="home-head">
-      <div class="tabs" role="tablist" aria-label="Home view">
-        <button class="tab ${home.view === 'dashboard' ? 'active' : ''}" role="tab" aria-selected="${home.view === 'dashboard'}" onclick="homeView('dashboard')">Classes</button>
-        <button class="tab ${home.view === 'activity' ? 'active' : ''}" role="tab" aria-selected="${home.view === 'activity'}" onclick="homeView('activity')">Activity</button>
+  el.innerHTML = `<div class="portal">
+    <header class="home-hello">
+      <div><h1>${esc(homeHello())}</h1><p id="homeSummary">${esc(homeSummary())}</p></div>
+      <div class="head-actions">
+        <div class="seg" role="group" aria-label="Home view">
+          <button aria-pressed="${home.view === 'dashboard'}" onclick="homeView('dashboard')">Classes</button>
+          <button aria-pressed="${home.view === 'activity'}" onclick="homeView('activity')">Activity</button>
+        </div>
+        ${teacher ? `<button class="btn btn-primary" onclick="openCreateClass()">${I.plusSm}Create class</button>` : `<button class="btn btn-ghost" onclick="openJoinClass()">${I.plusSm}Join a class</button>`}
       </div>
-      <div class="head-actions">${teacher ? `<button class="btn btn-primary btn-sm" onclick="openCreateClass()">${I.plusSm}Create class</button>` : `<button class="btn btn-ghost btn-sm" onclick="openJoinClass()">${I.plusSm}Join a class</button>`}</div>
-    </div>`;
-  el.innerHTML = `<div class="portal"><div class="home-grid">
-    <div class="home-main">${head}<div id="homeBody"></div></div>
-    <aside class="home-right" aria-label="To do">${teacher ? teacherHomeRight() : studentHomeRight()}</aside>
-  </div></div>`;
+    </header>
+    ${teacher ? happeningBoxHtml(home.data.dash.happeningNow) : nextUpHtml()}
+    <div class="home-grid">
+      <div class="home-main"><h2 class="home-h">${home.view === 'activity' ? 'Activity' : 'Your classes'}</h2><div id="homeBody"></div></div>
+      <aside class="home-right" aria-label="To do">${teacher ? teacherHomeRight() : studentHomeRight()}</aside>
+    </div>
+  </div>`;
   if (home.view === 'activity' && window.renderActivity) renderActivity($('homeBody'), home.data.classes);
   else $('homeBody').innerHTML = dashboardHtml();
   if (!teacher) homeExtStatus();
 }
 
 function dashboardHtml() {
-  const { classes: list, projects } = home.data;
+  const { classes: list } = home.data;
   const teacher = me.role === 'teacher';
   const active = list.filter(c => !c.archived), archived = list.filter(c => c.archived);
   const newTile = teacher
@@ -305,8 +354,7 @@ function dashboardHtml() {
     : `<div class="feed-empty" style="margin-bottom:18px;"><b>${teacher ? 'Create your first class' : 'You’re not in a class yet'}</b>${teacher ? 'A class holds your roster, its assignments (in-class essays, group projects and discussions, in folders if you like) and its announcements. You can share it with other teachers.' : 'Ask your teacher for the class code, then join with it.'}</div>`) : '';
   return `${empty}<div class="course-tiles">${active.map(courseTile).join('')}${newTile}</div>
     ${archived.length ? `<div class="home-more"><button class="btn btn-ghost btn-sm" aria-expanded="${home.showArchived}" onclick="home.showArchived=!home.showArchived;$('homeBody').innerHTML=dashboardHtml()">${home.showArchived ? 'Hide' : 'Show'} archived classes (${archived.length})</button></div>
-      ${home.showArchived ? `<div class="course-tiles" style="margin-top:14px;">${archived.map(courseTile).join('')}</div>` : ''}` : ''}
-    ${projectsSection(projects, list.length > 0)}`;
+      ${home.showArchived ? `<div class="course-tiles" style="margin-top:14px;">${archived.map(courseTile).join('')}</div>` : ''}` : ''}`;
 }
 
 function courseTile(c) {
@@ -314,54 +362,36 @@ function courseTile(c) {
     ? [c.activeSessions ? `<span class="live-dot-text"><i class="live-dot"></i>${c.activeSessions} writing now</span>` : '', c.toReview ? `<span><b>${c.toReview}</b> to review</span>` : '', `<span>${vcPlural(c.assignmentCount || 0, 'assignment')}</span>`]
     : [c.upcoming?.[0] ? `<span>Next: <b>${esc(c.upcoming[0].title)}</b> · ${esc(vcDate(c.upcoming[0].dueAt))}</span>` : `<span>${vcPlural(c.assignmentCount || 0, 'assignment')}</span>`];
   return `<a class="course-tile cc-${courseColor(c)} ${c.archived ? 'archived' : ''}" href="/class/${c.id}" data-link>
-    ${courseArt(c)}${courseMono(c)}
+    ${courseArt(c)}
     ${c.archived ? '<span class="pill pill-gray ct-flag">Archived</span>' : ''}
     <span class="ct-body"><span class="ct-name">${esc(c.name)}</span><span class="ct-sub">${c.isTeacher ? vcPlural(c.studentCount, 'student') + (teachersOf(c).length > 1 ? ` · ${vcPlural(teachersOf(c).length, 'teacher')}` : '') : esc(teacherNames(c))}</span>
       <span class="ct-stats">${stats.filter(Boolean).join('')}</span></span>
   </a>`;
 }
 
-function projectsSection(projects, collapsedByDefault) {
-  const list = projects.filter(p => !p.classId);
-  if (!list.length && me.role !== 'teacher') return '';
-  if (home.projectsOpen === null) home.projectsOpen = !collapsedByDefault;
-  const body = list.length
-    ? `<div class="stack" style="gap:8px;">${list.map(p => `<a class="card card-hover row-link" href="/project/${p.id}" data-link><b>${esc(p.name)}</b><span class="muted small">${vcPlural(p.students?.length || 0, 'student')} · ${vcPlural(p.resourceCount || 0, 'resource')}</span></a>`).join('')}</div>`
-    : `<div class="muted small">No projects outside your classes.</div>`;
-  return `<section class="home-section">
-    <div class="card collapse ${home.projectsOpen ? 'open' : ''}" id="homeProjects">
-      <div class="ch" role="button" tabindex="0" aria-expanded="${home.projectsOpen}" onclick="toggleHomeProjects()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleHomeProjects();}">${I.chev}<b style="flex:1;">Projects outside classes</b><span class="muted small">${list.length}</span>
-        ${me.role === 'teacher' ? `<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openNewProject()">${I.plusSm}New project</button>` : ''}</div>
-      <div class="cb">${body}</div>
-    </div></section>`;
-}
-function toggleHomeProjects() {
-  home.projectsOpen = !home.projectsOpen;
-  const el = $('homeProjects'); el.classList.toggle('open', home.projectsOpen);
-  el.querySelector('.ch').setAttribute('aria-expanded', home.projectsOpen);
-}
-
 /* ---- Home's right-hand column ---- */
 function teacherHomeRight() {
-  const d = home.data.dash;
-  const review = d.needsReview || [];
-  return `${happeningBoxHtml(d.happeningNow)}
-    <section class="side-box"><div class="side-box-h"><span>${I.check}To review</span>${review.length ? `<span>${review.length}</span>` : ''}</div>
-      ${review.length ? `<div class="side-box-b">${review.slice(0, 6).map(r => `<a class="ev-row" href="/review/${r.docId}" data-link><span class="ev-main"><span class="ev-title">${esc(r.student)}</span><span class="ev-meta">${esc(r.title)} · ${esc(r.className)} · ${esc(timeAgo(r.submittedAt))}</span></span></a>`).join('')}
+  const review = home.data.dash.needsReview || [];
+  return `<section class="side-box" id="upcomingBox">${upcomingBoxInner()}</section>
+    <section class="side-box"><div class="side-box-h"><span>Ready to read</span>${review.length ? `<span class="side-n">${review.length}</span>` : ''}</div>
+      ${review.length ? `<div class="side-box-b">${review.slice(0, 6).map(r => `<a class="up-row" href="/review/${r.docId}" data-link>${avatarHtml({ name: r.student }, 'avatar-sm')}<span class="ev-main"><span class="ev-title">${esc(r.student)}</span><span class="ev-meta">${esc(r.title)} · ${esc(r.className)}</span></span><span class="up-when">${esc(timeAgo(r.submittedAt))}</span></a>`).join('')}
         ${review.length > 6 ? `<div class="side-empty">and ${review.length - 6} more: see each assignment’s Submissions.</div>` : ''}</div>`
-        : `<div class="side-empty">Nothing waiting. Submitted work shows up here until you return it.</div>`}</section>
-    <section class="side-box" id="upcomingBox">${upcomingBoxInner()}</section>`;
+        : `<div class="side-empty">Nothing waiting. Submitted work shows up here until you return it.</div>`}</section>`;
 }
+// The live sessions, each a band across the top of Home
 function happeningBoxHtml(list) {
   if (!list?.length) return '<div id="happeningBox"></div>';
-  return `<section class="side-box" id="happeningBox"><div class="side-box-h live"><span><i class="live-dot"></i> Live now</span></div><div class="side-box-b">
-    ${list.map(h => `<a class="ev-row" href="/a/${h.assignmentId}?tab=live" data-link><span class="ev-main"><span class="ev-title">${esc(h.title)}</span><span class="ev-meta">${esc(h.className)} · ${h.live} of ${h.students} writing</span></span></a>`).join('')}</div></section>`;
+  return `<div id="happeningBox" class="live-bands">${list.map(h => `<section class="live-band" aria-label="Live now">
+      <span class="live-tag"><i></i>LIVE</span>
+      <span class="live-band-t"><b>${esc(h.className)}: ${esc(h.title)}</b><span> · ${h.live} of ${h.students} writing</span></span>
+      <a class="btn btn-primary" href="/a/${h.assignmentId}?tab=live" data-link>Open live view${PI.arrow}</a>
+    </section>`).join('')}</div>`;
 }
 function studentHomeRight() {
   const todo = home.data.dash.todo || [];
   const overdue = todo.filter(t => t.type === 'writing' && isOverdue(t.dueAt, t.status)).sort((a, b) => (a.dueAt < b.dueAt ? -1 : 1));
-  return `<section class="side-box"><div class="side-box-h"><span>${I.puzzle}Visor extension</span></div><div class="side-box-p" id="homeExt"><span class="muted small">Checking…</span></div></section>
-    ${overdue.length ? `<section class="side-box"><div class="side-box-h red"><span>${I.alert}Overdue</span><span>${overdue.length}</span></div><div class="side-box-b">
+  return `<section class="side-box"><div class="side-box-h"><span>Visor extension</span></div><div class="side-box-p" id="homeExt"><span class="muted small">Checking…</span></div></section>
+    ${overdue.length ? `<section class="side-box"><div class="side-box-h red"><span>Overdue</span><span class="side-n">${overdue.length}</span></div><div class="side-box-b">
       ${overdue.map(t => `<a class="ev-row" href="/a/${t.assignmentId}" data-link><span class="ev-main"><span class="ev-title">${esc(t.title)}</span><span class="ev-meta red">${esc(vcDue(t.dueAt))}</span><span class="ev-meta">${esc(t.className)} · ${esc(STATUS_LABEL[t.status] || '')}</span></span></a>`).join('')}</div></section>` : ''}
     <section class="side-box" id="upcomingBox">${upcomingBoxInner()}</section>`;
 }
@@ -385,27 +415,20 @@ async function loadHomeUpcoming() {
   if (box) box.innerHTML = upcomingBoxInner();
 }
 function upcomingBoxInner() {
-  const head = `<div class="side-box-h"><span>${PI.cal}Coming up</span><a href="/calendar" data-link>Calendar</a></div>`;
+  const head = `<div class="side-box-h"><span>Upcoming</span><a href="/calendar" data-link>Calendar</a></div>`;
   if (home.upcoming === null) return `${head}<div class="side-empty"><span class="spinner"></span></div>`;
   const list = home.upcoming.filter(e => me.role === 'teacher' || !isDone(e.status));
   if (!list.length) return `${head}<div class="side-empty">Nothing due in the next two weeks.</div>`;
-  return `${head}<div class="side-box-b">${eventsByDayHtml(list.slice(0, 12), { showClass: true })}</div>`;
+  return `${head}<div class="side-box-b">${list.slice(0, 6).map(ev => upRowHtml(ev, { showClass: true })).join('')}</div>`;
 }
 
 const EVENT_KIND = { due: 'Due', discussion: 'Discussion', opens: 'Writing opens', closes: 'Writing closes' };
-// Events grouped under "Today", "Tomorrow", "Thursday, October 16"…
-function eventsByDayHtml(events, { showClass = false } = {}) {
-  let out = '', day = '';
-  for (const ev of events) {
-    const k = vcDayKey(ev.at);
-    if (k !== day) { day = k; out += `<div class="ev-day">${esc(vcDayLabel(ev.at))}</div>`; }
-    const overdue = ev.kind === 'due' && isOverdue(ev.at, ev.status);
-    const meta = [`${EVENT_KIND[ev.kind] || ''} ${vcTime(ev.at)}`, showClass ? ev.className : '', ev.published === false ? 'Not published' : '', isDone(ev.status) ? STATUS_LABEL[ev.status] : ''].filter(Boolean);
-    out += `<a class="ev-row cc-${esc(ev.color || 'slate')}" href="/a/${ev.assignmentId}" data-link><span class="ev-dot"></span><span class="ev-main"><span class="ev-title">${esc(ev.title)}</span><span class="ev-meta ${overdue ? 'red' : ''}">${esc(meta.join(' · '))}</span></span></a>`;
-  }
-  return out;
+// One event in a right-hand column: its date in a lens, then what it is
+function upRowHtml(ev, { showClass = false } = {}) {
+  const d = new Date(ev.at), overdue = ev.kind === 'due' && isOverdue(ev.at, ev.status);
+  const meta = [`${EVENT_KIND[ev.kind] || ''} ${vcTime(ev.at)}`, showClass ? ev.className : '', ev.published === false ? 'Not published' : '', isDone(ev.status) ? STATUS_LABEL[ev.status] : ''].filter(Boolean);
+  return `<a class="up-row cc-${esc(ev.color || 'slate')}" href="/a/${ev.assignmentId}" data-link><span class="up-date" aria-hidden="true"><i>${esc(d.toLocaleDateString(undefined, { month: 'short' }))}</i><b>${d.getDate()}</b></span><span class="ev-main"><span class="sr-only">${esc(vcDayLabel(ev.at))}: </span><span class="ev-title">${esc(ev.title)}</span><span class="ev-meta ${overdue ? 'red' : ''}">${esc(meta.join(' · '))}</span></span></a>`;
 }
-
 /* ---- create and join ---- */
 function openCreateClass() {
   openModal({ title: 'Create a class', sub: 'Students join with its class code, or you add them by email. You can add other teachers later, under People.', body: `<div class="field"><label for="ncName">Class name</label><input id="ncName" class="input" placeholder="English 10 – Period 3" maxlength="120" /></div>`,
@@ -436,11 +459,12 @@ async function joinClass() {
 }
 
 /* ====================== the course frame ======================
-   Visor's "lens" layout: the class's cover (its banner, with a frosted panel
-   holding its monogram, name and teachers), pill tabs for its pages, then the
-   page with an optional right-hand column. The assignment page uses the
-   compact form: one bar with the monogram, the class name and the tabs. */
+   The class's cover (its banner across the top of the sheet, with its name
+   and teachers), pill tabs for its pages, then the page with an optional
+   right-hand column. The assignment page uses the compact form: one bar with
+   the class's tile, its name and the tabs. */
 function courseFrame(c, { active = '', main = '', right = '', compact = false }) {
+  VisorRouter.markClass(c.id);
   return `<div class="course cc-${courseColor(c)} ${right ? '' : 'no-right'}${compact ? ' compact' : ''}">
     ${compact ? courseBarHtml(c, active) : courseHeroHtml(c, active)}
     <div class="course-body">
@@ -461,8 +485,6 @@ function courseTabsHtml(c, active) {
       ${c.isTeacher ? link('settings', `/class/${c.id}?tab=settings`, I.gear, 'Settings') : ''}
     </nav>`;
 }
-// The monogram: the class's initials in a ring of its colour (the lens)
-const courseMono = (c, size = '') => `<span class="course-mono ${size}" aria-hidden="true">${esc(courseInitials(c?.name))}</span>`;
 function courseHeroHtml(c, active) {
   const teachers = teachersOf(c);
   const who = c.isTeacher
@@ -474,24 +496,21 @@ function courseHeroHtml(c, active) {
       : c.joinCode ? `<button type="button" class="glass-btn code" onclick="copyText('${esc(c.joinCode)}','Class code copied')" title="${c.joinOpen === false ? 'Joining with the code is closed' : 'Students join with this code. Click to copy it.'}"><span class="glass-k">Class code</span><span class="mono">${esc(c.joinCode)}</span>${I.copy}</button>` : '';
   return `<header class="course-hero">
       ${courseArt(c, 'course-cover')}
+      <div class="course-hero-text"><div class="course-name">${esc(c.name)}${c.archived ? ' <span class="pill pill-gray">Archived</span>' : ''}</div>
+        <div class="course-who">${avatarStack(teachers)}<span>${who}</span></div></div>
       <div class="course-hero-tools">${invite}${c.isTeacher ? `<button type="button" class="glass-btn icon" onclick="openClassBanner('${c.id}')" aria-label="Change the banner" title="Change the banner">${I.edit}</button>` : ''}</div>
-      <div class="course-glass">
-        ${courseMono(c, 'lg')}
-        <div class="course-glass-text"><div class="course-name">${esc(c.name)}${c.archived ? ' <span class="pill pill-gray">Archived</span>' : ''}</div>
-          <div class="course-who">${avatarStack(teachers)}<span>${who}</span></div></div>
-      </div>
     </header>
     ${courseTabsHtml(c, active)}`;
 }
 function courseBarHtml(c, active) {
   return `<header class="course-bar">
-      <a class="course-bar-id" href="/class/${c.id}" data-link>${courseMono(c)}<span class="course-bar-name">${esc(c.name)}</span></a>
+      <a class="course-bar-id" href="/class/${c.id}" data-link>${courseSmall(c)}<span class="course-bar-name">${esc(c.name)}</span></a>
       ${courseTabsHtml(c, active)}
     </header>`;
 }
 const avatarStack = list => `<span class="avatar-stack" aria-hidden="true">${list.slice(0, 4).map(t => avatarHtml(t, 'avatar-xs')).join('')}</span>`;
 
-// The sidebar's pencil (and Settings): the class's banner. A background (the
+// The banner's pencil (and Settings): the class's banner. A background (the
 // class colour, one of Visor's designs, or a picture) and the colour, which
 // also marks the class's calendar events and stays under any picture.
 let bn = null; // { classId, c, color, bg: { kind: 'none'|'preset'|'upload'|'file', preset, pos, url, blob } }
@@ -502,7 +521,7 @@ function openClassBanner(classId) {
   bn = { classId, c, color: courseColor(c), bg: b?.kind === 'preset' ? { kind: 'preset', preset: b.preset } : b?.kind === 'upload' ? { kind: 'upload', url: b.url, pos: b.pos ?? 50 } : { kind: 'none' } };
   bn.was = JSON.stringify([bn.color, bn.bg]);
   const tile = (key, label, art) => `<button type="button" role="radio" class="bn-tile" data-bg="${key}" aria-checked="false" aria-label="${esc(label)}">${art}<span class="bn-name">${esc(label)}</span></button>`;
-  openModal({ title: 'Class banner', sub: 'Everyone in the class sees it: on the class page, its tile on Home and the Classes menu.', wide: true,
+  openModal({ title: 'Class banner', sub: 'Everyone in the class sees it: on the class page and its tile on Home.', wide: true,
     body: `<div class="bn-preview" id="bnPreview"></div>
       <div class="bn-k" id="bnBgLabel">Background</div>
       <div class="bn-grid" role="radiogroup" aria-labelledby="bnBgLabel" id="bnGrid">
@@ -701,18 +720,18 @@ function classRightHtml() {
     if (a.discussionDate) events.push({ ...base, kind: 'discussion', at: a.discussionDate });
   }
   const upcoming = events.filter(e => Date.parse(e.at) >= now && Date.parse(e.at) < soon && (c.isTeacher || !isDone(e.status))).sort((a, b) => (a.at < b.at ? -1 : 1));
-  const upBox = `<section class="side-box"><div class="side-box-h"><span>${PI.cal}Coming up</span>${c.archived ? '' : `<a href="/calendar?class=${c.id}" data-link>Calendar</a>`}</div>
-    ${upcoming.length ? `<div class="side-box-b">${eventsByDayHtml(upcoming.slice(0, 10))}</div>` : '<div class="side-empty">Nothing due in the next three weeks.</div>'}</section>`;
+  const upBox = `<section class="side-box"><div class="side-box-h"><span>Upcoming</span>${c.archived ? '' : `<a href="/calendar?class=${c.id}" data-link>Calendar</a>`}</div>
+    ${upcoming.length ? `<div class="side-box-b">${upcoming.slice(0, 6).map(ev => upRowHtml(ev)).join('')}</div>` : '<div class="side-empty">Nothing due in the next three weeks.</div>'}</section>`;
   if (!c.isTeacher) {
     const overdue = list.filter(a => a.type === 'writing' && isOverdue(a.dueAt, a.status || 'not-started'));
-    return `${overdue.length ? `<section class="side-box"><div class="side-box-h red"><span>${I.alert}Overdue</span><span>${overdue.length}</span></div><div class="side-box-b">
+    return `${overdue.length ? `<section class="side-box"><div class="side-box-h red"><span>Overdue</span><span class="side-n">${overdue.length}</span></div><div class="side-box-b">
       ${overdue.map(a => `<a class="ev-row" href="/a/${a.id}" data-link><span class="ev-main"><span class="ev-title">${esc(a.title)}</span><span class="ev-meta red">${esc(vcDue(a.dueAt))}</span></span></a>`).join('')}</div></section>` : ''}${upBox}`;
   }
   const live = list.filter(a => a.stats?.live);
   const review = list.filter(a => a.stats?.submitted);
   return `${live.length ? `<section class="side-box"><div class="side-box-h live"><span><i class="live-dot"></i> Live now</span></div><div class="side-box-b">
       ${live.map(a => `<a class="ev-row" href="/a/${a.id}?tab=live" data-link><span class="ev-main"><span class="ev-title">${esc(a.title)}</span><span class="ev-meta">${a.stats.live} of ${c.studentCount} writing</span></span></a>`).join('')}</div></section>` : ''}
-    <section class="side-box"><div class="side-box-h"><span>${I.check}To review</span></div>
+    <section class="side-box"><div class="side-box-h"><span>Ready to read</span></div>
       ${review.length ? `<div class="side-box-b">${review.map(a => `<a class="side-stat" href="/a/${a.id}?tab=submissions" data-link><span>${esc(a.title)}</span><b>${a.stats.submitted}</b></a>`).join('')}</div>` : '<div class="side-empty">Nothing waiting for you.</div>'}</section>
     ${upBox}`;
 }
@@ -1217,7 +1236,7 @@ function classSettingsHtml() {
       <div class="field"><label>Banner</label>
         <div class="color-preview cs-banner">${courseArt(c, '', 'div', 'id="csPreview"')}<div><div class="small">${esc(c.background?.kind === 'preset' ? BG_NAME[c.background.preset] : c.background?.kind === 'upload' ? 'Your picture' : 'Class colour')} · ${esc(COLOR_NAME[courseColor(c)] || '')}</div>
           <button type="button" class="btn btn-ghost btn-sm" style="margin-top:6px;" onclick="openClassBanner('${c.id}')">${I.edit}Change background and colour</button>
-          <div class="hint">On the class page, its tile on Home and the Classes menu. The colour also marks its calendar events.</div></div></div></div>
+          <div class="hint">On the class page and its tile on Home. The colour also marks its calendar events.</div></div></div></div>
       <div class="field"><label for="csRetention">Keep research records for</label>
         <div style="display:flex;gap:8px;align-items:center;"><input id="csRetention" class="input" type="number" min="1" max="3650" value="${c.researchRetentionDays || 180}" style="max-width:120px;" /><span class="muted small">days</span></div>
         <div class="hint">Searches, pages and copies the extension recorded during writing sessions are deleted after this. Essays and their writing history are kept.</div></div>
@@ -1225,7 +1244,7 @@ function classSettingsHtml() {
     </section>
     <section class="card card-pad">
       <h2 class="section-title" style="font-size:16px;margin-bottom:6px;">${c.archived ? 'Archived' : 'Archive'}</h2>
-      <p class="small muted" style="margin:0 0 12px;">${c.archived ? 'This class is archived: it’s hidden from Home and the Classes menu, but nothing is deleted.' : 'Archiving hides the class from Home and the Classes menu (for every teacher of it). Nothing is deleted, and you can bring it back.'}</p>
+      <p class="small muted" style="margin:0 0 12px;">${c.archived ? 'This class is archived: it’s hidden from Home and the sidebar, but nothing is deleted.' : 'Archiving hides the class from Home and the Classes menu (for every teacher of it). Nothing is deleted, and you can bring it back.'}</p>
       <button class="btn btn-ghost" onclick="classPatch({ archived: ${!c.archived} }, '${c.archived ? 'Class restored' : 'Class archived'}')">${c.archived ? 'Restore class' : 'Archive class'}</button>
     </section>
     ${c.isOwner === false ? `<section class="card card-pad danger-zone">

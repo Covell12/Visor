@@ -12,7 +12,7 @@ When everyone's in, use **Add people → Close joining with the code** so the co
 
 **Co-teachers.** **Add people → Add a teacher…** shares the class with another teacher (they need a Visor teacher account). Co-teachers can do everything you can (assignments, announcements, people, live sessions, review) except delete the class; the class's owner (whoever made it) can remove them, and they can leave it themselves.
 
-Every class gets a colour and a banner, shown on its tile on Home, in the **Classes** menu and on the **Calendar**. Change them with the pencil at the top right of the class's page (or **Settings → Change background and colour**): keep the colour, pick one of eight designs, or upload your own picture (PNG, JPEG or WebP) and choose which part shows. Everyone in the class sees it.
+Every class gets a colour and a banner, shown on its tile on Home, in the sidebar and on the **Calendar**. Change them with the pencil at the top right of the class's page (or **Settings → Change background and colour**): keep the colour, pick one of eight designs, or upload your own picture (PNG, JPEG or WebP) and choose which part shows. Everyone in the class sees it.
 
 ## 2. Make a writing assignment
 
@@ -29,7 +29,7 @@ Change anything you like (time limit, the window when sessions can start, allowe
 
 **Announcements.** Post to a class on its **Announcements** page, and pin the important ones to the top. To post the same announcement to several classes at once, use the box on Home's **Activity** tab. Students see announcements on the class page and in their own Activity, next to newly published assignments.
 
-**Calendar.** The **Calendar** in the top bar shows every due date, discussion date and writing window across your classes (unpublished ones are marked, and only you see them). Filter it to one class, or switch to the list.
+**Calendar.** The **Calendar** in the sidebar shows every due date, discussion date and writing window across your classes (unpublished ones are marked, and only you see them). Filter it to one class, or switch to the list.
 
 ## 3. On the day
 
