@@ -196,6 +196,10 @@ textarea.input { min-height: 120px; resize: vertical; line-height: 1.5; }
 .vnav-item.active::before { content: ""; position: absolute; left: 0; top: 7px; bottom: 7px; width: 3px; border-radius: 2px; background: linear-gradient(180deg, var(--blue), var(--green)); }
 .vnav-n { flex: none; min-width: 20px; padding: 0 6px; border-radius: 5px; background: #F2B04A; color: #3A2503; font-size: 11.5px; font-weight: 700; line-height: 18px; text-align: center; font-variant-numeric: tabular-nums; }
 .vnav-main .vnav-item.active { color: var(--brand); }
+.vnav-school { color: var(--ink); font-weight: 600; }
+.vnav-school-ic { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 22px; height: 22px; margin-left: -2px; overflow: hidden; border-radius: 6px; background: var(--grad); color: #fff; }
+.vnav-school-ic svg { width: 14px; height: 14px; }
+.vnav-school-ic img { width: 100%; height: 100%; object-fit: contain; background: #fff; }
 .vnav-t { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* A class in the sidebar: its letter on a tile of its colour, dark enough for white text */
 .vtile { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 26px; height: 26px; border-radius: 9px; background: color-mix(in srgb, var(--cc, #5E6E7D) 70%, #14293A); color: #fff; font-size: 12px; font-weight: 700; }

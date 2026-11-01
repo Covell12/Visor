@@ -21,6 +21,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const C = require('../lib/classes');
 const app = require('../server');
+const repo = require('../lib/repo');
 
 let server, base;
 test.before(async () => {
@@ -42,8 +43,14 @@ function client() {
   return { get: u => call('GET', u), post: (u, b) => call('POST', u, b || {}) };
 }
 let n = 0;
+// These schools have nobody running them, the way every school did before
+// facilitators (lib/schools.js): anyone can still pick one.
+async function openSchool(name) {
+  await repo.withCore(core => { if (!Object.values(core.orgs).some(o => o.name === name)) { const id = `org-${name.replace(/\W/g, '')}`; core.orgs[id] = { id, name, createdAt: new Date().toISOString() }; } });
+}
 async function signup(role, firstName, lastName, schoolName) {
   const c = client();
+  if (schoolName) await openSchool(schoolName);
   const r = await c.post('/api/auth/signup', { email: `${firstName.toLowerCase()}${++n}@school.test`, password: 'secret12', firstName, lastName, role, ...(schoolName ? { schoolName } : {}), ...(role === 'student' ? { over13: true } : {}) });
   assert.strictEqual(r.status, 200, JSON.stringify(r.data));
   c.user = r.data.user;

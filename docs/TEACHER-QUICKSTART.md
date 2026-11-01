@@ -58,6 +58,22 @@ Time is fair by design. Pausing a student (or everyone) stops their clock, so a 
 
 Students can **unsubmit** an essay until the due date, or until you save feedback or a score on it. It then leaves To review until they submit again, and the essay shows how many times they unsubmitted. They can't unsubmit once their time or the session window has run out, or if you ended the session and submitted for them.
 
+## Your School
+
+Every teacher has a **Your School** tab showing the school's students and teachers, with their roles and grades.
+
+To set up a school, choose **Create a new school** when you sign up, or use the Your School tab. You become its **facilitator**, and a checklist takes you through the rest:
+
+1. **Add your logo** under Settings.
+2. **Add your people.** Paste email addresses, or copy columns straight from a spreadsheet, or upload a CSV. Name, role and grades are picked up from each line in any order, such as `Jo Park, jo@school.org, teacher, 9-10`. Anyone without a role or grade gets the defaults you choose, and you can fix any row before adding. Pasting a list again corrects what's there.
+3. **Invite them.** Send invites by email, or copy each person's link if email isn't set up.
+
+Once a school has a facilitator, it only takes people through invites. Picking its name isn't enough, and neither is signing up with an address on the list: the link is what proves it's them. Each link works for 30 days, for that one address. A student invited this way doesn't need to confirm they're 13 or older, because their school signed them up.
+
+Select several people in the list to change their role or grades together, invite them, or remove them. Removing someone takes them out of the school; their account, classes and work stay. A school always keeps at least one facilitator who has joined, and a joined student can't be made a teacher here.
+
+A school from before facilitators existed stays open to anyone until one of its teachers chooses **Become its facilitator**.
+
 Home's **To review** box lists submitted work across your classes, oldest first. Or open an assignment's **Submissions** tab and any essay:
 
 - **Document:** the essay and its Works Cited. **Color by source** marks what was typed, pasted from a page copied during the session, pasted from outside Visor's view, cited, or your starter text.

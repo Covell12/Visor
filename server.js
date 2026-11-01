@@ -24,6 +24,7 @@ const crypto = require('crypto');
 const repo = require('./lib/repo');
 const audioStorage = require('./lib/audioStorage');
 const imageStorage = require('./lib/imageStorage');
+const schools = require('./lib/schools');
 const audioFormats = require('./lib/audioFormats');
 const audioConvert = require('./lib/audioConvert');
 const { normalizeReport, buildDriveReport } = require('./lib/reports');
@@ -249,7 +250,11 @@ app.get('/api/config', (req, res) => {
 function slug(s) {
   return String(s || '').normalize('NFKD').replace(/\p{M}/gu, '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-|-$/g, '');
 }
-function publicOrg(o) { return o ? { id: o.id, name: o.name } : null; }
+// `managed`: someone runs it, so it only takes people through its invites
+function publicOrg(o) {
+  if (!o) return null;
+  return { id: o.id, name: o.name, ...(schools.isManaged(o) ? { managed: true } : {}), ...(o.logo?.id ? { logoUrl: `/api/schools/${o.id}/logo?v=${o.logo.id}` } : {}) };
+}
 
 function createOrg(core, name) {
   const org = { id: uid(), name, createdAt: now() };
@@ -259,23 +264,49 @@ function createOrg(core, name) {
 
 // The school someone chose. { schoolId } picks an existing school; { schoolName }
 // finds one with that name or creates it; neither means "no school" (null).
-function resolveSchoolChoice(core, { schoolId, schoolName } = {}) {
+// A school someone runs only takes people through its invites, and a new school
+// is its creator's to run. person: { id, role, orgId }
+function resolveSchoolChoice(core, { schoolId, schoolName } = {}, person) {
+  const joinable = org => {
+    if (schools.isManaged(org) && org.id !== person.orgId) throw new HttpError(403, `${org.name} has its own list of people. Ask its facilitator for an invite.`);
+    return org;
+  };
   if (schoolId) {
     const org = own(core.orgs, schoolId);
     if (!org) throw new HttpError(400, 'That school is no longer on Visor. Pick it again or type its name.');
-    return org;
+    return joinable(org);
   }
   if (schoolName != null && typeof schoolName !== 'string') throw new HttpError(400, 'School name must be text');
   const name = String(schoolName || '').trim().replace(/\s+/g, ' ');
   if (!name) return null;
   if (name.length > 120) throw new HttpError(400, 'That school name is too long');
   if (!slug(name)) throw new HttpError(400, 'Use letters or numbers in the school name');
-  return Object.values(core.orgs).find(o => slug(o.name) === slug(name)) || createOrg(core, name);
+  const found = Object.values(core.orgs).find(o => slug(o.name) === slug(name));
+  if (found) return joinable(found);
+  if (person.role !== 'teacher') throw new HttpError(403, 'Only teachers can create a school. Pick yours from the list, or leave this blank.');
+  const org = createOrg(core, name);
+  org.facilitatorIds = [person.id];
+  return org;
+}
+
+// Someone leaving their school. A school can't be left with nobody running it.
+function leaveSchool(core, u) {
+  const org = u.orgId ? own(core.orgs, u.orgId) : null;
+  if (!schools.isFacilitator(org, u.id)) return;
+  if (org.facilitatorIds.length === 1) throw new HttpError(409, `You’re the only facilitator of ${org.name}. Make someone else its facilitator first.`);
+  org.facilitatorIds = org.facilitatorIds.filter(id => id !== u.id);
+}
+function joinSchool(core, u, org, person) {
+  const before = u.orgId;
+  if (before !== org.id) leaveSchool(core, u);
+  u.orgId = org.id;
+  if (person.role === 'facilitator' && !schools.isFacilitator(org, u.id)) org.facilitatorIds = [...(org.facilitatorIds || []), u.id];
+  if (before !== org.id) dropSchoolIfEmpty(core, before);
 }
 
 // Remove a school nobody belongs to any more (keeps typos and abandoned names from piling up)
 function dropSchoolIfEmpty(core, orgId) {
-  if (!orgId || !own(core.orgs, orgId)) return;
+  if (!orgId || !own(core.orgs, orgId) || schools.isManaged(core.orgs[orgId])) return;
   const used = Object.values(core.users).some(u => u.orgId === orgId) || Object.values(core.projects).some(p => p.orgId === orgId);
   if (!used) delete core.orgs[orgId];
 }
@@ -312,7 +343,7 @@ function verifyPassword(password, user) {
 function publicUser(u, core) {
   if (!u) return null;
   const org = core ? core.orgs[u.orgId] : null;
-  return { id: u.id, email: u.email, firstName: u.firstName, lastName: u.lastName, name: `${u.firstName} ${u.lastName}`.trim(), role: u.role, orgId: u.orgId, org: publicOrg(org), avatarColor: u.avatarColor || null, ...avatarField(u), tutorialSeen: !!u.tutorialSeen };
+  return { id: u.id, email: u.email, firstName: u.firstName, lastName: u.lastName, name: `${u.firstName} ${u.lastName}`.trim(), role: u.role, orgId: u.orgId, org: publicOrg(org), ...(schools.isFacilitator(org, u.id) ? { facilitator: true } : {}), avatarColor: u.avatarColor || null, ...avatarField(u), tutorialSeen: !!u.tutorialSeen };
 }
 
 // Someone's picture, for anything that shows them. Only there if they chose one.
@@ -333,25 +364,30 @@ function joinClassesOnSignIn(core, user, classCode) {
 }
 
 app.post('/api/auth/signup', ah(async (req, res) => {
-  const { email, password, role, schoolId, schoolName, classCode, over13 } = req.body || {};
+  const { email, password, schoolId, schoolName, classCode, over13, inviteToken } = req.body || {};
   const firstName = cleanText(req.body?.firstName, NAME_MAX), lastName = cleanText(req.body?.lastName, NAME_MAX);
   const em = cleanText(email, 200).toLowerCase();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) return res.status(400).json({ error: 'Enter a valid email address' });
   if (!firstName || !lastName) return res.status(400).json({ error: 'Enter your first and last name' });
   if (typeof password !== 'string' || password.length < 6) return res.status(400).json({ error: 'Password needs at least 6 characters' });
   if (password.length > 200) return res.status(400).json({ error: 'That password is too long' });
+  const invite = inviteToken ? await inviteForSignup(inviteToken, em) : null;
+  const role = invite ? schools.ROLES[invite.person.role].account : req.body?.role;
   if (!['teacher', 'student'].includes(role)) return res.status(400).json({ error: 'Pick Student or Teacher' });
 
   const { hash, salt } = hashPassword(password); // slow on purpose; done before taking the lock
   const out = await repo.withCore(core => {
     if (Object.values(core.users).some(u => u.email === em)) throw new HttpError(409, 'That email already has an account. Sign in instead.');
-    checkStudentAge(core, { role, email: em, over13 });
-    const org = resolveSchoolChoice(core, { schoolId, schoolName });
-    const user = { id: uid(), email: em, firstName, lastName, role, orgId: org ? org.id : null, passwordSalt: salt, passwordHash: hash, createdAt: now() };
-    core.users[user.id] = user;
+    const id = uid();
+    if (!invite) checkStudentAge(core, { role, email: em, over13 });
+    const org = invite ? null : resolveSchoolChoice(core, { schoolId, schoolName }, { id, role });
+    const user = { id, email: em, firstName, lastName, role, orgId: org ? org.id : null, passwordSalt: salt, passwordHash: hash, createdAt: now() };
+    core.users[id] = user;
+    if (invite) joinSchool(core, user, own(core.orgs, invite.org.id), invite.person);
     joinClassesOnSignIn(core, user, role === 'student' ? classCode : null);
-    return { user: publicUser(user, core), id: user.id };
+    return { user: publicUser(user, core), id };
   });
+  if (invite) await repo.deleteRecord('schoolinvite', invite.record.id);
   req.session.userId = out.id;
   res.json({ user: out.user });
 }));
@@ -389,7 +425,7 @@ app.post('/api/auth/logout', (req, res) => { req.session = null; res.json({ ok: 
 const LOGIN_TRIES = 10, THROTTLE_MS = 15 * 60 * 1000;
 const RESET_MS = 60 * 60 * 1000, RESETS_PER_HOUR = 3, FORGOT_PER_IP = 30, FORGOT_MIN_MS = 1500;
 const resetId = token => crypto.createHash('sha256').update(String(token)).digest('hex');
-const siteUrl = () => process.env.PUBLIC_URL || (IS_FIREBASE ? 'https://visor-ed.web.app' : `http://localhost:${PORT}`);
+const siteUrl = () => process.env.PUBLIC_URL || (IS_FIREBASE ? 'https://visor-ed.com' : `http://localhost:${PORT}`);
 const contactEmail = () => process.env.CONTACT_EMAIL || 'visor.edu.ai@gmail.com';
 const escHtml = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -497,8 +533,10 @@ app.post('/api/auth/google', ah(async (req, res) => {
 
 // Finishes account creation for a Google sign-in that had no existing account.
 app.post('/api/auth/google/signup', ah(async (req, res) => {
-  const { credential, role, schoolId, schoolName, classCode, over13 } = req.body || {};
+  const { credential, schoolId, schoolName, classCode, over13, inviteToken } = req.body || {};
   const g = await verifyGoogleCredential(credential);
+  const invite = inviteToken ? await inviteForSignup(inviteToken, g.email) : null;
+  const role = invite ? schools.ROLES[invite.person.role].account : req.body?.role;
   if (!['teacher', 'student'].includes(role)) return res.status(400).json({ error: 'Pick Student or Teacher' });
   const out = await repo.withCore(core => {
     let user = Object.values(core.users).find(u => u.email === g.email);
@@ -506,13 +544,16 @@ app.post('/api/auth/google/signup', ah(async (req, res) => {
       if (!user.googleSub) { user.googleSub = g.sub; delete user.passwordHash; delete user.passwordSalt; }
       return { user: publicUser(user, core), id: user.id };
     }
-    checkStudentAge(core, { role, email: g.email, over13 });
-    const org = resolveSchoolChoice(core, { schoolId, schoolName });
-    user = { id: uid(), email: g.email, firstName: cleanText(g.firstName, NAME_MAX) || 'Student', lastName: cleanText(g.lastName, NAME_MAX), role, orgId: org ? org.id : null, googleSub: g.sub, createdAt: now() };
+    const id = uid();
+    if (!invite) checkStudentAge(core, { role, email: g.email, over13 });
+    const org = invite ? null : resolveSchoolChoice(core, { schoolId, schoolName }, { id, role });
+    user = { id, email: g.email, firstName: cleanText(g.firstName, NAME_MAX) || 'Student', lastName: cleanText(g.lastName, NAME_MAX), role, orgId: org ? org.id : null, googleSub: g.sub, createdAt: now() };
     core.users[user.id] = user;
+    if (invite) joinSchool(core, user, own(core.orgs, invite.org.id), invite.person);
     joinClassesOnSignIn(core, user, role === 'student' ? classCode : null);
     return { user: publicUser(user, core), id: user.id };
   });
+  if (invite) await repo.deleteRecord('schoolinvite', invite.record.id);
   req.session.userId = out.id;
   res.json({ user: out.user });
 }));
@@ -547,9 +588,12 @@ app.patch('/api/me', requireAuth, ah(async (req, res) => {
     if (typeof tutorialSeen === 'boolean') u.tutorialSeen = tutorialSeen;
     if (hasSchool) {
       const before = u.orgId;
-      const org = school ? resolveSchoolChoice(core, { schoolId: school.id, schoolName: school.name }) : null;
-      u.orgId = org ? org.id : null;
-      if (before !== u.orgId) dropSchoolIfEmpty(core, before);
+      const org = school ? resolveSchoolChoice(core, { schoolId: school.id, schoolName: school.name }, u) : null;
+      if ((org ? org.id : null) !== before) {
+        leaveSchool(core, u);
+        u.orgId = org ? org.id : null;
+        dropSchoolIfEmpty(core, before);
+      }
     }
     return publicUser(u, core);
   });
@@ -613,6 +657,298 @@ app.get('/api/school/students', requireAuth, requireTeacher, ah(async (req, res)
     }
   }
   res.json([...found.values()].map(u => publicUser(u, core)).sort((a, b) => a.name.localeCompare(b.name)));
+}));
+
+// ---- Your School ----
+// Every teacher sees their school's people; its facilitators run it (lib/schools.js).
+const INVITE_MS = 30 * 24 * 60 * 60 * 1000, INVITES_AT_ONCE = 50, LOGO_MAX_BYTES = 1024 * 1024;
+const INVITE_GONE = 'This invite link isn’t valid any more. Ask your school’s facilitator for a new one.';
+
+const schoolRoster = async orgId => (await repo.getRecord('schoolroster', orgId)) || { id: orgId, people: [] };
+// Change a school's list. Runs in a transaction, so fn may run twice: it only touches `roster`.
+async function changeRoster(orgId, fn) {
+  if (!await repo.getRecord('schoolroster', orgId)) await repo.putRecord('schoolroster', { id: orgId, people: [], updatedAt: now() });
+  let out;
+  await repo.updateRecord('schoolroster', orgId, roster => { out = fn(roster); roster.updatedAt = now(); });
+  return out;
+}
+const membersOf = (core, org) => Object.values(core.users).filter(u => u.orgId === org.id);
+// Accounts in a school that aren't on its list: its creator, and anyone from
+// before someone ran it. Their account says what they are, until a facilitator says more.
+const roleOfMember = (org, u) => (schools.isFacilitator(org, u.id) ? 'facilitator' : u.role === 'teacher' ? 'teacher' : 'student');
+async function fillRoster(core, org, roster) {
+  const listed = new Set(roster.people.map(p => p.email));
+  const missing = membersOf(core, org).filter(u => !listed.has(u.email));
+  if (!missing.length) return roster;
+  await changeRoster(org.id, r => schools.addPeople(r, missing.filter(u => !r.people.some(p => p.email === u.email)).map(u => ({ email: u.email, name: fullName(u), role: roleOfMember(org, u) })), { by: 'joined', at: now() }));
+  return schoolRoster(org.id);
+}
+// The list as people see it. Joined is whether the account is in this school.
+function schoolRows(core, org, roster, canRun) {
+  const members = new Map(membersOf(core, org).map(u => [u.email, u]));
+  const row = (p, u) => ({
+    id: p?.id || `u-${u.id}`, email: p?.email || u.email, name: u ? fullName(u) : p.name, role: p?.role || roleOfMember(org, u), grades: p?.grades || [],
+    status: u ? 'joined' : !canRun ? 'waiting' : p.invitedAt ? 'invited' : 'added',
+    ...(canRun && p?.invitedAt ? { invitedAt: p.invitedAt } : {}), avatarColor: u?.avatarColor || null, ...avatarField(u)
+  });
+  const rows = roster.people.map(p => { const u = members.get(p.email); members.delete(p.email); return row(p, u); });
+  for (const u of members.values()) rows.push(row(null, u));
+  return rows.sort((a, b) => (a.name || a.email).localeCompare(b.name || b.email));
+}
+function schoolFor(req, core, { run = false } = {}) {
+  const me = meOrThrow(req, core);
+  if (me.role !== 'teacher') throw new HttpError(403, 'Your School is for teachers.');
+  const org = me.orgId ? own(core.orgs, me.orgId) : null;
+  if (!org) throw new HttpError(404, 'You aren’t in a school yet.');
+  if (run && !schools.isFacilitator(org, me.id)) throw new HttpError(403, 'Only this school’s facilitator can do that.');
+  return { me, org };
+}
+// A joined account can't change between student and teacher here, and a school
+// always keeps someone who has joined and can run it.
+function checkRoster(core, org, people) {
+  const members = new Map(membersOf(core, org).map(u => [u.email, u]));
+  for (const p of people) {
+    const u = members.get(p.email);
+    if (u && schools.ROLES[p.role].account !== u.role) throw new HttpError(409, `${fullName(u)} has a ${u.role} account, so they can’t be listed as ${schools.ROLES[p.role].label.toLowerCase()}.`);
+  }
+  if (schools.isManaged(org) && !people.some(p => p.role === 'facilitator' && members.has(p.email))) throw new HttpError(409, 'A school needs a facilitator who has joined. Make someone else one first.');
+}
+// Joined people listed as facilitators are the ones who run it. Never leaves a
+// school with none: an empty list would open it to anyone who picks its name.
+async function syncFacilitators(orgId) {
+  const roster = await schoolRoster(orgId);
+  await repo.withCore(core => {
+    const org = own(core.orgs, orgId);
+    if (!org) return;
+    const emails = new Set(roster.people.filter(p => p.role === 'facilitator').map(p => p.email));
+    const ids = membersOf(core, org).filter(u => emails.has(u.email)).map(u => u.id);
+    if (ids.length) org.facilitatorIds = ids;
+  });
+}
+// A facilitator's request: the school, with everyone in it on its list first
+async function schoolToRun(req) {
+  const core = await repo.readCore();
+  const got = schoolFor(req, core, { run: true });
+  await fillRoster(core, got.org, await schoolRoster(got.org.id));
+  return { core, ...got };
+}
+
+app.get('/api/school', requireAuth, ah(async (req, res) => {
+  const core = await repo.readCore();
+  const me = meOrThrow(req, core);
+  if (me.role !== 'teacher') throw new HttpError(403, 'Your School is for teachers.');
+  const base = { roles: Object.entries(schools.ROLES).map(([id, r]) => ({ id, label: r.label, about: r.about })), grades: schools.GRADES, mailReady: mail.ready() };
+  const org = me.orgId ? own(core.orgs, me.orgId) : null;
+  if (!org) return res.json({ ...base, school: null, people: [], canRun: false });
+  const canRun = schools.isFacilitator(org, me.id);
+  const saved = await schoolRoster(org.id);
+  const roster = canRun ? await fillRoster(core, org, saved) : saved;
+  res.json({ ...base, school: { ...publicOrg(org), facilitators: (org.facilitatorIds || []).map(id => fullName(core.users[id])).filter(Boolean) }, canRun, people: schoolRows(core, org, roster, canRun) });
+}));
+
+// Create a school (or take over one with that name that nobody runs): { name }
+app.post('/api/school', requireAuth, ah(async (req, res) => {
+  const user = await repo.withCore(core => {
+    const me = meOrThrow(req, core);
+    if (me.role !== 'teacher') throw new HttpError(403, 'Only teachers can create a school.');
+    if (schools.isManaged(own(core.orgs, me.orgId))) throw new HttpError(409, 'You’re already in a school someone runs.');
+    if (!cleanText(req.body?.name, 120)) throw new HttpError(400, 'Enter your school’s name');
+    const before = me.orgId;
+    const org = resolveSchoolChoice(core, { schoolName: req.body.name }, me);
+    if (!schools.isManaged(org)) org.facilitatorIds = [me.id];
+    me.orgId = org.id;
+    if (before !== org.id) dropSchoolIfEmpty(core, before);
+    return publicUser(me, core);
+  });
+  res.json({ user });
+}));
+
+// Become the facilitator of your school, when nobody runs it
+app.post('/api/school/claim', requireAuth, ah(async (req, res) => {
+  const user = await repo.withCore(core => {
+    const { me, org } = schoolFor(req, core);
+    if (schools.isManaged(org)) throw new HttpError(409, 'This school already has a facilitator.');
+    org.facilitatorIds = [me.id];
+    return publicUser(me, core);
+  });
+  res.json({ user });
+}));
+
+app.patch('/api/school', requireAuth, ah(async (req, res) => {
+  const name = cleanText(req.body?.name, 120);
+  if (!name || !slug(name)) throw new HttpError(400, 'Enter your school’s name');
+  const user = await repo.withCore(core => {
+    const { me, org } = schoolFor(req, core, { run: true });
+    if (Object.values(core.orgs).some(o => o.id !== org.id && slug(o.name) === slug(name))) throw new HttpError(409, 'Another school has that name.');
+    org.name = name;
+    return publicUser(me, core);
+  });
+  res.json({ user });
+}));
+
+// The logo is public: an invite shows it before anyone has signed in
+app.post('/api/school/logo', requireAuth, ah(async (req, res, next) => { schoolFor(req, await repo.readCore(), { run: true }); next(); }), (req, res, next) => imageBody(req, res, next), ah(async (req, res) => {
+  const buf = Buffer.isBuffer(req.body) ? req.body : null;
+  if (buf && buf.length > LOGO_MAX_BYTES) return res.status(413).json({ error: 'That logo is too large. Use one under 1 MB.' });
+  const mime = imageStorage.sniffImage(buf);
+  if (!BG_TYPES.includes(mime)) throw new HttpError(400, 'Use a PNG, JPEG or WebP picture.');
+  const id = crypto.randomBytes(16).toString('hex');
+  const { org: seen } = schoolFor(req, await repo.readCore(), { run: true });
+  const stored = await imageStorage.putImage({ docId: `schoollogo-${seen.id}`, id, mime, buf });
+  let old = null, user;
+  try {
+    user = await repo.withCore(core => {
+      const { me, org } = schoolFor(req, core, { run: true });
+      old = org.logo || null;
+      org.logo = { id, mime, stored };
+      return publicUser(me, core);
+    });
+  } catch (err) { await imageStorage.deleteImage(stored); throw err; }
+  if (old) await imageStorage.deleteImage(old.stored);
+  res.json({ user });
+}));
+app.delete('/api/school/logo', requireAuth, ah(async (req, res) => {
+  let old = null;
+  const user = await repo.withCore(core => {
+    const { me, org } = schoolFor(req, core, { run: true });
+    old = org.logo || null;
+    delete org.logo;
+    return publicUser(me, core);
+  });
+  if (old) await imageStorage.deleteImage(old.stored);
+  res.json({ user });
+}));
+app.get('/api/schools/:id/logo', ah(async (req, res) => {
+  const logo = own((await repo.readCore()).orgs, req.params.id)?.logo;
+  if (!logo?.stored || logo.id !== req.query.v) return res.status(404).json({ error: 'not found' });
+  await imageStorage.streamImage(logo.stored, logo.mime, res);
+}));
+
+// Add people in bulk: { people: [{ email, name, role, grades }] }. Someone already
+// listed gets the new role and grades, so pasting a list again corrects it.
+app.post('/api/school/people', requireAuth, ah(async (req, res) => {
+  const { core, me, org } = await schoolToRun(req);
+  const people = Array.isArray(req.body?.people) ? req.body.people : [];
+  if (!people.length) throw new HttpError(400, 'Add at least one email address.');
+  if (people.length > schools.MAX_PEOPLE) throw new HttpError(400, `Add at most ${schools.MAX_PEOPLE} people at a time.`);
+  const members = new Map(membersOf(core, org).map(u => [u.email, u]));
+  const wrong = [], okay = people.filter(raw => {
+    const p = schools.cleanPerson(raw), u = members.get(p.email);
+    if (p.error || !u || schools.ROLES[p.role].account === u.role) return true;
+    wrong.push({ email: p.email, why: `has a ${u.role} account` });
+    return false;
+  });
+  const out = await changeRoster(org.id, roster => schools.addPeople(roster, okay, { by: me.id, at: now() }));
+  await syncFacilitators(org.id);
+  const emails = new Set(okay.map(p => schools.cleanPerson(p).email));
+  const ids = (await schoolRoster(org.id)).people.filter(p => emails.has(p.email)).map(p => p.id);
+  res.json({ ...out, skipped: [...out.skipped, ...wrong], ids });
+}));
+
+// Change several people at once: { ids, role?, grades?, name? }
+app.post('/api/school/people/update', requireAuth, ah(async (req, res) => {
+  const { core, org } = await schoolToRun(req);
+  const b = req.body || {}, ids = new Set(Array.isArray(b.ids) ? b.ids.map(String) : []);
+  const role = b.role === undefined ? undefined : Object.prototype.hasOwnProperty.call(schools.ROLES, b.role) ? b.role : null;
+  if (role === null) throw new HttpError(400, 'Pick a role.');
+  await changeRoster(org.id, roster => {
+    for (const p of roster.people.filter(x => ids.has(x.id))) {
+      if (role) p.role = role;
+      if (b.grades !== undefined) p.grades = schools.cleanGrades(b.grades);
+      if (typeof b.name === 'string' && ids.size === 1) p.name = cleanText(b.name, 120);
+    }
+    checkRoster(core, org, roster.people);
+  });
+  await syncFacilitators(org.id);
+  res.json({ ok: true });
+}));
+
+// Take people off the list. Anyone who joined leaves the school; their account,
+// classes and work stay.
+app.post('/api/school/people/remove', requireAuth, ah(async (req, res) => {
+  const { core, org } = await schoolToRun(req);
+  const ids = new Set(Array.isArray(req.body?.ids) ? req.body.ids.map(String) : []);
+  let gone = [];
+  await changeRoster(org.id, roster => {
+    gone = roster.people.filter(p => ids.has(p.id)).map(p => p.email);
+    roster.people = roster.people.filter(p => !ids.has(p.id));
+    checkRoster(core, org, roster.people);
+  });
+  await repo.withCore(c => { for (const u of Object.values(c.users)) if (u.orgId === org.id && gone.includes(u.email)) u.orgId = null; });
+  await syncFacilitators(org.id);
+  res.json({ removed: gone.length });
+}));
+
+async function makeInvite(org, person, by) {
+  const token = crypto.randomBytes(32).toString('base64url');
+  await repo.putRecord('schoolinvite', { id: resetId(token), orgId: org.id, personId: person.id, email: person.email, by, createdAt: now(), expiresAt: new Date(Date.now() + INVITE_MS).toISOString() });
+  return `${siteUrl()}/invite/${token}`;
+}
+function sendInviteEmail(org, person, from, url) {
+  const role = schools.ROLES[person.role].label.toLowerCase();
+  const lines = [`${from} added you to ${org.name} on Visor as ${/^[aeiou]/.test(role) ? 'an' : 'a'} ${role}.`, 'Use this link to join. It works for 30 days.'];
+  return mail.send({ to: person.email, subject: `Join ${org.name} on Visor`, text: [...lines, url].join('\n\n'), html: emailHtml(lines, { url, label: 'Join your school' }) });
+}
+// { ids } emails those people, a few at a time (the page sends the rest in turn).
+// { ids, copy: true } makes the links instead, for sending some other way.
+app.post('/api/school/invites', requireAuth, ah(async (req, res) => {
+  const { core, me, org } = await schoolToRun(req);
+  const ids = new Set(Array.isArray(req.body?.ids) ? req.body.ids.map(String) : []);
+  const members = new Set(membersOf(core, org).map(u => u.email));
+  const chosen = (await schoolRoster(org.id)).people.filter(p => ids.has(p.id) && !members.has(p.email));
+  if (req.body?.copy) {
+    const links = [];
+    for (const p of chosen) links.push({ id: p.id, email: p.email, name: p.name, link: await makeInvite(org, p, me.id) });
+    return res.json({ links });
+  }
+  if (!mail.ready()) return res.status(503).json({ error: 'Email isn’t set up yet. Copy the invite links instead.', mailReady: false });
+  if (chosen.length > INVITES_AT_ONCE) throw new HttpError(400, `Send at most ${INVITES_AT_ONCE} at a time.`);
+  const sent = [];
+  let stopped = null;
+  for (const p of chosen) {
+    try { await sendInviteEmail(org, p, fullName(me), await makeInvite(org, p, me.id)); sent.push(p.id); }
+    catch (err) { console.warn('school invite not sent:', err.message); stopped = 'The email service stopped accepting messages, possibly its daily limit. Send the rest later.'; break; }
+  }
+  const at = now();
+  if (sent.length) await changeRoster(org.id, roster => { for (const p of roster.people) if (sent.includes(p.id)) p.invitedAt = at; });
+  res.json({ sent: sent.length, stopped });
+}));
+
+// An invite link: its record, its school and the person it's for. Null if it's no good.
+async function openInvite(token, core) {
+  const record = await repo.getRecord('schoolinvite', resetId(token));
+  if (!record || Date.parse(record.expiresAt) < Date.now()) return null;
+  const org = own(core.orgs, record.orgId);
+  const person = org && (await schoolRoster(org.id)).people.find(p => p.id === record.personId);
+  return person ? { record, org, person } : null;
+}
+async function inviteForSignup(token, email) {
+  const invite = await openInvite(token, await repo.readCore());
+  if (!invite) throw new HttpError(400, INVITE_GONE);
+  if (invite.person.email !== email) throw new HttpError(403, `This invite is for ${invite.person.email}.`);
+  return invite;
+}
+// What an invite page shows, before anyone has signed in
+app.get('/api/invite/:token', ah(async (req, res) => {
+  const core = await repo.readCore();
+  const invite = await openInvite(req.params.token, core);
+  if (!invite) return res.status(404).json({ error: INVITE_GONE });
+  const { org, person } = invite, r = schools.ROLES[person.role];
+  res.json({ school: publicOrg(org), email: person.email, name: person.name, role: person.role, roleLabel: r.label, account: r.account, hasAccount: Object.values(core.users).some(u => u.email === person.email) });
+}));
+// For someone who already has an account: the link reached their inbox, so it's them
+app.post('/api/invite/:token/accept', requireAuth, ah(async (req, res) => {
+  const invite = await openInvite(req.params.token, await repo.readCore());
+  if (!invite) throw new HttpError(404, INVITE_GONE);
+  const user = await repo.withCore(core => {
+    const me = meOrThrow(req, core);
+    if (me.email !== invite.person.email) throw new HttpError(403, `This invite is for ${invite.person.email}, and you’re signed in as ${me.email}.`);
+    if (schools.ROLES[invite.person.role].account !== me.role) throw new HttpError(409, `This invite is for a ${schools.ROLES[invite.person.role].account} account, and yours is a ${me.role} account. Ask your school’s facilitator to change it.`);
+    joinSchool(core, me, own(core.orgs, invite.org.id), invite.person);
+    return publicUser(me, core);
+  });
+  await repo.deleteRecord('schoolinvite', invite.record.id);
+  res.json({ user });
 }));
 
 // ═══════════════════════════════════════════════════════════════

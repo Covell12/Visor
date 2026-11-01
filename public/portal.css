@@ -556,3 +556,68 @@ details > summary { transition: color .15s; }
 .tour-dots i.on { background: var(--brand); }
 @media (prefers-reduced-motion: reduce) { .tour-step { animation: none; } }
 
+/* Your School */
+.school-hero { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 18px; }
+.school-logo { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 64px; height: 64px; overflow: hidden; border-radius: 16px; background: linear-gradient(135deg, #C4EAF5, #D8F1DE); box-shadow: inset 0 0 0 1px var(--line); color: var(--brand); }
+.school-logo svg { width: 30px; height: 30px; }
+.school-logo img { width: 100%; height: 100%; object-fit: contain; background: #fff; }
+.school-id { flex: 1 1 240px; min-width: 0; }
+.school-id h1 { margin: 0; font-size: 24px; font-weight: 700; letter-spacing: -0.015em; overflow-wrap: anywhere; }
+.school-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.school-actions .btn svg { width: 16px; height: 16px; }
+.school-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 10px; margin-bottom: 12px; }
+.school-bar input[type=search] { flex: 1 1 220px; min-width: 0; }
+.school-bar select { width: auto; }
+.school-check { width: 34px; padding-right: 0 !important; }
+.school-check input { width: 16px; height: 16px; accent-color: var(--brand); }
+.school-more { padding: 10px; text-align: center; border-top: 1px solid var(--line); }
+.school-bulk { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 10px; margin-bottom: 10px; padding: 8px 12px; border-radius: var(--r-lg); background: var(--brand-soft); font-size: 13.5px; }
+.school-bulk .btn svg { width: 15px; height: 15px; }
+.school-roles { margin-top: 18px; font-size: 14px; color: var(--ink-2); }
+.school-roles summary { cursor: pointer; font-weight: 600; color: var(--ink); }
+.school-roles dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 16px; margin: 10px 0 0; }
+.school-roles dt { font-weight: 600; color: var(--ink); }
+.school-roles dd { margin: 0; }
+.school-none { text-align: center; }
+.school-none h1 { margin: 12px 0 6px; font-size: 22px; }
+.school-none .field { text-align: left; }
+.school-logo-row { display: flex; align-items: center; gap: 16px; margin-bottom: 18px; }
+.school-logo-row .hint { margin-top: 6px; }
+.setup-card { margin-bottom: 18px; padding: 16px 18px; border-radius: var(--r-lg); background: linear-gradient(90deg, var(--blue-soft), var(--green-soft)); box-shadow: inset 0 0 0 1px #C9E6F1; }
+.setup-card h2 { margin: 0 0 10px; font-size: 16px; font-weight: 650; }
+.setup-card ol { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.setup-card li { display: flex; align-items: center; gap: 10px; min-height: 34px; font-size: 14.5px; }
+.setup-card li.done { color: var(--ink-2); }
+.setup-n { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 24px; height: 24px; border-radius: 50%; background: #fff; font-size: 12.5px; font-weight: 700; color: var(--brand); box-shadow: inset 0 0 0 1px #BFDDE9; }
+.setup-card li.done .setup-n { background: var(--green-deep); box-shadow: none; color: #fff; }
+.setup-n svg { width: 14px; height: 14px; }
+.setup-t { flex: 1; min-width: 0; }
+.grade-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.grade-chip { min-width: 34px; height: 30px; padding: 0 7px; border: 0; border-radius: 8px; background: #fff; box-shadow: inset 0 0 0 1px var(--field-line); color: var(--ink-2); font-size: 12.5px; font-weight: 600; cursor: pointer; }
+.grade-chip:hover { box-shadow: inset 0 0 0 1px var(--brand); }
+.grade-chip[aria-pressed="true"] { background: var(--brand); box-shadow: none; color: #fff; }
+.ap-file { display: inline-block; margin-top: 6px; font-size: 13px; cursor: pointer; }
+.ap-defaults { display: grid; grid-template-columns: minmax(0, 200px) minmax(0, 1fr); gap: 16px; }
+.ap-sum { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; margin-bottom: 6px; font-size: 13.5px; font-weight: 600; }
+.ap-bad { color: #A33631; font-weight: 500; }
+.ap-table { max-height: 300px; overflow: auto; border-radius: var(--r-lg); box-shadow: inset 0 0 0 1px var(--line); }
+.ap-table .roster td, .ap-table .roster th { padding: 6px 10px; }
+.ap-table .ap-email { max-width: 240px; overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.ap-table .ap-grades { width: 90px; }
+.ap-send { margin-right: auto; }
+.invite-banner { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; padding: 12px 14px; border-radius: var(--r-lg); background: linear-gradient(90deg, var(--blue-soft), var(--green-soft)); box-shadow: inset 0 0 0 1px #C9E6F1; }
+.invite-banner > img, .invite-banner .school-logo { flex: none; width: 48px; height: 48px; border-radius: 12px; background: #fff; object-fit: contain; }
+.invite-banner b { display: block; font-size: 15.5px; }
+.invite-banner span { font-size: 13.5px; color: var(--ink-2); }
+.invite-mode .role-cards, .invite-mode #suStudentExtras, .invite-mode .sub, .invite-mode .field:has(#suRoleLabel), .invite-mode .field:has(#suSchoolPicker) { display: none; }
+.school-new { display: inline-block; margin-top: 6px; font-size: 13.5px; font-weight: 600; }
+@media (max-width: 600px) {
+  .ap-defaults { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .ap-table .roster { min-width: 520px; }
+  .modal .mf:has(.ap-send) { flex-wrap: wrap; }
+  .ap-send { flex: 1 1 100%; margin-right: 0; }
+  .school-roles dl { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .school-roles dd { margin-bottom: 8px; }
+  .roster-card:has(.school-table) { overflow-x: auto; }
+}
+

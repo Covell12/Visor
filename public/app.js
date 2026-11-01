@@ -218,6 +218,7 @@ function pickRole(role) {
   selectedRole = role;
   document.querySelectorAll('.role-card').forEach(c => { const on = c.dataset.role === role; c.classList.toggle('selected', on); c.setAttribute('aria-pressed', String(on)); });
   $('suStudentExtras')?.classList.toggle('hidden', role !== 'student');
+  $('suSchoolPicker')?.syncRole?.();
 }
 // Class code and the 13-or-older confirmation (students only)
 function studentSignupExtras() {
@@ -230,36 +231,47 @@ function mountSchoolPicker(id, current) {
   const el = $(id);
   el.innerHTML = `
     <div class="school-picker-box">
-      <input id="${id}Input" class="input" type="text" autocomplete="off" placeholder="Search for your school, or type its name" value="${esc(current?.name || '')}" />
+      <input id="${id}Input" class="input" type="text" autocomplete="off" placeholder="Search for your school" value="${esc(current?.name || '')}" />
       <div class="dropdown hidden"></div>
     </div>
     <div class="school-chosen tiny"></div>
+    <button type="button" class="linklike school-new hidden">Create a new school</button>
     <div class="hint">Leave this blank if you'd rather not pick a school. You can change it any time in Profile settings.</div>`;
   el.dataset.schoolId = current?.id || '';
-  const input = el.querySelector('input'), dd = el.querySelector('.dropdown');
+  el.dataset.managed = current?.managed ? '1' : '';
+  el.dataset.create = '';
+  const input = el.querySelector('input'), dd = el.querySelector('.dropdown'), make = el.querySelector('.school-new');
+  // Only teachers can create one
+  const teacher = () => (id === 'suSchoolPicker' ? selectedRole : me?.role) === 'teacher';
   // Under the box: what will be saved. Hidden while suggestions are open.
   const showChosen = () => {
     const name = input.value.trim(), chosen = el.querySelector('.school-chosen');
     const open = !dd.classList.contains('hidden');
-    chosen.innerHTML = !name || open ? '' : el.dataset.schoolId ? `${I.school}<span>${esc(name)}</span>` : `${I.school}<span>New school: <b>${esc(name)}</b></span>`;
+    make.classList.toggle('hidden', !teacher() || !!el.dataset.create || (!!el.dataset.schoolId && current?.id === el.dataset.schoolId));
+    input.placeholder = el.dataset.create ? 'Your school’s name' : 'Search for your school';
+    chosen.innerHTML = open ? '' : !name ? (el.dataset.create ? `${I.school}<span>Name your new school. You’ll set it up next.</span>` : '')
+      : el.dataset.schoolId ? `${I.school}<span>${esc(name)}${el.dataset.managed && current?.id !== el.dataset.schoolId ? ': invite only. Ask its facilitator for an invite.' : ''}</span>`
+        : `${I.school}<span>New school: <b>${esc(name)}</b>. You’ll be its facilitator, and add its logo and people next.</span>`;
   };
+  el.syncRole = showChosen;
   const search = debounce(async () => {
     const q = input.value.trim();
-    if (q.length < 2) { dd.classList.add('hidden'); showChosen(); return; }
+    if (el.dataset.create || q.length < 2) { dd.classList.add('hidden'); showChosen(); return; }
     let schools = [];
     try { schools = (await api(`/api/schools?q=${encodeURIComponent(q)}`)).schools; } catch {}
     if (input.value.trim() !== q) return;
     const exact = schools.some(x => x.name.toLowerCase() === q.toLowerCase());
-    dd.innerHTML = schools.map(x => `<button type="button" data-id="${esc(x.id)}" data-name="${esc(x.name)}">${I.school}<span>${esc(x.name)}</span></button>`).join('')
-      + (exact ? '' : `<button type="button" data-id="" data-name="${esc(q)}">${I.plusSm}<span>Add <b>${esc(q)}</b> as a new school</span></button>`);
-    dd.classList.remove('hidden'); showChosen();
+    dd.innerHTML = schools.map(x => `<button type="button" data-id="${esc(x.id)}" data-name="${esc(x.name)}" data-managed="${x.managed ? '1' : ''}">${I.school}<span>${esc(x.name)}${x.managed ? ' <i class="tiny muted">invite only</i>' : ''}</span></button>`).join('')
+      + (exact || !teacher() ? '' : `<button type="button" data-id="" data-name="${esc(q)}" data-managed="">${I.plusSm}<span>Create <b>${esc(q)}</b> as a new school</span></button>`);
+    dd.classList.toggle('hidden', !dd.innerHTML); showChosen();
   }, 200);
-  input.addEventListener('input', () => { el.dataset.schoolId = ''; showChosen(); search(); });
+  input.addEventListener('input', () => { el.dataset.schoolId = ''; el.dataset.managed = ''; showChosen(); search(); });
   input.addEventListener('focus', search);
+  make.addEventListener('click', () => { el.dataset.create = '1'; el.dataset.schoolId = ''; el.dataset.managed = ''; input.value = ''; dd.classList.add('hidden'); showChosen(); input.focus(); });
   dd.addEventListener('mousedown', e => {
     const b = e.target.closest('button'); if (!b) return;
     e.preventDefault();
-    input.value = b.dataset.name; el.dataset.schoolId = b.dataset.id;
+    input.value = b.dataset.name; el.dataset.schoolId = b.dataset.id; el.dataset.managed = b.dataset.managed;
     dd.classList.add('hidden'); showChosen();
   });
   input.addEventListener('blur', () => setTimeout(() => { dd.classList.add('hidden'); showChosen(); }, 150));
@@ -272,18 +284,73 @@ function schoolChoice(id) {
   return el.dataset.schoolId ? { schoolId: el.dataset.schoolId } : { schoolName: name };
 }
 
+/* ---- a school's invite link ---- */
+let invite = null; // the link being used: { token, school, email, name, role, roleLabel, account, hasAccount }
+let inviteProblem = null;
+// The token comes out of the address straight away, as a reset link's does
+async function openInvitePage(token) {
+  history.replaceState(null, '', '/');
+  try { invite = { token, ...await api(`/api/invite/${encodeURIComponent(token)}`) }; }
+  catch (e) { inviteProblem = e.message; }
+}
+// Signed out: the invite's school above the form, with its address filled in
+function showInviteAuth() {
+  showAuth(invite.hasAccount ? 'signin' : 'signup');
+  const s = invite.school;
+  $('inviteBanner').innerHTML = `${s.logoUrl ? `<img src="${esc(s.logoUrl)}" alt="" />` : `<span class="school-logo">${I.school}</span>`}<div><b>${esc(s.name)}</b><span>You’re invited to join as ${/^[AEIOU]/.test(invite.roleLabel) ? 'an' : 'a'} ${esc(invite.roleLabel.toLowerCase())}. ${invite.hasAccount ? 'Sign in to join.' : 'Create your account to join.'}</span></div>`;
+  $('inviteBanner').classList.remove('hidden');
+  if (invite.hasAccount) { $('siEmail').value = invite.email; return; }
+  $('signupForm').classList.add('invite-mode');
+  $('suEmail').value = invite.email; $('suEmail').disabled = true;
+  const [first, ...rest] = String(invite.name || '').split(' ');
+  $('suFirst').value = first || ''; $('suLast').value = rest.join(' ');
+}
+function clearInvite() {
+  invite = null;
+  $('inviteBanner').classList.add('hidden');
+  $('signupForm').classList.remove('invite-mode');
+  $('suEmail').disabled = false;
+}
+// Signed in: the link reached this person, so join
+async function acceptInvite() {
+  const token = invite.token, name = invite.school.name;
+  clearInvite();
+  try {
+    const r = await api(`/api/invite/${encodeURIComponent(token)}/accept`, { method: 'POST', body: {} });
+    me = r.user; paintSchool();
+    toast(`You joined ${name}`);
+    if (me.role === 'teacher') VisorRouter.go('/school');
+  } catch (e) {
+    openModal({ title: 'This invite can’t be used here', body: `<p>${esc(e.message)}</p>`, footer: `<button class="btn btn-primary" onclick="closeModal()">OK</button>` });
+  }
+}
+// The sidebar's school: its name, and for teachers the Your School tab with its logo
+function paintSchool() {
+  $('topSchool').textContent = me.org?.name || '';
+  $('navSchool').classList.toggle('hidden', me.role !== 'teacher');
+  $('navSchoolIc').innerHTML = me.org?.logoUrl ? `<img src="${esc(me.org.logoUrl)}" alt="" />` : I.school;
+}
+
 async function doSignup() {
   formError('signupError', '');
-  if (!selectedRole) return formError('signupError', 'Pick Student or Teacher.');
+  const joining = invite?.token && !invite.hasAccount ? invite.token : null;
+  if (!selectedRole && !joining) return formError('signupError', 'Pick Student or Teacher.');
   try {
     let r;
     if (googlePending) {
-      r = await api('/api/auth/google/signup', { method: 'POST', body: { credential: googlePending.credential, role: selectedRole, ...schoolChoice('suSchoolPicker'), ...studentSignupExtras() } });
+      const choice = joining ? { inviteToken: joining } : { role: selectedRole, ...schoolChoice('suSchoolPicker'), ...studentSignupExtras() };
+      r = await api('/api/auth/google/signup', { method: 'POST', body: { credential: googlePending.credential, ...choice } });
+    } else if (joining) {
+      r = await api('/api/auth/signup', { method: 'POST', body: { email: invite.email, firstName: $('suFirst').value.trim(), lastName: $('suLast').value.trim(), password: $('suPassword').value, inviteToken: joining } });
     } else {
       const body = { email: $('suEmail').value.trim(), firstName: $('suFirst').value.trim(), lastName: $('suLast').value.trim(), password: $('suPassword').value, role: selectedRole, ...schoolChoice('suSchoolPicker'), ...studentSignupExtras() };
       r = await api('/api/auth/signup', { method: 'POST', body });
     }
-    me = r.user; googlePending = null; enterApp();
+    me = r.user; googlePending = null;
+    if (joining) clearInvite();
+    // A teacher who just joined or created a school starts on its page
+    if (me.role === 'teacher' && me.org && (joining || me.facilitator)) history.replaceState(null, '', '/school');
+    enterApp();
   } catch (e) {
     formError('signupError', e.message);
   }
@@ -374,9 +441,12 @@ async function boot() {
     // Visor Classroom: the extension's side panel embeds the editor without a cookie
     if (window.VisorRouter && VisorRouter.isEmbed()) return VisorRouter.startEmbed();
     if (location.pathname === '/reset') { await openResetPage(); mountSchoolPicker('suSchoolPicker', null); initGoogleSignIn(); return; }
+    const link = /^\/invite\/([\w-]+)\/?$/.exec(location.pathname);
+    if (link) await openInvitePage(link[1]);
     const r = await api('/api/me');
     if (r.signedIn) { me = r.user; if (!r.geminiReady && me.role === 'teacher') toast('AI features are unavailable: this server has no Gemini access set up. Everything else works.', 'err'); enterApp(); }
-    else showAuth('signin');
+    else if (invite) showInviteAuth();
+    else { showAuth('signin'); if (inviteProblem) formError('signinError', inviteProblem); }
   } catch { showAuth('signin'); }
   mountSchoolPicker('suSchoolPicker', null);
   initGoogleSignIn();
@@ -384,7 +454,7 @@ async function boot() {
 
 function enterApp() {
   $('authView').classList.add('hidden'); $('appView').classList.remove('hidden');
-  $('topSchool').textContent = me.org?.name || '';
+  paintSchool();
   $('userBtn').innerHTML = `${avatarHtml(me, 'avatar-sm')}<span><div class="n">${esc(me.name)}</div><div class="r">${esc(me.role)}</div></span>`;
   $('newProjectBtn').classList.toggle('hidden', me.role !== 'teacher');
   $('emptyMainText').textContent = me.role === 'teacher' ? 'Create a project on the left to add students and resources.' : 'Your teacher adds you to projects. They will show up on the left.';
@@ -392,7 +462,10 @@ function enterApp() {
   // view is the /project/:id route. The sidebar lists classes and projects.
   if (window.VisorRouter) VisorRouter.start(); else loadProjects();
   if (window.navRefresh) navRefresh();
-  if (!me.tutorialSeen) setTimeout(openTutorial, 400);
+  if (invite) acceptInvite();
+  else if (inviteProblem) { toast(inviteProblem, 'err'); inviteProblem = null; }
+  // (Someone starting on their new school's page sets it up first)
+  else if (!me.tutorialSeen && location.pathname !== '/school') setTimeout(openTutorial, 400);
 }
 
 /* ====================== profile settings ====================== */
@@ -493,7 +566,7 @@ async function saveProfile() {
     await saveProfileIcon();
     const r = await api('/api/me', { method: 'PATCH', body: { firstName: $('profFirst').value, lastName: $('profLast').value, avatarColor: prof.color, school } });
     me = r.user; closeModal(); toast('Profile saved');
-    $('topSchool').textContent = me.org?.name || '';
+    paintSchool();
     $('userBtn').innerHTML = `${avatarHtml(me, 'avatar-sm')}<span><div class="n">${esc(me.name)}</div><div class="r">${esc(me.role)}</div></span>`;
     if (project) selectProject(project.id);
   } catch (e) { $('profErr').textContent = e.message; $('profErr').classList.remove('hidden'); }

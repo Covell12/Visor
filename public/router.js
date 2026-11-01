@@ -9,6 +9,7 @@
      /review/:docId          teacher review
      /calendar               due dates across classes (calendar.js)
      /project/:id            the existing project view
+     /school                 the teacher's school (school.js)
      /extension/connect      connect the Visor extension */
 
 'use strict';
@@ -56,7 +57,7 @@ const VisorRouter = (() => {
     });
   }
   function setNav(path) {
-    here.nav = path === '/' ? 'home' : /^\/calendar\/?$/.test(path) ? 'calendar' : '';
+    here.nav = path === '/' ? 'home' : /^\/calendar\/?$/.test(path) ? 'calendar' : /^\/school\/?$/.test(path) ? 'school' : '';
     here.class = /^\/class\/([^/]+)/.exec(path)?.[1] || null;
     here.project = /^\/project\/([^/]+)/.exec(path)?.[1] || null;
     paintNav();
