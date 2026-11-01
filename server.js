@@ -308,7 +308,7 @@ function publicUser(u, core) {
 // Students: Visor is for schools, so a student either confirms they're 13 or
 // older, or was signed up by their school (a teacher invited their email to a
 // class). Anyone else is told to ask their teacher.
-const UNDER_13_MESSAGE = 'Ask your teacher to add you to their class.';
+const UNDER_13_MESSAGE = 'Check the box below Class code if you’re 13 or older. If you’re under 13, ask your teacher to add you to their class.';
 function checkStudentAge(core, { role, email, over13 }) {
   if (role === 'student' && over13 !== true && !classes.hasPendingInvite(core, email)) throw new HttpError(400, UNDER_13_MESSAGE);
 }

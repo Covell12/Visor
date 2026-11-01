@@ -67,7 +67,7 @@ test('the classroom flow, end to end', async t => {
   // a second student joins with the code; without the age box and no invite, sign-up is refused
   r = await kim.post('/api/auth/signup', { email: 'kim@school.test', password: 'secret12', firstName: 'Kim', lastName: 'Park', role: 'student', classCode: cls.joinCode });
   assert.strictEqual(r.status, 400);
-  assert.strictEqual(r.data.error, 'Ask your teacher to add you to their class.');
+  assert.strictEqual(r.data.error, 'Check the box below Class code if you’re 13 or older. If you’re under 13, ask your teacher to add you to their class.');
   r = await kim.post('/api/auth/signup', { email: 'kim@school.test', password: 'secret12', firstName: 'Kim', lastName: 'Park', role: 'student', classCode: cls.joinCode, over13: true });
   assert.strictEqual(r.status, 200);
 
