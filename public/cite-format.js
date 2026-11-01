@@ -52,7 +52,7 @@
   }
   const fullName = n => (n.org ? n.org : squash(`${n.first} ${n.last}${n.suffix ? ', ' + n.suffix : ''}`));
   const invName = n => (n.org ? n.org : n.first ? `${n.last}, ${n.first}${n.suffix ? ', ' + n.suffix : ''}` : n.last);
-  const initials = first => first.split(/\s+/).filter(Boolean).map(w => w.split('-').map(p => (/^[A-Za-z]\.$/.test(p) ? p : p[0].toUpperCase() + '.')).join('-')).join(' ');
+  const initials = first => first.split(/\s+/).filter(w => /[^-]/.test(w)).map(w => w.split('-').filter(Boolean).map(p => (/^[A-Za-z]\.$/.test(p) ? p : p[0].toUpperCase() + '.')).join('-')).join(' ');
   const apaName = n => (n.org ? n.org : n.first ? `${n.last}, ${initials(n.first)}${n.suffix ? ', ' + n.suffix : ''}` : n.last);
   const lastOf = n => (n.org ? n.org : n.last);
 

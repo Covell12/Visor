@@ -354,9 +354,9 @@ test('time limits: extra time is applied, and time-up submits automatically', as
   r = await stu.post(`/api/write/${doc.id}/beat`, { surfaceId: 't', surf: 'tab', focused: true, visible: true }, H);
   assert.ok(Math.abs(Date.parse(r.data.deadlineAt) - Date.parse(r.data.serverNow) - 35 * 60e3) < 5000);
   // Time runs out (the deadline is moved into the past rather than waiting 35 minutes)
-  await repo.updateRecord('session', r.data.id, s => { s.deadlineAt = new Date(Date.now() - 1000).toISOString(); });
+  await repo.updateRecord('session', r.data.id, s => { s.deadlineAt = new Date(Date.now() - 30000).toISOString(); });
   r = await stu.post(`/api/write/${doc.id}/ops`, { baseSeq: 0, ops: [{ k: 'i', at: 0, s: 'late', t: Date.now(), src: 'type' }], surfaceId: 't' }, H);
-  assert.strictEqual(r.status, 409, 'no writing after the deadline');
+  assert.strictEqual(r.status, 409, 'no writing after the deadline, past the moment the last words are taken');
   assert.strictEqual(r.data.session.endReason, 'time-limit');
   r = await stu.get(`/api/write/${a.id}`);
   assert.strictEqual(r.data.doc.status, 'submitted');

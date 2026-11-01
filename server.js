@@ -2484,17 +2484,21 @@ app.post('/api/write/:docId/ops', ah(async (req, res) => {
   const a = await repo.getRecord('assignment', s0.assignmentId);
   // Pastes: look for the research copy each one came from (outside the transaction)
   const copies = body.ops.some(o => o && (o.src === 'paste' || o.src === 'drop')) ? await researchCopiesFor(s0.studentId, s0.assignmentId) : [];
-  let endedNow = null;
+  let endedNow = null, finished = null;
   const out = await repo.withRecords(async t => {
     const s = await t.get('session', s0.id);
     const doc = await t.get('doc', req.params.docId);
     const nowMs = Date.now();
     endedNow = sessionsLib.sweep(s, nowMs, { windowEnd: a?.writing?.windowEnd });
-    if (s.state === 'ended') { t.put('session', s); return { ended: s }; }
-    if (s.teacherPaused) throw new HttpError(423, 'Your teacher paused the session.');
-    if (doc.status === 'submitted') throw new HttpError(409, 'This document has been submitted.');
+    // Time ran out with these still on their way: they count, as long as this
+    // surface was writing in this session and nothing has been written since
+    const lastWords = sessionsLib.inFinalSave(s, nowMs) && !!own(s.surfaces, String(body.surfaceId || '')) && (!doc.lease || doc.lease.sessionId === s.id) && (doc.status !== 'submitted' || doc.autoSubmitted);
+    if (s.state === 'ended' && !lastWords) { t.put('session', s); return { ended: s }; }
+    if (lastWords) finished = s;
+    if (!lastWords && s.teacherPaused) throw new HttpError(423, 'Your teacher paused the session.');
+    if (!lastWords && doc.status === 'submitted') throw new HttpError(409, 'This document has been submitted.');
     const surfaceId = String(body.surfaceId || '');
-    if (!sessionsLib.holdsLease(doc.lease, s.id, surfaceId, tok.surf)) throw new HttpError(409, 'Another window is writing in this document.', { notLeaseHolder: true, lease: doc.lease, ...writing.resyncData(doc) });
+    if (!lastWords && !sessionsLib.holdsLease(doc.lease, s.id, surfaceId, tok.surf)) throw new HttpError(409, 'Another window is writing in this document.', { notLeaseHolder: true, lease: doc.lease, ...writing.resyncData(doc) });
     const chunkIds = writing.chunkIdsFor(doc.id, Number(body.baseSeq), body.ops.length);
     const chunks = {};
     if (Number(body.baseSeq) === doc.seq) for (const id of chunkIds) chunks[id] = await t.get('opchunk', id);
@@ -2512,6 +2516,7 @@ app.post('/api/write/:docId/ops', ah(async (req, res) => {
     return { seq: doc.seq, pastes: stamped.filter(o => o.paste).map(o => ({ n: o.n, origin: o.paste.origin, internal: o.paste.internal })) };
   });
   if (out.ended) { if (endedNow) await afterSessionEnded(out.ended, a); return res.status(409).json({ error: 'Your writing session has ended.', ...endedReply(out.ended) }); }
+  if (finished && endedNow) await afterSessionEnded(finished, a);
   res.json(out);
 }));
 
@@ -2744,7 +2749,8 @@ function cleanSource(raw = {}, base = {}) {
   if (raw.authors !== undefined) src.authors = (Array.isArray(raw.authors) ? raw.authors : String(raw.authors || '').split('\n')).map(a => cleanText(String(a), 120)).filter(Boolean).slice(0, 20);
   if (raw.type !== undefined) src.type = SOURCE_TYPES.includes(raw.type) ? raw.type : 'webpage';
   src.authors = src.authors || []; src.type = src.type || 'webpage';
-  if (src.url && !/^https?:\/\//i.test(src.url)) src.url = '';
+  // "nytimes.com/article" is a link typed by hand; anything else isn't a link
+  if (src.url && !/^https?:\/\//i.test(src.url)) src.url = /^[\w-]+(\.[\w-]+)+([/?#]\S*)?$/.test(src.url) ? `https://${src.url}` : '';
   return src;
 }
 function withFormatting(src, style) {

@@ -103,7 +103,7 @@ const wsPanelAllowed = () => {
 
 // fetch with the session token (and the extension token inside the side panel).
 // raw: a Blob sent as it is (a picture), with its own type, instead of JSON.
-async function wapi(path, { method = 'GET', body, raw, headers: extra, keepalive = false } = {}) {
+async function wapi(path, { method = 'GET', body, raw, headers: extra, keepalive = false, timeoutMs = 0 } = {}) {
   const headers = { ...(extra || {}) };
   if (raw) headers['Content-Type'] = raw.type || 'application/octet-stream';
   else if (body) headers['Content-Type'] = 'application/json';
@@ -111,7 +111,7 @@ async function wapi(path, { method = 'GET', body, raw, headers: extra, keepalive
   if (WR.extToken) headers['X-Visor-Token'] = WR.extToken;
   let r;
   try {
-    r = await fetch(path, { method, headers, body: raw || (body ? JSON.stringify(body) : undefined), credentials: 'same-origin', keepalive });
+    r = await fetch(path, { method, headers, body: raw || (body ? JSON.stringify(body) : undefined), credentials: 'same-origin', keepalive, signal: timeoutMs ? AbortSignal.timeout(timeoutMs) : undefined });
   } catch (e) {
     const err = new Error('You seem to be offline.'); err.network = true; throw err;
   }
@@ -140,6 +140,7 @@ function surfaceFocus() {
 // Why this surface can't write right now (null = it can)
 function lockReason() {
   if (!wsActive()) return WR.session ? 'ended' : 'not-started';
+  if (WR.session.deadlineAt && WR.session.pause?.reason !== 'teacher' && Date.parse(WR.session.deadlineAt) <= serverNow()) return 'ended';
   if (WR.session.pause?.reason === 'teacher') return 'teacher';
   if (!isLeaseHolder()) return 'mirror';
   if (WR.offline) return 'offline';
@@ -391,17 +392,24 @@ async function wsSubmit() {
   if (w.maxWords && words > w.maxWords) note = `It has ${words} words; the assignment asks for at most ${w.maxWords}. ` + note;
   if (!await confirmModal('Submit your essay?', note, { okLabel: 'Submit' })) return;
   await writerFlush();
+  // Never submit past writing that hasn't reached the server: it stays here to send
+  if (WR.queue.length) return toast('Your latest writing hasn’t saved yet, so your essay wasn’t submitted. Check your connection and try again.', 'err');
+  const left = writerStoredCopy();
+  if (left?.ops?.length && !await confirmModal('Submit without your unsent writing?', 'Some writing saved on this device hasn’t reached Visor. Submitting now leaves it out, and it can’t be added afterwards. Cancel and start a session to send it first.', { okLabel: 'Submit without it', danger: true })) return;
   try {
     const r = await wapi(`/api/write/${WR.doc.id}/submit`, { method: 'POST', body: {} });
     if (r.warning) toast(r.warning);
     WR.token = null;
-    if (window.VisorExt) VisorExt.endSession(WR.doc.id).catch(() => {});
-    WR.data = await writerFetch(); WR.doc = WR.data.doc; WR.session = WR.data.session;
+    WR.doc = r.doc ? { ...WR.doc, ...r.doc } : { ...WR.doc, status: 'submitted' };
+    if (WR.session) WR.session = { ...WR.session, state: 'ended' };
     writerClearStoredQueue();
-    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
-    toast('Submitted');
-    writerRefresh();
-  } catch (e) { toast(e.message, 'err'); }
+  } catch (e) { return toast(e.message, 'err'); }
+  // It's in. If this refresh fails the page still has to show that.
+  if (window.VisorExt) VisorExt.endSession(WR.doc.id).catch(() => {});
+  try { WR.data = await writerFetch(); WR.doc = WR.data.doc; WR.session = WR.data.session; } catch {}
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  toast('Submitted');
+  writerRefresh();
 }
 
 // Resume from the paused card: only if this window really has focus
@@ -439,6 +447,16 @@ function wsInstall() {
   WR.timers.push(setInterval(wsTick, 1000));
   WR.timers.push(setInterval(() => writerFlush(), WR_FLUSH_MS));
   WR.timers.push(setInterval(wsCheckExtension, 15000));
+  // The start card waits on a window opening or a teacher adding time: keep it current
+  WR.timers.push(setInterval(wsRefreshStartCard, 30000));
+}
+async function wsRefreshStartCard() {
+  if (wsActive() || !WR.data || document.hidden || WR.doc?.status === 'submitted' || WR.starting) return;
+  if (!WR.data.windowProblem && WR.data.timeLeftMs !== 0) return;
+  const fresh = await writerFetch().catch(() => null);
+  if (!fresh || wsActive() || WR.starting) return;
+  WR.data = fresh;
+  writerRefresh();
 }
 /* ---- other extensions' writing tools on the page ----
    Grammar checkers and AI writing helpers from other extensions show up on
@@ -525,7 +543,8 @@ function wsTick() {
       const left = Date.parse(s.deadlineAt) - serverNow();
       if (el) { el.textContent = vcClock(Math.max(0, left)) + ' left'; el.classList.toggle('low', left < 5 * 60000); }
       if (left < 5 * 60000 && left > 0 && !WR.warned) { WR.warned = true; writerBanner('5 minutes left.', 'warn'); }
-      if (left <= 0 && !WR.timeUpShown) { WR.timeUpShown = true; writerFlush({ final: true }).then(wsBeat); writerBanner('Time’s up.', 'warn'); }
+      if (left <= 2000) writerFlush(); // the last words go out ahead of the buzzer
+      if (left <= 0 && !WR.timeUpShown) { WR.timeUpShown = true; writerRefresh(); writerFlush().then(wsBeat); writerBanner('Time’s up.', 'warn'); }
     } else if (el) {
       el.textContent = vcClock(serverNow() - Date.parse(s.startedAt));
     }

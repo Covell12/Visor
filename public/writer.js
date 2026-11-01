@@ -928,9 +928,9 @@ async function writerFlush({ unload = false } = {}) {
         if (batch.length === WR.queue.length && !WR.queueDetached && WR.quill) text = writerText();
         else { text = WR.confirmedText; for (const op of batch) text = applyTextOp(text, op); }
         const textHash = await sha256Hex(text);
-        const r = await wapi(`/api/write/${WR.doc.id}/ops`, { method: 'POST', body: { baseSeq: WR.seq, ops: batch, textHash, surfaceId: WR.surfaceId } });
+        const r = await wapi(`/api/write/${WR.doc.id}/ops`, { method: 'POST', body: { baseSeq: WR.seq, ops: batch, textHash, surfaceId: WR.surfaceId }, timeoutMs: 30000 });
         WR.queue.splice(0, batch.length);
-        WR.seq = r.seq; WR.confirmedText = text;
+        WR.seq = r.seq; WR.confirmedText = text; WR.rebased = false;
         if (!WR.queue.length) WR.queueDetached = false;
         writerPersistQueue(true);
       }
@@ -939,8 +939,8 @@ async function writerFlush({ unload = false } = {}) {
       writerSetSaved('saved');
     } catch (e) {
       if (e.network) { wsGoOffline(); writerSetSaved('offline'); writerRetrySoon(); }
-      else if (e.status === 409 && e.data?.ended) { writerSetSaved('saved'); await wsSessionEnded(e.data); }
-      else if (e.status === 409 && e.data && 'text' in e.data) writerResync(e.data, e.data.notLeaseHolder);
+      else if (e.status === 409 && e.data?.ended) { writerSetSaved(WR.queue.length ? 'unsaved' : 'saved'); await wsSessionEnded(e.data); }
+      else if (e.status === 409 && e.data && 'text' in e.data) writerConflict(e.data, e.data.notLeaseHolder);
       else if (e.status === 423) { writerSetSaved('unsaved'); writerRetrySoon(); }
       else if (e.status === 401) wsLost(e.message);
       // The server won't take these edits however often they're sent: start again from its copy
@@ -978,28 +978,98 @@ function writerFlushBeacon() {
   }
 }
 
-// The server's text differs from ours: take the server's
-function writerResync(data, notLeaseHolder) {
-  WR.queue = [];
+// How many of these queued ops the server already has, starting from baseText
+// at baseSeq, or -1 if its text isn't what they lead to. The server numbers every
+// op, so its seq says how many to look for.
+function opsLanded(ops, baseText, baseSeq, server) {
+  const want = server.seq - baseSeq;
+  if (want === 0) return server.text === baseText ? 0 : -1;
+  let text = baseText, found = -1;
+  for (let i = 0; i < ops.length; i++) {
+    text = applyTextOp(text, ops[i]);
+    if (text === server.text && i + 1 === want) return want;
+    if (text === server.text) found = i + 1; // one the server dropped as empty can throw the count off
+  }
+  return found;
+}
+
+// The server isn't where this page thought. Usually nothing is wrong: a reply got
+// lost, so a batch arrived though this page never heard. Those ops come off the
+// queue and the rest go on. Student writing is never dropped to resolve this.
+function writerConflict(data, notLeaseHolder) {
+  const landed = opsLanded(WR.queue, WR.confirmedText, WR.seq, data);
+  if (landed > 0) {
+    WR.queue.splice(0, landed);
+    WR.seq = data.seq; WR.confirmedText = data.text;
+    if (!WR.queue.length) WR.queueDetached = false;
+    writerPersistQueue(true);
+  }
+  if (notLeaseHolder) {
+    // Another window took over, and it has the server's copy
+    if (WR.queue.length) toast('The last few words typed here didn’t reach the window you switched to.', 'err');
+    WR.queue = [];
+    writerPersistQueue(true);
+    writerLoadServerText(data, { force: true });
+    WR.lease = data.lease || WR.lease;
+    writerSetSaved('saved');
+    return writerRefresh();
+  }
+  if (landed >= 0) {
+    writerSetSaved(WR.queue.length ? 'saving' : 'saved');
+    if (WR.queue.length) writerRetrySoon();
+    return;
+  }
+  if (writerRebase(data)) return;
+  const text = WR.queueDetached ? '' : writerText();
+  WR.queue = []; WR.queueDetached = false;
   writerPersistQueue(true);
   writerLoadServerText(data, { force: true });
-  if (notLeaseHolder) WR.lease = data.lease || WR.lease;
-  else { wsNoteEvent('resync'); toast('Re-synced with the server'); }
+  wsNoteEvent('resync');
   writerSetSaved('saved');
   writerRefresh();
+  if (text && text !== data.text) writerRescue(text);
+}
+
+// The essay on screen and the server's differ in a way the queue can't explain.
+// What's on screen is what the student wrote, so it goes back up as one edit on
+// top of the server's copy. Once: if the server refuses that too, writerRescue.
+function writerRebase(data) {
+  if (WR.rebased || WR.queueDetached) return false;
+  const want = writerText(), have = data.text;
+  let a = 0, b = 0;
+  while (a < want.length && a < have.length && want[a] === have[a]) a++;
+  while (b < want.length - a && b < have.length - a && want[want.length - 1 - b] === have[have.length - 1 - b]) b++;
+  const gone = have.length - a - b, added = want.slice(a, want.length - b);
+  // A picture can't be rebuilt from its placeholder
+  if (added.includes(WR_EMBED) || have.slice(a, a + gone).includes(WR_EMBED)) return false;
+  const t = Date.now();
+  WR.queue = [...(gone ? [{ k: 'd', at: a, len: gone, t, src: 'other' }] : []), ...(added ? [{ k: 'i', at: a, s: added, t, src: 'other' }] : [])];
+  WR.seq = data.seq; WR.confirmedText = data.text; WR.rebased = true;
+  writerPersistQueue(true);
+  wsNoteEvent('resync');
+  if (WR.queue.length) writerRetrySoon(); else writerSetSaved('saved');
+  return true;
+}
+
+// Writing the server won't take, shown so the student can copy it somewhere safe
+function writerRescue(text) {
+  openModal({ title: 'Copy your latest writing', sub: 'Visor couldn’t save it, so your essay went back to its last save. Copy this and paste what’s missing back in.', closable: false,
+    body: `<textarea id="wrRescue" class="input" readonly style="width:100%;min-height:220px;" aria-label="Your unsaved writing">${esc(text)}</textarea>`,
+    footer: `<button class="btn btn-ghost" onclick="closeModal()">Done</button><button class="btn btn-primary" onclick="copyText($('wrRescue').value,'Copied')">Copy</button>` });
 }
 
 // A 400 or 413 from the ops route: those edits can never be saved. Drop them
 // and show the last saved essay (never resend the same batch for ever).
 async function writerRejected(e) {
   console.warn('Visor: the server refused some edits', e.status, e.message);
+  const text = WR.queueDetached || !WR.quill ? '' : writerText();
   WR.queue = []; WR.queueDetached = false;
   writerPersistQueue(true);
   wsNoteEvent('resync');
   toast('Some changes couldn’t be saved, so the essay was reloaded from its last save.', 'err');
   try {
     const fresh = await writerFetch();
-    if (WR.quill && fresh?.doc) { WR.doc = { ...WR.doc, ...fresh.doc }; writerLoadServerText(fresh.doc, { force: true }); }
+    if (WR.quill && fresh?.doc) { WR.doc = { ...WR.doc, ...fresh.doc }; writerLoadServerText(fresh.doc, { force: true }); if (text && text !== fresh.doc.text) writerRescue(text); }
   } catch {
     // Can't reach the server now: the next save starts from the text it last confirmed,
     // and a mismatch there reloads the essay
@@ -1077,34 +1147,43 @@ function writerPersistNow() {
   if (!WR.doc) return;
   try {
     if (!WR.queue.length) { if (WR.storedOwn) localStorage.removeItem(queueKey()); WR.storedOwn = false; }
-    else { localStorage.setItem(queueKey(), JSON.stringify({ sessionId: WR.session?.id, baseSeq: WR.seq, ops: WR.queue, savedAt: Date.now() })); WR.storedOwn = true; }
+    else { localStorage.setItem(queueKey(), JSON.stringify({ sessionId: WR.session?.id, baseSeq: WR.seq, baseText: WR.confirmedText, ops: WR.queue, savedAt: Date.now() })); WR.storedOwn = true; }
   } catch {}
 }
 function writerClearStoredQueue() { WR.storedOwn = false; try { localStorage.removeItem(queueKey()); } catch {} }
-// After a reload: offer to send writing that never reached the server, but
-// only if the document hasn't changed since (otherwise it can't be placed).
+function writerStoredCopy() { try { return JSON.parse(localStorage.getItem(queueKey()) || 'null'); } catch { return null; } }
+// After a reload: offer to send writing that never reached the server. Part of
+// it may have arrived as the page closed, and then only the rest is left.
 function writerCheckStoredQueue() {
-  let stored = null;
-  try { stored = JSON.parse(localStorage.getItem(queueKey()) || 'null'); } catch {}
+  let stored = writerStoredCopy();
   if (!stored?.ops?.length || WR.queue.length) return;
   // Sent as the page closed, and the server has it
   if (stored.sentText != null && stored.sentText === WR.doc.text) return writerClearStoredQueue();
+  if (stored.baseSeq !== WR.doc.seq && stored.baseText != null) {
+    const landed = opsLanded(stored.ops, stored.baseText, stored.baseSeq, WR.doc);
+    if (landed === stored.ops.length) return writerClearStoredQueue();
+    if (landed > 0) {
+      stored = { ...stored, ops: stored.ops.slice(landed), baseSeq: WR.doc.seq, baseText: WR.doc.text };
+      try { localStorage.setItem(queueKey(), JSON.stringify(stored)); } catch {}
+    }
+  }
   if (stored.baseSeq !== WR.doc.seq) {
+    // The essay moved on without these. They can't be placed, but they're the student's.
+    const text = stored.ops.filter(o => o.k === 'i').map(o => o.s).join('').replaceAll(WR_EMBED, '');
     writerClearStoredQueue();
-    writerBanner(`Some writing saved on this device on ${vcDateTime(new Date(stored.savedAt).toISOString())} couldn’t be sent, because the document changed after it. It was discarded.`, 'warn');
+    if (text.trim()) writerRescue(text);
     return;
   }
   if (!wsActive() || !isLeaseHolder()) {
     writerBanner(`You have writing saved on this device that hasn’t been sent yet. Start a session to send it.`, 'info');
     return;
   }
-  openModal({ title: 'Send unsent writing?', sub: `Saved on this device ${timeAgo(new Date(stored.savedAt).toISOString())}.`, body: `<p style="margin:0;">${stored.ops.length} edit${stored.ops.length === 1 ? '' : 's'} didn’t reach Visor before the page closed. Send ${stored.ops.length === 1 ? 'it' : 'them'} now?</p>`,
+  openModal({ title: 'Send unsent writing?', closable: false, sub: `Saved on this device ${timeAgo(new Date(stored.savedAt).toISOString())}.`, body: `<p style="margin:0;">${stored.ops.length} edit${stored.ops.length === 1 ? '' : 's'} didn’t reach Visor before the page closed. Send ${stored.ops.length === 1 ? 'it' : 'them'} now?</p>`,
     footer: `<button class="btn btn-ghost" onclick="writerClearStoredQueue();closeModal();toast('Discarded')">Discard</button><button class="btn btn-primary" onclick="writerSendStored()">Send</button>` });
 }
 async function writerSendStored() {
   closeModal();
-  let stored = null;
-  try { stored = JSON.parse(localStorage.getItem(queueKey()) || 'null'); } catch {}
+  const stored = writerStoredCopy();
   if (!stored || stored.baseSeq !== WR.seq) { writerClearStoredQueue(); return toast('The document changed, so that writing couldn’t be sent.', 'err'); }
   // Send it like any other edits (they aren't in the editor, which shows the
   // server's text), then show the server's text
@@ -2361,7 +2440,7 @@ function writerToggleInstructions(open) {
 // The extension's side panel has no room for the dropdown: the same text in a dialog
 function writerInstructionsDialog() {
   const a = WR.data.assignment;
-  openModal({ title: 'Instructions', sub: a.title, body: `${a.instructions ? `<div class="wr-instr-text">${esc(a.instructions).replace(/\n/g, '<br>')}</div>` : '<div class="wr-instr-text muted">Your teacher didn’t write instructions for this one.</div>'}
+  openModal({ title: 'Instructions', sub: esc(a.title), body: `${a.instructions ? `<div class="wr-instr-text">${esc(a.instructions).replace(/\n/g, '<br>')}</div>` : '<div class="wr-instr-text muted">Your teacher didn’t write instructions for this one.</div>'}
     <div class="wr-instr-rules"><span class="wr-instr-k">How this assignment works</span>${esc(WR.data.describe)}</div>`,
     footer: '<button class="btn btn-primary" onclick="closeModal()">Done</button>' });
 }

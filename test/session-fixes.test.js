@@ -203,3 +203,43 @@ test('returned feedback doesn’t say who gave it', async () => {
   assert.strictEqual(fb.comment, 'Good start');
   assert.strictEqual(fb.by, undefined);
 });
+
+test('the last words typed as time runs out still count, and only for a moment', async () => {
+  const { st, doc } = await essay(45);
+  const r = await st.post(`/api/write/${doc.id}/sessions`, { surfaceId: 'one', surf: 'tab' });
+  const H = { 'X-Visor-Session': r.data.token };
+  const op = s => ({ k: 'i', at: 0, s, t: Date.now(), src: 'type' });
+  // the buzzer went two seconds ago, and these were on their way
+  await repo.updateRecord('session', r.data.session.id, s => { s.deadlineAt = new Date(Date.now() - 2000).toISOString(); });
+  let w = await st.post(`/api/write/${doc.id}/ops`, { baseSeq: 0, ops: [op('Last words')], surfaceId: 'one' }, H);
+  assert.strictEqual(w.status, 200, JSON.stringify(w.data));
+  assert.strictEqual((await repo.getRecord('doc', doc.id)).text, 'Last words');
+  assert.strictEqual((await repo.getRecord('session', r.data.session.id)).state, 'ended');
+  // a moment later it's over
+  await repo.updateRecord('session', r.data.session.id, s => { s.endedAt = new Date(Date.now() - 60000).toISOString(); });
+  w = await st.post(`/api/write/${doc.id}/ops`, { baseSeq: w.data.seq, ops: [op('Too late ')], surfaceId: 'one' }, H);
+  assert.deepStrictEqual([w.status, w.data.ended], [409, true]);
+  assert.strictEqual((await repo.getRecord('doc', doc.id)).text, 'Last words');
+});
+
+test('a session the student ended takes no more writing', async () => {
+  const { st, doc } = await essay(null);
+  const r = await st.post(`/api/write/${doc.id}/sessions`, { surfaceId: 'one', surf: 'tab' });
+  const H = { 'X-Visor-Session': r.data.token };
+  await st.post(`/api/write/${doc.id}/end`, {}, H);
+  const w = await st.post(`/api/write/${doc.id}/ops`, { baseSeq: 0, ops: [{ k: 'i', at: 0, s: 'After', t: Date.now(), src: 'type' }], surfaceId: 'one' }, H);
+  assert.deepStrictEqual([w.status, w.data.ended], [409, true]);
+});
+
+test('a link with a stray % or a name with a stray hyphen can’t break an essay', () => {
+  const grade = require('../lib/source-grade');
+  const cite = require('../lib/cite');
+  for (const url of ['https://web.archive.org/web/2012/http://www.example.fr/caf%E9.html', 'https://web.archive.org/web/2012/https://example.com/50%-off']) {
+    assert.ok(grade.grade({ type: 'web', url, title: 'A page' }), url);
+  }
+  for (const name of ['John Smith - CNN', 'Mary - Jane Smith', 'Jean- Luc Godard']) {
+    const f = cite.format({ type: 'web', title: 'A page', authors: [name], url: 'https://example.com/' }, 'apa');
+    assert.ok(f.text.length > 0, name);
+    assert.doesNotMatch(f.text, /undefined/);
+  }
+});
