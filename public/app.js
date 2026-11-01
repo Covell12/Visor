@@ -97,14 +97,14 @@ function toast(msg, kind = '') {
 let modalOnClose = null, modalReturn = null, modalLight = false;
 // light: a click outside closes it even with a box in it (nothing typed there
 // matters). keep: nothing but its own buttons closes it (a recording in progress).
-function openModal({ title, sub = '', body = '', footer = '', wide = false, onClose = null, closable = true, light = false, keep = false }) {
+function openModal({ title, sub = '', body = '', footer = '', wide = false, cls = '', onClose = null, closable = true, light = false, keep = false }) {
   modalOnClose = onClose; modalLight = light;
   window.toggleNav?.(false); // on a phone the drawer would sit over the dialog
   // Where the keyboard goes back to. A dialog opened from another keeps the first one's.
   if (!$('modalRoot').firstElementChild) modalReturn = document.activeElement;
   $('modalRoot').innerHTML = `
     <div class="overlay" onmousedown="this._downOnBackdrop=event.target===this" onclick="if(event.target===this&&this._downOnBackdrop){${closable ? 'modalBackdrop()' : ''}}">
-      <div class="modal ${wide ? 'wide' : ''}"${keep ? ' data-keep' : ''} role="dialog" aria-modal="true" aria-labelledby="modalTitle" tabindex="-1">
+      <div class="modal ${wide ? 'wide' : ''} ${cls}"${keep ? ' data-keep' : ''} role="dialog" aria-modal="true" aria-labelledby="modalTitle" tabindex="-1">
         <div class="mh"><div><h3 id="modalTitle">${title}</h3>${sub ? `<p>${sub}</p>` : ''}</div>${closable ? `<button class="btn-icon" aria-label="Close" onclick="closeModal()">${I.x}</button>` : ''}</div>
         <div class="mb" id="modalBody">${body}</div>
         ${footer ? `<div class="mf" id="modalFooter">${footer}</div>` : '<div id="modalFooter"></div>'}
@@ -500,39 +500,38 @@ async function saveProfile() {
 }
 
 /* ====================== tutorial ====================== */
+// The first-run tour: a few short steps, one idea each
 const TUTORIAL = {
   teacher: [
-    { icon: 'school', title: '1. Create a class', text: 'Start on <b>Home</b> with <b>Create class</b>. Each class gets a 6-character class code: put it on the board, or add students by email on the class’s <b>People</b> page (anyone without an account joins automatically when they sign up). Set extra time for students who need it there, and add co-teachers who share the class.' },
-    { icon: 'pen', title: '2. Make an assignment', text: 'On the class’s <b>Assignments</b> page, use <b>New</b> for a <b>Writing</b> assignment, <b>Group project</b> or <b>Discussion</b>, and folders to keep units together. Post to the class under <b>Announcements</b>. For writing, the <b>In-class essay (locked)</b> preset is a timed session with pasting from outside sources off; <b>Homework essay (open)</b> has no time limit and allows pasting. Both block AI sites unless you untick it. Publish it when you’re ready.' },
-    { icon: 'puzzle', title: '3. Students write in Visor', text: 'Students write in Visor’s own editor during a session. Leaving the tab pauses their writing and is recorded. For locked sessions they need the Visor Chrome extension, which also records their research, keeps them on allowed sites and adds citations with one click.' },
-    { icon: 'eye', title: '4. Watch live, then review', text: 'The assignment’s <b>Live</b> tab shows every student as they write: words, pauses, pastes, time left, with buttons to pause, message or add time. After they submit, open any essay to replay it keystroke by keystroke, read its research log, and see factual notes about how it was written.' },
-    { icon: 'sparkle', title: '5. Feedback, groups and discussions', text: 'Leave a comment and score, then <b>Return to student</b>. Group projects give each group its own project for Google Docs reports, recordings and an AI-written summary. Discussions turn a recording into measured talk time and turns per student. Visor shows what happened; you make the call.' }
+    { icon: 'school', title: 'Create a class', text: 'Students join with its class code, or add them on its People page.' },
+    { icon: 'pen', title: 'Add an assignment', text: 'Choose a locked in-class essay or an open homework essay, then set the time and rules.' },
+    { icon: 'eye', title: 'Watch students write', text: 'The Live tab shows words, pauses and pastes. Pause a student, send a message or add time.' },
+    { icon: 'doc', title: 'Review and return', text: 'Replay any essay, check its research, then return it with feedback and a score.' }
   ],
   student: [
-    { icon: 'school', title: '1. Join your class', text: 'Click <b>Join a class</b> on Home and type the class code your teacher gives you (or your teacher adds you by email). Your classes show up on Home and in the sidebar; what’s due shows under <b>Coming up</b> and on the <b>Calendar</b>.' },
-    { icon: 'puzzle', title: '2. Connect the extension', text: 'Some sessions need the Visor Chrome extension. Install it, then use the <b>Visor extension</b> box on Home to connect it. During a session it records the searches and pages you use for research, and its <b>Cite this page</b> button adds a citation to your essay.' },
-    { icon: 'pen', title: '3. Write in a session', text: 'Open an assignment, click <b>Open the editor</b>, then <b>Start writing session</b>. Visor records how your writing happens, not just the result. If you leave the Visor tab, writing pauses until you come back, and you see the same pause your teacher sees.' },
-    { icon: 'doc', title: '4. Cite and submit', text: 'Use <b>Insert citation</b> or the extension’s cite button to add sources; your Works Cited list builds itself. When you’re done, click <b>Submit</b>. Your teacher can return it with feedback and a score.' },
-    { icon: 'users', title: '5. Group projects and discussions', text: 'In group projects, the extension sends your group’s Google Doc history to Visor automatically, and you can add meeting recordings. In class discussions, your teacher may share your own talk time and turns with you.' }
+    { icon: 'school', title: 'Join your class', text: 'On Home, choose Join a class and enter your teacher’s class code.' },
+    { icon: 'puzzle', title: 'Connect the extension', text: 'Some sessions need the Visor Chrome extension. Connect it from the box on Home.' },
+    { icon: 'pen', title: 'Write in a session', text: 'Open an assignment and start a session. Your teacher can see how your writing happens, including time away.' },
+    { icon: 'doc', title: 'Cite and submit', text: 'Add your sources, then submit. You can unsubmit until the due date or until your teacher reviews it.' }
   ]
 };
 let tut = { i: 0 };
-function openTutorial() { tut.i = 0; renderTutorial(); }
+function openTutorial() {
+  tut.i = 0;
+  openModal({ title: 'How Visor works', cls: 'tour', onClose: finishTutorial, body: '<div id="tourStep"></div>', footer: ' ' });
+  renderTutorial();
+}
+function tutorialGo(step) { tut.i += step; renderTutorial(); }
 function renderTutorial() {
-  const steps = TUTORIAL[me.role] || TUTORIAL.student;
-  const st = steps[tut.i]; const last = tut.i === steps.length - 1;
-  openModal({ title: st.title, closable: true, onClose: finishTutorial, body: `
-    <div class="wiz-progress">${steps.map((_, j) => `<span class="${j < tut.i ? 'done' : ''} ${j === tut.i ? 'cur' : ''}"></span>`).join('')}</div>
-    <div style="display:flex;gap:18px;align-items:flex-start;">
-      <div class="choice" style="pointer-events:none;padding:14px;flex:none;"><div class="ic" style="margin:0;">${I[st.icon]}</div></div>
-      <div style="font-size:15.5px;line-height:1.6;">${st.text}</div>
-    </div>`,
-    footer: `<div style="display:flex;gap:10px;width:100%;align-items:center;">
-      <button class="btn btn-ghost" ${tut.i === 0 ? 'disabled' : ''} onclick="tut.i--;renderTutorial()">Back</button>
-      <span style="flex:1"></span>
-      ${last ? '' : `<button class="btn btn-ghost" onclick="closeModal()">Skip</button>`}
-      <button class="btn btn-primary" onclick="${last ? 'closeModal()' : 'tut.i++;renderTutorial()'}">${last ? 'Got it' : 'Next'}</button>
-    </div>` });
+  const steps = TUTORIAL[me.role] || TUTORIAL.student, st = steps[tut.i], last = tut.i === steps.length - 1;
+  $('tourStep').innerHTML = `<div class="tour-step">
+    <div class="tour-art"><span class="tour-ic">${I[st.icon]}</span></div>
+    <div class="tour-text"><h2>${esc(st.title)}</h2><p>${esc(st.text)}</p></div>
+  </div>`;
+  $('modalFooter').innerHTML = `<div class="tour-dots" role="img" aria-label="Step ${tut.i + 1} of ${steps.length}">${steps.map((_, j) => `<i class="${j === tut.i ? 'on' : ''}"></i>`).join('')}</div>
+    ${tut.i ? '<button class="btn btn-ghost" onclick="tutorialGo(-1)">Back</button>' : '<button class="btn btn-ghost" onclick="closeModal()">Skip</button>'}
+    <button class="btn btn-primary" id="tourNext" onclick="${last ? 'closeModal()' : 'tutorialGo(1)'}">${last ? 'Done' : 'Next'}</button>`;
+  $('tourNext').focus({ preventScroll: true });
 }
 async function finishTutorial() {
   if (me && !me.tutorialSeen) { me.tutorialSeen = true; try { await api('/api/me', { method: 'PATCH', body: { tutorialSeen: true } }); } catch {} }

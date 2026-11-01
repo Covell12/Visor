@@ -1927,7 +1927,7 @@ async function submissionRows(core, cls, a) {
     return {
       student: publicUser(u), docId: d?.id || null, status: d?.status || 'not-started',
       words: d?.stats?.words || 0, submittedAt: d?.submittedAt || null, returnedAt: d?.returnedAt || null,
-      updatedAt: d?.updatedAt || null, sessions: d?.stats?.sessions || 0, score: d?.feedback?.score ?? null
+      updatedAt: d?.updatedAt || null, sessions: d?.stats?.sessions || 0, score: d?.feedback?.score ?? null, unsubmits: d?.unsubmits || 0
     };
   }).sort((x, y) => x.student.lastName.localeCompare(y.student.lastName) || x.student.firstName.localeCompare(y.student.firstName));
 }
@@ -1970,6 +1970,7 @@ app.get('/api/assignments/:id', requireAuth, ah(async (req, res) => {
   if (a.type === 'writing') {
     const d = (await repo.listRecords('doc', { assignmentId: a.id, studentId: got.me.id }))[0];
     out.doc = d ? { id: d.id, status: d.status, words: d.stats?.words || 0, submittedAt: d.submittedAt || null, returnedAt: d.returnedAt || null } : null;
+    if (d?.status === 'submitted') out.doc.unsubmitBlocked = unsubmitBlocked(a, cls, d, await repo.listRecords('session', { docId: d.id }));
   }
   if (a.type === 'group') out.myGroup = await myGroupFor(core, a, got.me);
   if (a.type === 'discussion') out.myStats = await myDiscussionStats(a, got.me);
@@ -2561,7 +2562,7 @@ async function syncDocStats(docId) {
 const cleanSurfaceId = v => { const id = String(v || '').slice(0, 60); return /^(__proto__|constructor|prototype)$/.test(id) ? '' : id; };
 
 function docView(doc, { withFeedback } = {}) {
-  const out = { id: doc.id, assignmentId: doc.assignmentId, text: doc.text, formats: doc.formats, sources: doc.sources || [], seq: doc.seq, status: doc.status, submittedAt: doc.submittedAt, returnedAt: doc.returnedAt, reopened: !!doc.reopened, lease: doc.lease, stats: doc.stats, autoSubmitted: !!doc.autoSubmitted };
+  const out = { id: doc.id, assignmentId: doc.assignmentId, text: doc.text, formats: doc.formats, sources: doc.sources || [], seq: doc.seq, status: doc.status, submittedAt: doc.submittedAt, returnedAt: doc.returnedAt, reopened: !!doc.reopened, lease: doc.lease, stats: doc.stats, autoSubmitted: !!doc.autoSubmitted, unsubmits: doc.unsubmits || 0 };
   // Without who gave it: an advisor's feedback mustn't name them to the student
   if (withFeedback && doc.feedback && (doc.status === 'returned' || doc.reopened)) { const { by, ...feedback } = doc.feedback; out.feedback = feedback; }
   return out;
@@ -2573,6 +2574,11 @@ function timeLeft(a, cls, doc, sessions, studentId) {
   if (!lim) return null;
   const total = lim * 60000 * classes.multiplierFor(cls, studentId) + (doc.extraTimeMs || 0);
   return Math.max(0, total - sessionsLib.usedMs(sessions.filter(s => s.state === 'ended')));
+}
+
+// Why this student can't take their submission back now (null if they can)
+function unsubmitBlocked(a, cls, doc, sessions, t = Date.now()) {
+  return sessionsLib.unsubmitProblem({ doc, assignment: a, timeLeftMs: timeLeft(a, cls, doc, sessions, doc.studentId), now: t });
 }
 
 // The editor page: the student's document, the assignment's settings, the
@@ -2603,6 +2609,7 @@ app.get('/api/write/:assignmentId', ah(async (req, res) => {
     canWrite: !!active && !active.teacherPaused && fresh.status !== 'submitted',
     timeLeftMs: timeLeft(a, got.cls, fresh, list, me.id), multiplier: mult,
     windowProblem: sessionsLib.windowProblem(a.writing, Date.now()),
+    unsubmitBlocked: fresh.status === 'submitted' ? unsubmitBlocked(a, got.cls, fresh, list) : null,
     user: { id: me.id, name: fullName(me) },
     serverNow: now()
   });
@@ -2922,11 +2929,27 @@ app.post('/api/write/:docId/submit', ah(async (req, res) => {
     await afterSessionEnded(done, got.a);
   }
   if (!list.some(s => s.state !== 'ended') && list[0]) await repo.updateRecord('session', list[0].id, x => { sessionsLib.addEvent(x, { t, type: 'submit', afterSession: true }); });
-  const doc = await repo.updateRecord('doc', got.doc.id, d => { d.status = 'submitted'; d.submittedAt = new Date(t).toISOString(); d.reopened = false; d.lease = null; d.updatedAt = now(); });
+  const doc = await repo.updateRecord('doc', got.doc.id, d => { d.status = 'submitted'; d.submittedAt = new Date(t).toISOString(); d.reopened = false; d.lease = null; d.updatedAt = now(); delete d.submittedBy; });
   const w = got.a.writing || {}, words = doc.stats?.words || 0;
   const warning = w.minWords && words < w.minWords ? `Submitted with ${words} words; the assignment asks for at least ${w.minWords}.`
     : w.maxWords && words > w.maxWords ? `Submitted with ${words} words; the assignment asks for at most ${w.maxWords}.` : null;
   res.json({ doc: docView(doc), warning });
+}));
+
+// Take a submission back to keep writing. Checked again inside the update, so a
+// teacher's review that lands at the same moment wins.
+app.post('/api/write/:docId/unsubmit', ah(async (req, res) => {
+  const got = await docFor(req, await repo.readCore());
+  if (!got.isOwner) throw new HttpError(403, 'Only the student can unsubmit their document.');
+  const list = await sweepDocSessions(got.doc, got.a);
+  const t = Date.now();
+  const doc = await repo.updateRecord('doc', got.doc.id, d => {
+    const problem = unsubmitBlocked(got.a, got.cls, d, list, t);
+    if (problem) throw new HttpError(409, problem);
+    Object.assign(d, { status: 'in-progress', submittedAt: null, autoSubmitted: false, lease: null, unsubmits: (d.unsubmits || 0) + 1, updatedAt: now() });
+  });
+  if (list[0]) await repo.updateRecord('session', list[0].id, x => { sessionsLib.addEvent(x, { t, type: 'unsubmit', afterSession: true }); });
+  res.json({ doc: docView(doc, { withFeedback: true }) });
 }));
 
 // ---- Sources (Works Cited) ----

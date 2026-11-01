@@ -40,7 +40,7 @@ function rvRender() {
     <div class="course-body"><div class="course-main">
     <div class="page-head">
       <div><h1>${esc(student.name)}</h1>
-        <div class="head-meta"><span>${esc(a.title)}</span>${statusPillDoc(doc.status)}<span class="muted small">${vcPlural(report.totals.studentWords, 'word')}${report.totals.studentWords !== report.totals.words ? ` (${report.totals.words} with the starter text)` : ''}</span>${doc.submittedAt ? `<span class="muted small">Submitted ${esc(vcDateTime(doc.submittedAt))}</span>` : ''}</div></div>
+        <div class="head-meta"><span>${esc(a.title)}</span>${statusPillDoc(doc.status)}<span class="muted small">${vcPlural(report.totals.studentWords, 'word')}${report.totals.studentWords !== report.totals.words ? ` (${report.totals.words} with the starter text)` : ''}</span>${doc.submittedAt ? `<span class="muted small">Submitted ${esc(vcDateTime(doc.submittedAt))}</span>` : ''}${doc.unsubmits ? `<span class="muted small">Unsubmitted ${vcPlural(doc.unsubmits, 'time')}</span>` : ''}</div></div>
       <div class="head-actions">
         <a class="btn btn-ghost btn-sm ${nav.prev ? '' : 'disabled'}" ${nav.prev ? `href="/review/${nav.prev.docId}" data-link` : 'aria-disabled="true"'} title="${nav.prev ? esc(nav.prev.name) : ''}">← Prev student</a>
         <span class="tiny muted">${nav.position} of ${nav.of}</span>

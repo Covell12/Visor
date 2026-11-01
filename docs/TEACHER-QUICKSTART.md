@@ -24,7 +24,7 @@ Every class gets a colour and a banner, shown on its tile on Home, in the sideba
 
 On the class's **Assignments** page, **New → Writing assignment**, then pick a preset:
 
-- **In-class essay (locked):** 45 minutes, runs in full screen, needs the Visor Chrome extension, students can only paste text from their own essay, AI sites are blocked, and it submits itself when time runs out.
+- **In-class essay (locked):** 45 minutes, runs in full screen (a student who leaves full screen sees only a warning, with their essay hidden, until they go back, and you see it on the Live tab), needs the Visor Chrome extension, students can only paste text from their own essay, AI sites are blocked, and it submits itself when time runs out.
 - **Homework essay (open):** no time limit, pasting allowed, research recorded, AI sites blocked.
 
 AI sites are blocked by default in both (untick **Block AI sites** to only record visits). Blocking works through the Visor extension, so in an open session a student without the extension isn't blocked; tick **Require the Visor extension** if every student must have it.
@@ -55,6 +55,8 @@ Home's **Live now** box lists every assignment with students writing right now. 
 Time is fair by design. Pausing a student (or everyone) stops their clock, so a fire drill costs nobody any writing time. A session window closes for everyone at the same moment, but extra time from **People**, and any time you add from the Live tab, carries past it. When time runs out or the window closes, **Time up** submits automatically if it's on.
 
 ## 4. Review
+
+Students can **unsubmit** an essay until the due date, or until you save feedback or a score on it. It then leaves To review until they submit again, and the essay shows how many times they unsubmitted. They can't unsubmit once their time or the session window has run out, or if you ended the session and submitted for them.
 
 Home's **To review** box lists submitted work across your classes, oldest first. Or open an assignment's **Submissions** tab and any essay:
 

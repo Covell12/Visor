@@ -412,6 +412,14 @@ async function wsSubmit() {
   writerRefresh();
 }
 
+// Take a submission back and write again. It's no longer handed in until it's
+// submitted again, so the question says that.
+async function wsUnsubmit() {
+  if (!await unsubmitEssay(WR.doc.id, WR.data.assignment.dueAt)) return;
+  try { WR.data = await writerFetch(); WR.doc = WR.data.doc; WR.session = WR.data.session; } catch {}
+  writerRefresh(true);
+}
+
 // Resume from the paused card: only if this window really has focus
 function wsResume() {
   const mode = WR.data.assignment.writing.mode;

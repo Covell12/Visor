@@ -465,7 +465,8 @@ function assignmentRightHtml() {
       ${d?.words ? `<div class="your-work-line">${d.words.toLocaleString()} words</div>` : ''}
       ${d?.submittedAt ? `<div class="your-work-line">Submitted ${esc(vcDateTime(d.submittedAt))}</div>` : ''}
       ${d?.returnedAt && st === 'returned' ? `<div class="your-work-line">Returned ${esc(vcDateTime(d.returnedAt))}</div>` : ''}
-      <a class="btn btn-primary" href="/write/${a.id}" data-link>${I.pen}${label}</a></div>`)}${details}`;
+      <a class="btn btn-primary" href="/write/${a.id}" data-link>${I.pen}${label}</a>
+      ${st === 'submitted' && d.unsubmitBlocked === null ? `<button class="btn btn-ghost" onclick="unsubmitFromOverview()">Unsubmit</button>` : ''}</div>`)}${details}`;
   }
   if (a.type === 'writing') {
     const subs = ap.data.submissions || [], n = st => subs.filter(s => s.status === st).length;
@@ -481,6 +482,19 @@ function assignmentRightHtml() {
     return `${box('Groups', `<div class="side-box-b"><div class="side-stat"><span>Groups</span><b>${groups.length}</b></div><div class="side-stat"><span>Students in a group</span><b>${groups.reduce((t, g) => t + g.students.length, 0)} of ${ap.data.students?.length || 0}</b></div></div>`)}${details}`;
   }
   return `${box('Discussion', `<div class="side-box-b"><div class="side-stat"><span>Date</span><b>${a.discussion?.date ? esc(vcDateTime(a.discussion.date)) : 'Not set'}</b></div><div class="side-stat"><span>Recordings</span><b>${(ap.data.discussions || []).length}</b></div></div>`)}${details}`;
+}
+
+// Asks first, then takes the submission back. True if it did.
+async function unsubmitEssay(docId, dueAt) {
+  const again = dueAt ? `Submit it again before ${vcDateTime(dueAt)}` : 'Submit it again';
+  if (!await confirmModal('Unsubmit your essay?', `It won’t count as handed in until you submit it again. ${again} for your teacher to review it. Your teacher can see that you unsubmitted it.`, { okLabel: 'Unsubmit' })) return false;
+  try { await api(`/api/write/${docId}/unsubmit`, { method: 'POST', body: {} }); }
+  catch (e) { toast(e.message, 'err'); return false; }
+  toast('Unsubmitted. Submit again when you’re ready.');
+  return true;
+}
+async function unsubmitFromOverview() {
+  if (await unsubmitEssay(ap.data.doc.id, ap.data.assignment.dueAt)) VisorRouter.render();
 }
 
 // The numbers at the top of a writing assignment
@@ -723,7 +737,7 @@ function renderSubmissions(body) {
     <thead><tr><th>Student</th><th>Status</th><th>Words</th><th>Sessions</th><th>Last active</th><th>Submitted</th><th>Score</th><th><span class="sr-only">Open</span></th></tr></thead>
     <tbody>${rows.map(r => `<tr>
       <td><div class="roster-name">${avatarHtml(r.student, 'avatar-sm')}<b>${esc(r.student.name)}</b></div></td>
-      <td>${statusPillDoc(r.status)}</td><td class="roster-num"><b>${r.words.toLocaleString()}</b>${wordBar(r.words)}</td><td class="mono">${r.sessions}</td>
+      <td>${statusPillDoc(r.status)}${r.unsubmits && r.status === 'in-progress' ? '<div class="tiny muted">Unsubmitted</div>' : ''}</td><td class="roster-num"><b>${r.words.toLocaleString()}</b>${wordBar(r.words)}</td><td class="mono">${r.sessions}</td>
       <td class="roster-num">${r.updatedAt ? esc(timeAgo(r.updatedAt)) : '—'}</td>
       <td class="small">${r.submittedAt ? esc(vcDateTime(r.submittedAt)) : '—'}</td><td class="mono">${r.score ?? '—'}</td>
       <td>${r.docId ? `<a class="btn btn-ghost btn-sm" href="/review/${r.docId}" data-link>Review</a>` : ''}</td></tr>`).join('')}</tbody></table></div>`;

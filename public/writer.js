@@ -154,6 +154,7 @@ function writerRender(el) {
   const sourcesBelow = works === 'page' || (works === 'panel' && WR.embed);
   WR.sideOpen = works !== 'off' && !WR.embed && writerPref(`visor-side:${a.id}`, works === 'panel' && window.innerWidth >= 1280 ? '1' : '0') === '1';
   el.innerHTML = `<div class="wr dx ${WR.embed ? 'wr-embed' : ''} wr-works-${works}">
+    <div id="wrWipe" class="wr-wipe hidden" role="alertdialog" aria-modal="true" aria-labelledby="wrWipeTitle"></div>
     <header class="wr-bar">
       <div class="wr-head">
         ${WR.embed ? '' : `<a class="wr-logo" href="/a/${a.id}" data-link aria-label="Back to the assignment" title="Back to the assignment"><img src="/logo.png" alt="" /></a><a class="wr-back" href="/a/${a.id}" data-link aria-label="Back to the assignment" title="Back to the assignment">${PI.left}</a>`}
@@ -2278,7 +2279,7 @@ function writerRenderIntro() {
   if (wsActive()) { el.innerHTML = ''; return; }
   // The side panel has no Instructions dropdown: they stay on its card
   const instr = WR.embed && a.instructions ? `<div class="wr-instr-open">${esc(a.instructions).replace(/\n/g, '<br>')}</div>` : '';
-  if (doc.status === 'submitted') { el.innerHTML = `<div class="card card-pad wr-card">${instr}<div class="wr-card-line">${I.check}<span>Submitted ${esc(vcDateTime(doc.submittedAt))}${doc.autoSubmitted ? ' (automatically, when time ran out)' : ''}. Your teacher will return it with feedback.</span></div></div>`; return; }
+  if (doc.status === 'submitted') { el.innerHTML = `<div class="card card-pad wr-card">${instr}<div class="wr-card-line">${I.check}<span>Submitted ${esc(vcDateTime(doc.submittedAt))}${doc.autoSubmitted ? ' (automatically, when time ran out)' : ''}. Your teacher will return it with feedback.</span></div>${WR.embed ? '' : writerUnsubmitLine()}</div>`; return; }
   const fb = doc.feedback ? `<div class="wr-feedback"><div class="kicker">Feedback from your teacher</div>${doc.feedback.score != null ? `<div class="wr-score">${esc(String(doc.feedback.score))}${doc.feedback.outOf ? ` <span class="muted">/ ${esc(String(doc.feedback.outOf))}</span>` : ''}</div>` : ''}${doc.feedback.comment ? `<div>${esc(doc.feedback.comment).replace(/\n/g, '<br>')}</div>` : ''}</div>` : '';
   if (doc.status === 'returned' && !doc.reopened) { el.innerHTML = `<div class="card card-pad wr-card">${fb || '<div>Your teacher returned this.</div>'}</div>`; return; }
   const needsExt = w.mode === 'locked' || w.requireExtension;
@@ -2294,7 +2295,7 @@ function writerRenderIntro() {
   const ended = WR.session && WR.session.state === 'ended';
   el.innerHTML = `<div class="card card-pad wr-card">
     ${fb}${ended ? '' : instr}
-    <div class="wr-start-h">${ended ? 'Your session ended' : doc.status === 'returned' ? 'Your teacher reopened this for more writing' : 'Ready when you are'}</div>
+    <div class="wr-start-h">${ended ? 'Your session ended' : doc.status === 'returned' ? 'Your teacher reopened this for more writing' : doc.unsubmits ? 'You unsubmitted this' : 'Ready when you are'}</div>
     ${WR.embed ? `<div class="wr-describe">${esc(WR.data.describe)}</div>` : `<div class="wr-describe">${ended ? 'Your writing is saved. Start another session to keep going, or submit it.' : 'Everything you write is saved as you go. The instructions and the rules for this assignment are above.'}</div>`}
     ${extLine}${permLine}${timeNote}
     ${blocked ? `<div class="callout amber" style="margin-top:10px;">${esc(blocked)}</div>` : ''}
@@ -2319,12 +2320,39 @@ function writerPanelStatus(reason) {
 const LOCK_TEXT = {
   'left-tab': ['Session paused: you left the Visor tab.', 'Writing is turned off while you’re away.'],
   'left-window': ['Session paused: you left the Visor window.', 'Writing is turned off while you’re away.'],
-  'exit-fullscreen': ['Session paused: you left full screen.', 'Locked sessions run in full screen.'],
   offline: ['Offline: your writing is saved on this device.', 'Writing turns back on when the connection does.'],
   'ext-missing': ['Visor’s extension was turned off.', 'Turn it back on, then reload this page to keep writing.'],
   teacher: ['Your teacher paused the session.', 'Writing turns back on when they resume it.'],
   'blocked-site': ['You’re on a blocked site.', 'Time on blocked sites counts as time away. Go back to another tab to keep researching.']
 };
+
+// A locked session out of full screen: the whole page is replaced by a warning,
+// whatever else is going on, until the student goes back. The essay is hidden as
+// well as covered, so it can't be selected, searched or printed from here.
+function writerApplyWipe(reason) {
+  const el = $('wrWipe');
+  const wipe = !!el && wsActive() && WR.data.assignment.writing.mode === 'locked' && !WR.embed && !document.fullscreenElement && reason !== 'mirror' && reason !== 'ended';
+  if (!el || wipe === !el.classList.contains('hidden')) return wipe;
+  el.classList.toggle('hidden', !wipe);
+  el.parentElement.classList.toggle('wr-wiped', wipe);
+  el.innerHTML = wipe ? `<div class="wr-wipe-card">
+      <span class="wr-wipe-ic">${I.alert}</span>
+      <h2 id="wrWipeTitle">You left full screen</h2>
+      <p>Your essay is hidden and your writing is paused until you go back.</p>
+      <div class="wr-wipe-seen"><b>Your teacher can see this.</b> They see that you left full screen and how long you’re away.</div>
+      <div class="wr-away">Away <span id="wrAwayTime">${vcDur(0)}</span></div>
+      <button class="btn btn-primary btn-lg" id="wrWipeBack" onclick="wsResume()">Return to full screen</button>
+    </div>` : '';
+  if (wipe) $('wrWipeBack').focus({ preventScroll: true });
+  return wipe;
+}
+
+// On the submitted card: take it back, or why that isn't possible now
+function writerUnsubmitLine() {
+  const why = WR.data.unsubmitBlocked, due = WR.data.assignment.dueAt;
+  if (why) return `<div class="small muted wr-unsub">${esc(localWhen(why))}</div>`;
+  return `<div class="wr-unsub"><button class="btn btn-ghost btn-sm" onclick="wsUnsubmit()">Unsubmit</button><span class="small muted">You can do this ${due ? `until ${esc(vcDateTime(due))}, or ` : ''}until your teacher reviews it.</span></div>`;
+}
 
 // Enable or lock the editor; show the paused or mirror card. Runs every
 // second and on every change, and only touches the page when the reason changes.
@@ -2337,7 +2365,9 @@ function writerApplyLock() {
   // The menus follow (editing items off while writing is locked)
   if (canWrite !== WR.lastCanEdit) { WR.lastCanEdit = canWrite; writerScheduleUi(); }
   if (WR.lease?.surf !== 'panel') WR.panelClosed = false;
-  if (reason === WR.lastLock) return;
+  const wiped = writerApplyWipe(reason);
+  if (reason === WR.lastLock && wiped === WR.lastWiped) return;
+  WR.lastWiped = wiped;
   const prev = WR.lastLock;
   WR.lastLock = reason;
   writerPanelStatus(reason);
@@ -2345,7 +2375,7 @@ function writerApplyLock() {
   if (canWrite && prev && prev !== 'mirror' && prev !== 'not-started' && prev !== 'ended' && document.hasFocus()) setTimeout(() => WR.quill?.focus(), 0);
   if (!canWrite && prev === null) WR.awaySince = Date.now();
   const ov = $('wrOverlay');
-  if (!wsActive() || canWrite) { ov.classList.add('hidden'); ov.innerHTML = ''; return; }
+  if (!wsActive() || canWrite || wiped) { ov.classList.add('hidden'); ov.innerHTML = ''; return; }
   ov.classList.remove('hidden');
   if (reason === 'mirror') {
     const w = WR.data.assignment.writing;
@@ -2367,10 +2397,10 @@ function writerApplyLock() {
     return;
   }
   const [title, line] = LOCK_TEXT[reason] || ['Session paused.', ''];
-  const showResume = ['left-tab', 'left-window', 'exit-fullscreen'].includes(reason);
+  const showResume = ['left-tab', 'left-window'].includes(reason);
   ov.innerHTML = `<div class="wr-card-pause" role="alert"><b>${esc(title)}</b><p>${esc(line)}</p>
     <div class="wr-away">Away <span id="wrAwayTime">${vcDur(Date.now() - (WR.awaySince || Date.now()))}</span></div>
-    ${showResume ? `<button class="btn btn-primary" onclick="wsResume()">${reason === 'exit-fullscreen' ? 'Return to full screen' : 'Resume'}</button>` : ''}</div>`;
+    ${showResume ? '<button class="btn btn-primary" onclick="wsResume()">Resume</button>' : ''}</div>`;
 }
 
 /* ====================== citations ======================

@@ -536,3 +536,23 @@ details > summary { transition: color .15s; }
 .prof-drop:hover, .prof-drop.over, .prof-drop:focus-within { border-color: var(--brand); background: var(--brand-soft); }
 .prof-file { position: relative; cursor: pointer; }
 .prof-file:focus-within { outline: 2px solid var(--brand); outline-offset: 2px; }
+
+/* The tour: one card, one idea at a time */
+.modal.tour { position: relative; max-width: 440px; overflow: hidden; }
+.modal.tour .mh { position: absolute; top: 0; right: 0; z-index: 1; padding: 10px; }
+.modal.tour .mh h3 { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.modal.tour .mb { padding: 0; }
+.modal.tour .mf { align-items: center; padding: 0 24px 22px; }
+.tour-step { animation: tour-in .22s var(--ease); }
+@keyframes tour-in { from { opacity: 0; transform: translateX(10px); } }
+.tour-art { display: flex; align-items: center; justify-content: center; height: 172px; background: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 440 172'><g fill='none' stroke-width='1.5'><circle cx='178' cy='86' r='112' stroke='%234DBEDC' stroke-opacity='.8'/><circle cx='262' cy='86' r='112' stroke='%237BC288' stroke-opacity='.8'/></g></svg>") center / cover no-repeat, linear-gradient(135deg, #C4EAF5, #D8F1DE); }
+.tour-ic { display: inline-flex; align-items: center; justify-content: center; width: 76px; height: 76px; border-radius: 50%; background: #fff; box-shadow: 0 8px 22px rgba(20,41,58,.14); color: var(--brand); }
+.tour-ic svg { width: 34px; height: 34px; }
+.tour-text { padding: 20px 24px 22px; }
+.tour-text h2 { margin: 0 0 6px; font-size: 21px; font-weight: 700; letter-spacing: -0.012em; }
+.tour-text p { margin: 0; min-height: 3em; color: var(--ink-2); font-size: 15px; line-height: 1.5; }
+.tour-dots { display: flex; gap: 6px; margin-right: auto; }
+.tour-dots i { width: 7px; height: 7px; border-radius: 50%; background: var(--line); transition: background-color .2s; }
+.tour-dots i.on { background: var(--brand); }
+@media (prefers-reduced-motion: reduce) { .tour-step { animation: none; } }
+
