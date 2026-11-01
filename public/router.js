@@ -29,7 +29,9 @@ const VisorRouter = (() => {
   function match(path) {
     for (const r of routes) {
       const m = r.re.exec(path);
-      if (m) return { r, params: Object.fromEntries(r.keys.map((k, i) => [k, decodeURIComponent(m[i + 1])])) };
+      if (!m) continue;
+      try { return { r, params: Object.fromEntries(r.keys.map((k, i) => [k, decodeURIComponent(m[i + 1])])) }; }
+      catch { return null; } // a malformed address is one that leads nowhere
     }
     return null;
   }
@@ -164,4 +166,8 @@ const VisorRouter = (() => {
 window.VisorRouter = VisorRouter;
 
 // The existing project view: the sidebar and project page from app.js
-VisorRouter.addShell('/project/:id', (el, { id }) => { loadProjects(id); });
+VisorRouter.addShell('/project/:id', (el, { id }) => {
+  loadProjects(id);
+  // Leaving: stop watching transcriptions, or their dialog opens over the next page
+  return () => { clearInterval(pollTimer); projectLoad++; project = null; };
+});

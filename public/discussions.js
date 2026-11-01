@@ -26,7 +26,9 @@ async function discList() {
   if (dq.poll) { clearInterval(dq.poll); dq.poll = null; }
   dq.open = null;
   el.innerHTML = `<div class="loading-row"><span class="spinner"></span></div>`;
-  const [c, fresh] = await Promise.all([api(`/api/classes/${dq.data.class.id}`), api(`/api/assignments/${dq.data.assignment.id}`)]);
+  let c, fresh;
+  try { [c, fresh] = await Promise.all([api(`/api/classes/${dq.data.class.id}`), api(`/api/assignments/${dq.data.assignment.id}`)]); }
+  catch (e) { el.innerHTML = `<div class="callout red">${esc(e.message)} <button class="btn btn-ghost btn-sm" onclick="discList()">Try again</button></div>`; return; }
   dq.cls = c.class; dq.data = fresh; ap.data = fresh;
   const a = fresh.assignment, rows = fresh.discussions;
   const consent = dq.cls.discussionConsentAt
@@ -188,7 +190,7 @@ async function discOpen(did) {
     discRender();
     if (!['recording', 'transcribing'].includes(r.discussion.status) && dq.poll) { clearInterval(dq.poll); dq.poll = null; }
   };
-  await load();
+  try { await load(); } catch (e) { toast(e.message, 'err'); return; }
   if (['recording', 'transcribing'].includes(dq.open.status)) dq.poll = setInterval(() => load().catch(() => {}), 4000);
 }
 

@@ -58,7 +58,7 @@ function jumpOpenRow(i) {
 async function openJump() {
   if (window.toggleNav) toggleNav(false);
   jump = { index: {}, rows: [], on: 0 };
-  openModal({ title: 'Search', onClose: () => { jump = null; }, body: `<div class="jump-box"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="jumpQ" class="input" type="search" autocomplete="off" aria-label="Search classes, assignments, projects and students" placeholder="Classes, assignments, projects, students" /></div>
+  openModal({ title: 'Search', light: true, onClose: () => { jump = null; }, body: `<div class="jump-box"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="jumpQ" class="input" type="search" autocomplete="off" aria-label="Search classes, assignments, projects and students" placeholder="Classes, assignments, projects, students" /></div>
     <div id="jumpList" class="jump-list"><div class="jump-empty"><span class="spinner spinner-sm"></span></div></div>` });
   const input = $('jumpQ');
   input.focus();

@@ -67,11 +67,13 @@ window.VisorExt = VisorExt;
 VisorRouter.add('/extension/connect', async el => {
   VisorRouter.title('Connect the extension');
   el.innerHTML = `<div class="page narrow"><div class="loading-row"><span class="spinner"></span></div></div>`;
+  const mine = VisorRouter.seq();
   const onPage = VisorExt.installedVersion();
   const p = await VisorExt.ping();
   const running = p.installed ? null : await VisorExt.storeCopyRunning();
   let status = null;
   try { status = await api('/api/ext/token/status'); } catch {}
+  if (mine !== VisorRouter.seq()) return; // left while it looked
   const connectedHere = p.installed && p.connected && p.user?.id === me.id;
   el.innerHTML = `<div class="page narrow">
     ${crumbs([['Home', '/'], ['Visor extension']])}

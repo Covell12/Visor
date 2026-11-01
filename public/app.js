@@ -84,14 +84,17 @@ function toast(msg, kind = '') {
 }
 
 // Modal: openModal({ title, sub, body, footer, wide, onClose }) → returns close()
-let modalOnClose = null, modalReturn = null;
-function openModal({ title, sub = '', body = '', footer = '', wide = false, onClose = null, closable = true }) {
-  modalOnClose = onClose;
+let modalOnClose = null, modalReturn = null, modalLight = false;
+// light: a click outside closes it even with a box in it (nothing typed there
+// matters). keep: nothing but its own buttons closes it (a recording in progress).
+function openModal({ title, sub = '', body = '', footer = '', wide = false, onClose = null, closable = true, light = false, keep = false }) {
+  modalOnClose = onClose; modalLight = light;
+  window.toggleNav?.(false); // on a phone the drawer would sit over the dialog
   // Where the keyboard goes back to. A dialog opened from another keeps the first one's.
   if (!$('modalRoot').firstElementChild) modalReturn = document.activeElement;
   $('modalRoot').innerHTML = `
-    <div class="overlay" onmousedown="this._downOnBackdrop=event.target===this" onclick="if(event.target===this&&this._downOnBackdrop){${closable ? 'closeModal()' : ''}}">
-      <div class="modal ${wide ? 'wide' : ''}" role="dialog" aria-modal="true" aria-labelledby="modalTitle" tabindex="-1">
+    <div class="overlay" onmousedown="this._downOnBackdrop=event.target===this" onclick="if(event.target===this&&this._downOnBackdrop){${closable ? 'modalBackdrop()' : ''}}">
+      <div class="modal ${wide ? 'wide' : ''}"${keep ? ' data-keep' : ''} role="dialog" aria-modal="true" aria-labelledby="modalTitle" tabindex="-1">
         <div class="mh"><div><h3 id="modalTitle">${title}</h3>${sub ? `<p>${sub}</p>` : ''}</div>${closable ? `<button class="btn-icon" aria-label="Close" onclick="closeModal()">${I.x}</button>` : ''}</div>
         <div class="mb" id="modalBody">${body}</div>
         ${footer ? `<div class="mf" id="modalFooter">${footer}</div>` : '<div id="modalFooter"></div>'}
@@ -99,12 +102,20 @@ function openModal({ title, sub = '', body = '', footer = '', wide = false, onCl
     </div>`;
   $('modalRoot').querySelector('.modal').focus({ preventScroll: true }); // a caller may then focus its first field
 }
+// A click outside, like Escape, never throws away what was being typed or recorded
+function modalBackdrop() {
+  if (modalLight || !$('modalRoot').querySelector('.modal[data-keep], .modal input:not([type=checkbox]):not([type=radio]), .modal textarea')) closeModal();
+}
 function closeModal() {
   $('modalRoot').innerHTML = '';
   if (modalReturn?.isConnected) modalReturn.focus({ preventScroll: true });
   modalReturn = null;
   if (modalOnClose) { const f = modalOnClose; modalOnClose = null; f(); }
 }
+// A card that opens something, reached by keyboard
+document.addEventListener('keydown', e => {
+  if ((e.key === 'Enter' || e.key === ' ') && e.target.matches?.('[role="button"][tabindex="0"]')) { e.preventDefault(); e.target.click(); }
+});
 // Tab stays inside an open dialog (classes.js handles Escape)
 document.addEventListener('keydown', e => {
   const box = $('modalRoot')?.querySelector('.modal');
@@ -273,7 +284,10 @@ async function doSignin() {
 }
 async function signOut() {
   await api('/api/auth/logout', { method: 'POST' });
-  me = null; project = null;
+  me = null; project = null; projectLoad++;
+  clearInterval(pollTimer);
+  driveToken = null; // an hour of the last person's Google Drive
+  showEmptyMain();   // and nothing of their project stays behind the sign-in
   window.VisorRouter?.stop(); // page timers (dashboard poll, live board) stop with the session
   if (window.resetPortal) resetPortal(); // and the pages forget what they loaded
   if (location.pathname !== '/') history.pushState(null, '', '/');
@@ -415,6 +429,8 @@ async function loadProjects(selectId) {
   const r = await api('/api/projects');
   projects = r.projects;
   renderProjectList();
+  // A refresh from elsewhere (Profile settings) updates the sidebar and stops there
+  if (!selectId && !/^\/project\//.test(location.pathname)) return;
   const id = selectId || project?.id || (projects[0] && projects[0].id);
   if (id) selectProject(id); else showEmptyMain();
 }
@@ -428,18 +444,25 @@ function renderProjectList() {
 
 function showEmptyMain() { $('emptyMain').classList.remove('hidden'); $('projectView').classList.add('hidden'); }
 
+let projectLoad = 0; // counts project loads, so a slow answer can tell it's been overtaken
 async function selectProject(id) {
+  const mine = ++projectLoad;
   clearInterval(pollTimer);
   window.VisorRouter?.onProjectSelected(id);
   try {
     const r = await api(`/api/projects/${id}`);
+    if (mine !== projectLoad) return;
     project = r.project; analysis = null;
     renderProjectList();
     renderProject();
     if (project.hasAnalysis && (project.isTeacher || project.showAnalysis || project.isDemo)) {
       api(`/api/projects/${id}/analysis`).then(a => { if (project?.id === id && a.analysis) { analysis = a.analysis; renderAnalysis(); } }).catch(() => {});
     }
-  } catch (e) { toast(e.message, 'err'); }
+  } catch (e) {
+    if (mine !== projectLoad) return;
+    project = null; showEmptyMain(); // never leave someone else's project on screen
+    toast(e.message, 'err');
+  }
 }
 
 function renderProject() {
@@ -575,7 +598,7 @@ function renderResources() {
     const sub = isAudio
       ? `${r.duration ? `<span>${fmtDur(r.duration)}</span>` : ''}<span>Added by ${esc(r.uploadedByName || '?')}</span><span>${timeAgo(r.uploadedAt)}</span>`
       : `<span>${esc(r.report?.docType === 'slides' ? 'Google Slides' : 'Google Doc')}</span><span>${(r.report?.revisionCount || 0).toLocaleString()} ${esc(r.report?.revisionLabel || 'revisions')}</span><span>${r.report?.contributors?.length || 0} contributors</span>${r.report?.metrics ? `<span>${Math.round((r.report.metrics.externalShare || 0) * 100)}% external pastes</span>` : ''}<span>${timeAgo(r.uploadedAt)}</span>`;
-    return `<div class="card card-hover res-card" onclick="openResource('${r.id}')">
+    return `<div class="card card-hover res-card" role="button" tabindex="0" onclick="openResource('${r.id}')">
       <div class="ic ${isAudio ? 'audio' : 'ext'}">${isAudio ? I.mic : I.doc}</div>
       <div class="grow" style="flex:1;min-width:0;">
         <div class="t">${esc(r.title)}</div>
@@ -656,7 +679,7 @@ async function sendRecording(fileOrBlob, { filename, title, duration, onProgress
 
 function showUploadAudio() {
   openModal({ title: 'Upload a recording', sub: 'MP3, M4A, WAV, WebM or OGG. Visor transcribes it and asks you who each voice is.', body: `
-    <div id="dropzone" class="dropzone" onclick="$('fileInput').click()" ondragover="event.preventDefault();this.classList.add('over')" ondragleave="this.classList.remove('over')" ondrop="onDrop(event)">
+    <div id="dropzone" class="dropzone" role="button" tabindex="0" aria-label="Choose a recording" onclick="$('fileInput').click()" ondragover="event.preventDefault();this.classList.add('over')" ondragleave="this.classList.remove('over')" ondrop="onDrop(event)">
       ${I.upload}
       <div style="font-weight:600;margin-top:8px;">Drop an audio file here, or click to choose</div>
       <div class="muted small" style="margin-top:4px;">Up to 60 MB</div>
@@ -706,7 +729,7 @@ function afterAudioAdded(resource) {
 /* ---- record ---- */
 let rec = { stream: null, recorder: null, chunks: [], start: 0, timer: null, blob: null, ctx: null, raf: null };
 function showRecordAudio() {
-  openModal({ title: 'Record a session', sub: 'Put the laptop in the middle of the table. Click to start, click again to stop.', body: `
+  openModal({ keep: true, title: 'Record a session', sub: 'Put the laptop in the middle of the table. Click to start, click again to stop.', body: `
     <div class="rec">
       <button id="recBtn" class="rec-btn" onclick="toggleRecord()">${I.mic}</button>
       <div class="rec-time" id="recTime">0:00</div>

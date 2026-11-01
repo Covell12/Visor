@@ -43,7 +43,7 @@ function calGo({ month = cal.month, classId = cal.classId, view = cal.view } = {
   const now = new Date();
   if (month.getFullYear() !== now.getFullYear() || month.getMonth() !== now.getMonth()) q.set('m', calMonthParam(month));
   if (classId) q.set('class', classId);
-  if (view === 'list') q.set('view', 'list');
+  if (view) q.set('view', view); // a phone starts on the list, so Month has to be said
   VisorRouter.go(`/calendar${q.toString() ? '?' + q : ''}`);
 }
 const calStep = n => calGo({ month: new Date(cal.month.getFullYear(), cal.month.getMonth() + n, 1) });

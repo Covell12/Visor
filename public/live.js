@@ -46,13 +46,14 @@ function renderLiveBoard(el, data) {
 }
 
 async function livePoll() {
-  if (!lb) return;
+  const board = lb; // another assignment's board may open while this one answers
+  if (!board) return;
   try {
-    const r = await api(`/api/assignments/${lb.data.assignment.id}/live`);
-    if (!lb) return;
+    const r = await api(`/api/assignments/${board.data.assignment.id}/live`);
+    if (lb !== board) return;
     lb.rows = r.rows; lb.fetchedAt = Date.now(); lb.error = null;
     lb.serverOffset = Date.parse(r.serverNow) - Date.now();
-  } catch (e) { if (lb) lb.error = e.message; }
+  } catch (e) { if (lb !== board) return; lb.error = e.message; }
   liveRender();
 }
 
@@ -112,6 +113,8 @@ function liveRender() {
   $('liveTag').innerHTML = lb.rows.some(r => ['writing', 'left', 'offline', 'paused'].includes(r.status)) ? '<span class="live-tag"><i></i>LIVE</span>' : '';
   const mode = lb.data.assignment.writing?.mode;
   const yes = (v, label) => (v == null ? '<span class="muted">—</span>' : v ? `<span class="ok-mark" title="${label}: yes">✓<span class="sr-only">${label}: yes</span></span>` : `<span class="no-mark" title="${label}: no">✗<span class="sr-only">${label}: no</span></span>`);
+  // The table is rebuilt every few seconds: the keyboard stays on the same button
+  const held = $('liveTable').contains(document.activeElement) ? document.activeElement.getAttribute('aria-label') : null;
   $('liveTable').innerHTML = rows.length ? `<table class="roster live-table">
     <thead><tr><th>Student</th><th>Status</th><th>Session</th><th>Time left</th><th>Words</th><th>Pastes</th><th>Away</th><th>Extension</th>${mode === 'locked' ? '<th>Lock</th>' : ''}<th><span class="sr-only">Actions</span></th></tr></thead>
     <tbody>${rows.map(r => {
@@ -143,13 +146,14 @@ function liveRender() {
       </tr>`;
     }).join('')}</tbody></table>`
     : `<div class="empty"><h4>${lb.filter === 'attention' ? 'Nobody needs attention' : 'No students here'}</h4></div>`;
+  if (held) [...$('liveTable').querySelectorAll('[aria-label]')].find(x => x.getAttribute('aria-label') === held)?.focus();
 }
 
 const liveActBtn = (label, icon, onclick, name) => `<button class="live-act" onclick="${onclick}" title="${label}" aria-label="${esc(`${label}: ${name}`)}">${icon}</button>`;
 
 async function liveAct(studentId, action, extra = {}) {
-  try { await api(`/api/assignments/${lb.data.assignment.id}/live/action`, { method: 'POST', body: { action, studentIds: [studentId], ...extra } }); livePoll(); }
-  catch (e) { toast(e.message, 'err'); }
+  try { const r = await api(`/api/assignments/${lb.data.assignment.id}/live/action`, { method: 'POST', body: { action, studentIds: [studentId], ...extra } }); livePoll(); return r; }
+  catch (e) { toast(e.message, 'err'); return null; }
 }
 async function liveBulk(action, extra = {}) {
   const ask = { 'pause-all': ['Pause everyone?', 'Writing turns off for every student until you resume.', 'Pause everyone'], 'end-all-submit': ['End every session and submit?', 'Every running session ends now and every essay in progress is submitted.', 'End and submit'], 'resume-all': null, 'extend-all': null }[action];
@@ -171,7 +175,7 @@ function liveMessage(studentId) {
   openModal({ title: `Message ${esc(r?.student.name || '')}`, sub: 'Shown as a banner in their editor within a few seconds.', body: `<div class="field"><label for="lmText">Message</label><input id="lmText" class="input" maxlength="200" placeholder="e.g. Ten minutes left: start your conclusion." /></div>`,
     footer: `<button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="lmOk">Send</button>` });
   setTimeout(() => $('lmText')?.focus(), 50);
-  const send = () => { const text = $('lmText').value.trim(); if (!text) return; closeModal(); liveAct(studentId, 'message', { message: text }).then(() => toast('Sent')); };
+  const send = () => { const text = $('lmText').value.trim(); if (!text) return; closeModal(); liveAct(studentId, 'message', { message: text }).then(r => { if (r) toast(r.changed ? 'Sent' : 'Their session has ended, so the message wasn’t sent.', r.changed ? '' : 'err'); }); };
   $('lmOk').onclick = send;
   $('lmText').addEventListener('keydown', e => { if (e.key === 'Enter') send(); });
 }

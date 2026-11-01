@@ -91,18 +91,19 @@ function renderClassUpdates(el, cls) {
   loadClassUpdates();
 }
 async function loadClassUpdates(more = false) {
-  if (!upd || upd.busy) return;
-  upd.busy = true;
-  const last = more ? upd.list[upd.list.length - 1] : null;
+  const u = upd; // another class may open while this one loads
+  if (!u || u.busy) return;
+  u.busy = true;
+  const last = more ? u.list[u.list.length - 1] : null;
   const before = last ? `&before=${encodeURIComponent(last.createdAt)}&beforeKey=${encodeURIComponent(last.id)}` : '';
   try {
-    const r = await api(`/api/classes/${upd.cls.id}/updates?limit=20${before}`);
-    if (!upd.el.isConnected) return;
-    if (!more) upd.pinned = r.pinned || [];
-    upd.list = more ? [...upd.list, ...r.updates] : r.updates;
-    upd.more = !!r.more;
-  } catch (e) { if (!more) upd.pinned = []; toast(e.message, 'err'); }
-  finally { upd.busy = false; }
+    const r = await api(`/api/classes/${u.cls.id}/updates?limit=20${before}`);
+    if (upd !== u || !u.el.isConnected) return;
+    if (!more) u.pinned = r.pinned || [];
+    u.list = more ? [...u.list, ...r.updates] : r.updates;
+    u.more = !!r.more;
+  } catch (e) { if (upd !== u) return; if (!more) u.pinned = []; toast(e.message, 'err'); }
+  finally { u.busy = false; }
   drawClassUpdates();
 }
 function drawClassUpdates() {

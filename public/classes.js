@@ -107,7 +107,7 @@ document.addEventListener('keydown', e => {
   if (e.key !== 'Escape') return;
   if (ddOpen) { ddClose(true); return; }
   const root = $('modalRoot');
-  if (root?.querySelector('.mh .btn-icon') && !root.querySelector('.modal input:not([type=checkbox]):not([type=radio]), .modal textarea')) closeModal();
+  if (root?.querySelector('.mh .btn-icon') && !root.querySelector('.modal[data-keep], .modal input:not([type=checkbox]):not([type=radio]), .modal textarea')) closeModal();
 });
 
 /* ---- dropdown menus: a button that shows a panel of actions or links ----
@@ -138,14 +138,18 @@ function ddToggle(id, btn) {
   ddOpen = { menu: m, btn };
   // Open upwards when there's no room below
   m.style.top = ''; m.style.bottom = '';
-  const r = m.getBoundingClientRect();
-  if (r.bottom > window.innerHeight - 8 && btn.getBoundingClientRect().top > r.height + 8) { m.style.top = 'auto'; m.style.bottom = 'calc(100% + 4px)'; }
+  const r = m.getBoundingClientRect(), b = btn.getBoundingClientRect();
+  const up = r.bottom > window.innerHeight - 8 && b.top > r.height + 8;
+  // A table that scrolls sideways would cut the menu off, so it floats above the page
+  if (m.closest('.roster-card')) Object.assign(m.style, { position: 'fixed', left: 'auto', right: `${window.innerWidth - b.right}px`, top: up ? `${b.top - r.height - 4}px` : `${b.bottom + 4}px` });
+  else if (up) { m.style.top = 'auto'; m.style.bottom = 'calc(100% + 4px)'; }
 }
 function ddClose(focusButton = false) {
   if (!ddOpen) return;
   const { menu, btn } = ddOpen;
   ddOpen = null;
   menu.classList.add('hidden');
+  Object.assign(menu.style, { position: '', left: '', right: '' });
   btn.setAttribute('aria-expanded', 'false');
   if (focusButton) btn.focus();
 }
@@ -165,6 +169,7 @@ document.addEventListener('keydown', e => {
   next?.focus();
 });
 document.addEventListener('focusin', e => { if (ddOpen && !ddOpen.menu.parentElement.contains(e.target)) ddClose(); });
+window.addEventListener('scroll', () => { if (ddOpen?.menu.style.position === 'fixed') ddClose(); }, true); // it would stay behind
 
 /* ---- course colours and pictures ----
    The server picks a colour for every class (the teacher can change it); the
@@ -1047,7 +1052,7 @@ function membersHtml() {
     { label: 'New class code', icon: I.refresh, onclick: 'rotateCode()' },
     { label: c.joinOpen ? 'Close joining with the code' : 'Open joining with the code', icon: I.hash, onclick: `setJoinOpen(${!c.joinOpen})` }
   ] });
-  const staffTable = (list, pill) => `<div class="card" style="overflow-x:auto;position:relative;"><table class="roster">
+  const staffTable = (list, pill) => `<div class="card roster-card"><table class="roster">
       <thead><tr><th>Name</th><th>Role</th><th><span class="sr-only">Actions</span></th></tr></thead>
       <tbody>${list.map(t => {
         const self = t.id === me.id;
@@ -1061,7 +1066,7 @@ function membersHtml() {
   const advisorRows = advisors.length ? `<h2 class="section-title people-h">Advisors <span class="muted">${advisors.length}</span></h2>
     ${staffTable(advisors, () => '<span class="pill pill-gray">Advisor</span>')}
     <div class="tiny muted" style="margin-top:6px;">Advisors can do everything a teacher can, but they aren’t listed as teachers, so students don’t see them on the class. Anything an advisor posts shows their name.</div>` : '';
-  const roster = c.students.length ? `<div class="card" style="overflow-x:auto;position:relative;"><table class="roster">
+  const roster = c.students.length ? `<div class="card roster-card"><table class="roster">
       <thead><tr><th>Name</th><th>Extra time</th><th>Accommodation note</th><th><span class="sr-only">Actions</span></th></tr></thead>
       <tbody>${c.students.map(s => `<tr>
         <td><div class="roster-name">${avatarHtml(s, 'avatar-sm')}<span><b>${esc(s.name)}</b><div class="tiny muted">${esc(s.email)}</div></span></div></td>
