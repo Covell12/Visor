@@ -98,7 +98,7 @@ function calGridHtml() {
       const label = d.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
       return `<div class="cal-cell ${d.getMonth() !== cal.month.getMonth() ? 'other' : ''} ${k === today ? 'today' : ''} ${i >= lastRow ? 'last-row' : ''}">
         <span class="cal-num" aria-hidden="true">${d.getDate()}</span><span class="sr-only" ${k === today ? 'aria-current="date"' : ''}>${esc(label)}${list.length ? `: ${vcPlural(list.length, 'event')}` : ''}</span>
-        ${shown.map(e => `<a class="cal-ev cc-${esc(e.color)} ${calEventClass(e)}" href="/a/${e.assignmentId}" data-link title="${esc(calEventTitle(e))}">${e.kind !== 'due' ? `<span class="k">${esc(CAL_KIND[e.kind])}:</span> ` : ''}<span class="t">${esc(vcTime(e.at))}</span> ${esc(e.title)}</a>`).join('')}
+        ${shown.map(e => `<a class="cal-ev cc-${esc(e.color)} ${calEventClass(e)}" href="/a/${e.assignmentId}" data-link title="${esc(calEventTitle(e))}">${e.kind !== 'due' ? `<span class="k">${esc(CAL_KIND[e.kind])}:</span> ` : ''}${esc(e.title)}</a>`).join('')}
         ${list.length > 3 ? `<button class="cal-more" onclick="calDay('${k}')">${list.length - 3} more</button>` : ''}
       </div>`;
     }).join('')}

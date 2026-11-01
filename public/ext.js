@@ -132,7 +132,7 @@ async function profileExtras(el) {
   if (!el) return;
   const [p, st] = await Promise.all([VisorExt.ping(), api('/api/ext/token/status').catch(() => null)]);
   const connected = (p.installed && p.connected && p.user?.id === me.id) || st?.connected;
-  el.innerHTML = `<div class="prof-row"><div><b>Extension</b><div class="tiny muted">${connected ? 'Connected' : p.installed ? 'Installed, not connected' : 'Not installed in this browser'}</div></div>
+  el.innerHTML = `<div class="prof-row"><div><b>Extension</b><div class="tiny muted">${connected ? 'Connected' : p.installed ? 'Installed, not connected' : 'Not connected in this browser'}</div></div>
       ${connected ? `<button class="btn btn-ghost btn-sm" onclick="extDisconnect().then(()=>profileExtras($('profExtras')))">Disconnect</button>` : `<a class="btn btn-ghost btn-sm" href="/extension/connect" data-link onclick="closeModal()">Connect</a>`}</div>
     ${me.role === 'student' ? `<div class="prof-row"><div><b>Your data</b><div class="tiny muted">Your essays, their writing history, and what your sessions recorded, as a JSON file.</div></div><a class="btn btn-ghost btn-sm" href="/api/me/export" download>Download my data</a></div>` : ''}`;
 }

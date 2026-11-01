@@ -229,7 +229,7 @@ const courseSmall = c => `<span class="vtile cc-${courseColor(c)}" aria-hidden="
 function navPaint(list) {
   const teacher = me.role === 'teacher';
   const active = list.filter(c => !c.archived), archived = list.length - active.length;
-  $('navClasses').innerHTML = active.map(c => `<a class="vnav-item" href="/class/${c.id}" data-link data-class="${c.id}">${courseSmall(c)}<span class="vnav-t">${esc(c.name)}</span>${c.activeSessions ? `<i class="live-dot" title="${vcPlural(c.activeSessions, 'student')} writing now"></i>` : ''}</a>`).join('')
+  $('navClasses').innerHTML = active.map(c => `<a class="vnav-item" href="/class/${c.id}" data-link data-class="${c.id}" title="${esc(c.name)}">${courseSmall(c)}<span class="vnav-t">${esc(c.name)}</span>${c.activeSessions ? `<i class="live-dot" title="${vcPlural(c.activeSessions, 'student')} writing now"></i>` : ''}</a>`).join('')
     + (!active.length ? `<div class="vnav-empty">${archived ? 'All your classes are archived.' : teacher ? 'You haven’t made a class yet.' : 'You’re not in a class yet.'}</div>` : '')
     + (archived ? `<a class="vnav-more" href="/?archived=1" data-link>Archived (${archived})</a>` : '');
   const add = $('navAddClass');
@@ -403,7 +403,7 @@ async function homeExtStatus() {
   if (!$('homeExt')) return;
   const ok = p.installed && p.connected && p.user?.id === me.id;
   box.innerHTML = ok ? `<div class="ext-line ok">${I.check}Connected to your account</div><div class="tiny muted" style="margin-top:4px;">Ready for locked sessions and one-click citations.</div>`
-    : `<div class="ext-line">${I.puzzle}${p.installed ? 'Installed, not connected' : 'Not installed'}</div><div class="tiny muted" style="margin:4px 0 10px;">Some writing sessions need the Visor Chrome extension.</div><a class="btn btn-ghost btn-sm" href="/extension/connect" data-link>${p.installed ? 'Connect it' : 'Set it up'}</a>`;
+    : `<div class="ext-line">${I.puzzle}${p.installed ? 'Installed, not connected' : 'Not connected'}</div><div class="tiny muted" style="margin:4px 0 10px;">Some writing sessions need the Visor Chrome extension.</div><a class="btn btn-ghost btn-sm" href="/extension/connect" data-link>${p.installed ? 'Connect it' : 'Set it up'}</a>`;
 }
 
 // Upcoming: the next two weeks from the calendar (due dates, discussions,
@@ -526,7 +526,7 @@ function openClassBanner(classId) {
     body: `<div class="bn-preview" id="bnPreview"></div>
       <div class="bn-k" id="bnBgLabel">Background</div>
       <div class="bn-grid" role="radiogroup" aria-labelledby="bnBgLabel" id="bnGrid">
-        ${tile('none', 'Class colour', courseArt({ ...c, background: null, color: bn.color }, 'bn-art'))}
+        ${tile('none', 'Class color', courseArt({ ...c, background: null, color: bn.color }, 'bn-art'))}
         ${Object.entries(BG_NAME).map(([k, l]) => tile(k, l, courseArt({ ...c, background: { kind: 'preset', preset: k } }, 'bn-art'))).join('')}
         <span id="bnPhotoTile"></span>
         <button type="button" class="bn-tile bn-upload" id="bnUpload">${I.upload}<span class="bn-name">Upload a picture</span></button>
@@ -537,7 +537,7 @@ function openClassBanner(classId) {
         <div class="bn-pos-row"><span class="tiny muted">Top</span><input type="range" id="bnPos" min="0" max="100" step="1" /><span class="tiny muted">Bottom</span></div>
         <div class="hint">Choose which part of the picture shows. Wide pictures (about 3 to 1) fit best.</div>
       </div></div></div>
-      <div class="bn-k" id="bnColorLabel">Colour <span class="label-note">also marks the class on the calendar</span></div>
+      <div class="bn-k" id="bnColorLabel">Color <span class="label-note">also marks the class on the calendar</span></div>
       ${swatchesHtml('bnColor', bn.color, false)}
       <div id="bnErr" class="form-error hidden"></div>`,
     footer: `<button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="bnSave">Save</button>` });
@@ -569,7 +569,7 @@ function bnPaint(light) {
   const b = bn.bg;
   const shown = { ...bn.c, color: bn.color, background: b.kind === 'none' ? null : b.kind === 'preset' ? b : { kind: 'upload', url: b.url, pos: b.pos } };
   if (light) { [$('bnPreview').firstElementChild, $('bnGrid').querySelector('[data-bg="photo"] .course-art')].forEach(art => art?.style.setProperty('--bg-pos', `${b.pos}%`)); return; }
-  $('bnPreview').innerHTML = courseArt(shown, 'bn-big') + `<div class="bn-cap"><b>${esc(bn.c.name)}</b><span>${esc(b.kind === 'none' ? 'Class colour' : b.kind === 'preset' ? BG_NAME[b.preset] : 'Your picture')}</span></div>`;
+  $('bnPreview').innerHTML = courseArt(shown, 'bn-big') + `<div class="bn-cap"><b>${esc(bn.c.name)}</b><span>${esc(b.kind === 'none' ? 'Class color' : b.kind === 'preset' ? BG_NAME[b.preset] : 'Your picture')}</span></div>`;
   $('bnPhotoTile').outerHTML = bn.photo ? `<button type="button" role="radio" class="bn-tile" data-bg="photo" id="bnPhotoTile" aria-checked="false" aria-label="Your picture">${courseArt({ ...bn.c, background: { kind: 'upload', url: bn.photo.url, pos: bn.photo.pos } }, 'bn-art')}<span class="bn-name">Your picture</span></button>` : '<span id="bnPhotoTile"></span>';
   // The colour tile follows the colour picked
   const none = $('bnGrid').querySelector('[data-bg="none"] .course-art');
@@ -627,7 +627,7 @@ async function bnSave() {
 // A row of colour buttons (radio group). withNone adds "no colour" first.
 function swatchesHtml(id, current, withNone) {
   const opts = [...(withNone ? [null] : []), ...COURSE_COLORS];
-  return `<div class="swatches" role="radiogroup" aria-label="Colour" id="${id}">${opts.map(k => `<button type="button" role="radio" class="swatch ${k ? 'cc-' + k : 'none'}" data-v="${k || ''}" aria-checked="${(current || null) === k}" aria-label="${k ? COLOR_NAME[k] : 'No colour'}" title="${k ? COLOR_NAME[k] : 'No colour'}">${I.check}</button>`).join('')}</div>`;
+  return `<div class="swatches" role="radiogroup" aria-label="Color" id="${id}">${opts.map(k => `<button type="button" role="radio" class="swatch ${k ? 'cc-' + k : 'none'}" data-v="${k || ''}" aria-checked="${(current || null) === k}" aria-label="${k ? COLOR_NAME[k] : 'No colour'}" title="${k ? COLOR_NAME[k] : 'No colour'}">${I.check}</button>`).join('')}</div>`;
 }
 function wireSwatches(id, onPick) {
   const box = $(id);
@@ -933,7 +933,7 @@ function openFolderForm(id = null) {
   let color = f?.color || null;
   openModal({ title: f ? 'Edit folder' : 'New folder', sub: f ? '' : cp.folder ? `Inside ${esc(folderById(cp.folder)?.name || 'this folder')}.` : 'Folders keep a unit’s assignments together. Students see a folder once something in it is published.',
     body: `<div class="field"><label for="fName">Name</label><input id="fName" class="input" maxlength="120" value="${esc(f?.name || '')}" placeholder="e.g. Unit 1: The Great Gatsby" /></div>
-      <div class="field"><label>Colour</label>${swatchesHtml('fColor', color, true)}</div>
+      <div class="field"><label>Color</label>${swatchesHtml('fColor', color, true)}</div>
       <div class="field"><label for="fDesc">Description <span class="label-note">optional</span></label><textarea id="fDesc" class="input" maxlength="1000" style="min-height:80px;" placeholder="Shown at the top of the folder.">${esc(f?.description || '')}</textarea></div>
       <div id="fErr" class="form-error hidden"></div>`,
     footer: `<button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="fSave">${f ? 'Save' : 'Create folder'}</button>` });
@@ -1262,9 +1262,9 @@ function classSettingsHtml() {
       <h2 class="section-title" style="font-size:16px;margin-bottom:14px;">Class details</h2>
       <div class="field"><label for="csName">Class name</label><input id="csName" class="input" value="${esc(c.name)}" maxlength="120" /></div>
       <div class="field"><label>Banner</label>
-        <div class="color-preview cs-banner">${courseArt(c, '', 'div', 'id="csPreview"')}<div><div class="small">${esc(c.background?.kind === 'preset' ? BG_NAME[c.background.preset] : c.background?.kind === 'upload' ? 'Your picture' : 'Class colour')} · ${esc(COLOR_NAME[courseColor(c)] || '')}</div>
-          <button type="button" class="btn btn-ghost btn-sm" style="margin-top:6px;" onclick="openClassBanner('${c.id}')">${I.edit}Change background and colour</button>
-          <div class="hint">On the class page and its tile on Home. The colour also marks its calendar events.</div></div></div></div>
+        <div class="color-preview cs-banner">${courseArt(c, '', 'div', 'id="csPreview"')}<div><div class="small">${esc(c.background?.kind === 'preset' ? BG_NAME[c.background.preset] : c.background?.kind === 'upload' ? 'Your picture' : 'Class color')} · ${esc(COLOR_NAME[courseColor(c)] || '')}</div>
+          <button type="button" class="btn btn-ghost btn-sm" style="margin-top:6px;" onclick="openClassBanner('${c.id}')">${I.edit}Change background and color</button>
+          <div class="hint">On the class page and its tile on Home. The color also marks its calendar events.</div></div></div></div>
       <div class="field"><label for="csRetention">Keep research records for</label>
         <div style="display:flex;gap:8px;align-items:center;"><input id="csRetention" class="input" type="number" min="1" max="3650" value="${c.researchRetentionDays || 180}" style="max-width:120px;" /><span class="muted small">days</span></div>
         <div class="hint">Searches, pages and copies the extension recorded during writing sessions are deleted after this. Essays and their writing history are kept.</div></div>
@@ -1272,7 +1272,7 @@ function classSettingsHtml() {
     </section>
     <section class="card card-pad">
       <h2 class="section-title" style="font-size:16px;margin-bottom:6px;">${c.archived ? 'Archived' : 'Archive'}</h2>
-      <p class="small muted" style="margin:0 0 12px;">${c.archived ? 'This class is archived: it’s hidden from Home and the sidebar, but nothing is deleted.' : 'Archiving hides the class from Home and the Classes menu (for every teacher of it). Nothing is deleted, and you can bring it back.'}</p>
+      <p class="small muted" style="margin:0 0 12px;">${c.archived ? 'This class is archived: it’s hidden from Home and the sidebar, but nothing is deleted.' : 'Archiving hides the class from Home and the sidebar (for everyone on its staff). Nothing is deleted, and you can bring it back.'}</p>
       <button class="btn btn-ghost" onclick="classPatch({ archived: ${!c.archived} }, '${c.archived ? 'Class restored' : 'Class archived'}')">${c.archived ? 'Restore class' : 'Archive class'}</button>
     </section>
     ${c.isOwner === false ? `<section class="card card-pad danger-zone">

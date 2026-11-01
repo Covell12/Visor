@@ -136,7 +136,7 @@ test('materials: folder names, colours and descriptions', () => {
   assert.throws(() => M.cleanFolderInput({ name: '   ' }), { status: 400, message: 'Give the folder a name' });
   assert.throws(() => M.cleanFolderInput({}), { message: 'Give the folder a name' });
   assert.strictEqual(M.cleanFolderInput({ name: 'x'.repeat(300) }).name.length, 120);
-  assert.throws(() => M.cleanFolderInput({ name: 'U', color: 'pink' }), { status: 400, message: 'Pick one of the course colours' });
+  assert.throws(() => M.cleanFolderInput({ name: 'U', color: 'pink' }), { status: 400, message: 'Pick one of the course colors' });
   for (const color of COURSE_COLORS) assert.strictEqual(M.cleanFolderInput({ name: 'U', color }).color, color);
   assert.strictEqual(M.cleanFolderInput({ name: 'U', description: '  Line 1\r\nLine 2\n\n' }).description, 'Line 1\nLine 2');
   assert.strictEqual(M.cleanFolderInput({ name: 'U', description: 'x'.repeat(1000) }).description.length, 1000);
@@ -191,7 +191,7 @@ test('course colours: a stable default, the teacher picks one, students see it',
 
   r = await teacher.patch(`/api/classes/${cls.id}`, { color: 'pink' });
   assert.strictEqual(r.status, 400);
-  assert.strictEqual(r.data.error, 'Pick one of the course colours');
+  assert.strictEqual(r.data.error, 'Pick one of the course colors');
   const pick = COURSE_COLORS.find(c => c !== def);
   r = await teacher.patch(`/api/classes/${cls.id}`, { color: pick });
   assert.strictEqual(r.status, 200);
@@ -254,7 +254,7 @@ test('folders: create, nest, edit, move, reorder, delete; assignments in folders
   r = await teacher.post(`/api/classes/${cls.id}/folders`, { name: '  ' });
   assert.strictEqual(r.status, 400);
   r = await teacher.post(`/api/classes/${cls.id}/folders`, { name: 'Bad colour', color: 'pink' });
-  assert.strictEqual(r.data.error, 'Pick one of the course colours');
+  assert.strictEqual(r.data.error, 'Pick one of the course colors');
   r = await stu.post(`/api/classes/${cls.id}/folders`, { name: 'Mine' });
   assert.strictEqual(r.status, 403);
   assert.strictEqual(r.data.error, 'only the class teacher can do that');

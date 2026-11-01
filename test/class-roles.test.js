@@ -268,3 +268,35 @@ test('nothing a student receives names an advisor; assistant teachers are listed
   const project = (await stu.get(`/api/projects/${pid}`)).data.project;
   assert.ok(project.teachers.some(t => t.id === A.id) && !project.teachers.some(t => t.id === V.id));
 });
+
+test('search: everyone gets what they can open, and nothing else', async () => {
+  const { owner, advisor, stu, S, V, cls } = await staffedClass('Roles 6');
+  const stranger = client();
+  await signup(stranger, 'student', 'Una', 'Outsider');
+  const pub = (await owner.post(`/api/classes/${cls.id}/assignments`, { type: 'writing', title: 'Published essay' })).data.assignment;
+  await owner.post(`/api/assignments/${pub.id}/publish`, {});
+  await owner.post(`/api/classes/${cls.id}/assignments`, { type: 'writing', title: 'Secret draft' });
+  const other = await newClass(owner, 'Other class');
+
+  let r = await stu.get('/api/search-index');
+  assert.deepStrictEqual(r.data.classes.map(c => c.name), ['Roles 6']);
+  assert.deepStrictEqual(r.data.assignments.map(a => a.title), ['Published essay']);
+  assert.deepStrictEqual(r.data.students, [], 'students get no roster');
+  assert.ok(!JSON.stringify(r.data).includes(V.id), 'nor an advisor');
+
+  r = await advisor.get('/api/search-index');
+  assert.deepStrictEqual(r.data.classes.map(c => c.name), ['Roles 6'], 'only their own classes');
+  assert.deepStrictEqual(r.data.assignments.map(a => [a.title, a.draft]).sort(), [['Published essay', false], ['Secret draft', true]]);
+  assert.deepStrictEqual(r.data.students.map(x => x.id), [S.id]);
+
+  r = await owner.get('/api/search-index');
+  assert.deepStrictEqual(r.data.classes.map(c => c.name).sort(), ['Other class', 'Roles 6']);
+  await owner.patch(`/api/classes/${other.id}`, { archived: true });
+  r = await owner.get('/api/search-index');
+  assert.deepStrictEqual(r.data.classes.map(c => c.name), ['Roles 6'], 'archived classes stay out');
+
+  r = await stranger.get('/api/search-index');
+  assert.deepStrictEqual([r.data.classes, r.data.assignments, r.data.students, r.data.projects], [[], [], [], []]);
+  assert.strictEqual((await client().get('/api/search-index')).status, 401);
+});
+

@@ -379,7 +379,7 @@ const TUTORIAL = {
     { icon: 'sparkle', title: '5. Feedback, groups and discussions', text: 'Leave a comment and score, then <b>Return to student</b>. Group projects give each group its own project for Google Docs reports, recordings and an AI-written summary. Discussions turn a recording into measured talk time and turns per student. Visor shows what happened; you make the call.' }
   ],
   student: [
-    { icon: 'school', title: '1. Join your class', text: 'Welcome to Visor Classroom. Click <b>Join a class</b> on Home and type the class code your teacher gives you (or your teacher adds you by email). Your classes show up on Home and in the <b>Classes</b> menu; what’s due shows under <b>Coming up</b> and on the <b>Calendar</b>.' },
+    { icon: 'school', title: '1. Join your class', text: 'Welcome to Visor Classroom. Click <b>Join a class</b> on Home and type the class code your teacher gives you (or your teacher adds you by email). Your classes show up on Home and in the sidebar; what’s due shows under <b>Coming up</b> and on the <b>Calendar</b>.' },
     { icon: 'puzzle', title: '2. Connect the extension', text: 'Some sessions need the Visor Chrome extension. Install it, then use the <b>Visor extension</b> box on Home to connect it. During a session it records the searches and pages you use for research, and its <b>Cite this page</b> button adds a citation to your essay.' },
     { icon: 'pen', title: '3. Write in a session', text: 'Open an assignment, click <b>Open the editor</b>, then <b>Start writing session</b>. Visor records how your writing happens, not just the result. If you leave the Visor tab, writing pauses until you come back, and you see the same pause your teacher sees.' },
     { icon: 'doc', title: '4. Cite and submit', text: 'Use <b>Insert citation</b> or the extension’s cite button to add sources; your Works Cited list builds itself. When you’re done, click <b>Submit</b>. Your teacher can return it with feedback and a score.' },
@@ -519,7 +519,7 @@ async function loadProjectsQuiet() { try { const r = await api('/api/projects');
 function renderMembers() {
   const p = project;
   const rows = [];
-  for (const t of (p.teachers?.length ? p.teachers : p.teacher ? [p.teacher] : [])) rows.push(`<div class="row">${avatarHtml(t)}<div class="grow"><div class="t">${esc(t.name)} <span class="pill pill-blue">Teacher</span></div><div class="s">${esc(t.email || '')}</div></div></div>`);
+  for (const t of (p.teachers?.length ? p.teachers : p.teacher ? [p.teacher] : [])) rows.push(`<div class="row">${avatarHtml(t)}<div class="grow"><div class="t">${esc(t.name)} <span class="pill pill-blue">${t.assistant ? 'Assistant teacher' : 'Teacher'}</span></div><div class="s">${esc(t.email || '')}</div></div></div>`);
   p.students.forEach((s, i) => rows.push(`<div class="row">${avatarHtml(s)}<div class="grow"><div class="t">${esc(s.name)}</div><div class="s">${esc(s.email || '')}</div></div>${p.isTeacher && !p.isDemo ? `<button class="btn-icon" title="Remove from project" onclick="removeStudent('${s.id}')">${I.x}</button>` : ''}</div>`));
   if (!p.students.length) rows.push(`<div class="empty"><div class="ic">${I.users}</div><h4>No students yet</h4><p>${p.isTeacher ? 'Search above by name, or type a student\'s full email address.' : 'Your teacher hasn\'t added anyone yet.'}</p></div>`);
   $('membersList').innerHTML = rows.join('');

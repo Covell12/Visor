@@ -723,10 +723,11 @@ async function projectResources(project) {
 
 function publicProject(core, project, me, { resources, resourceCount } = {}) {
   const isTeacher = isProjectTeacher(core, project, me.id);
+  const cls = project.classId ? own(core.classes, project.classId) : null;
   const out = {
     id: project.id, name: project.name, code: isTeacher ? project.code : undefined,
     teacher: isTeacher ? publicUser(core.users[project.teacherId]) : nameOnly(core.users[project.teacherId]),
-    teachers: projectTeacherIds(core, project).map(id => own(core.users, id)).filter(Boolean).map(u => (isTeacher ? publicUser(u) : nameOnly(u))),
+    teachers: projectTeacherIds(core, project).map(id => own(core.users, id)).filter(Boolean).map(u => ({ ...(isTeacher ? publicUser(u) : nameOnly(u)), ...(cls && classes.staffRole(cls, u.id) === 'assistant' ? { assistant: true } : {}) })),
     students: project.studentIds.map(id => publicUser(core.users[id])).filter(Boolean),
     showAnalysis: !!project.showAnalysis, isTeacher, createdAt: project.createdAt,
     classId: project.classId || null, assignmentId: project.assignmentId || null,
@@ -1336,6 +1337,25 @@ function publicClass(core, cls, me) {
     discussionConsentAt: cls.discussionConsentAt || null
   };
 }
+
+// Everything the search box can jump to, for this person: their running classes
+// and the assignments in them (a student only sees published ones), their group
+// projects, and for a class's staff its students. The page filters as they type.
+app.get('/api/search-index', requireAuth, ah(async (req, res) => {
+  const core = await repo.readCore();
+  const me = meOrThrow(req, core);
+  const mine = Object.values(core.classes).filter(c => !c.archived && (classes.isClassTeacher(c, me.id) || c.studentIds.includes(me.id)));
+  const lists = await Promise.all(mine.map(c => repo.listRecords('assignment', { classId: c.id })));
+  const out = { classes: [], assignments: [], projects: [], students: [] };
+  mine.forEach((c, i) => {
+    const staff = classes.isClassTeacher(c, me.id);
+    out.classes.push({ id: c.id, name: c.name, color: classes.colorFor(c) });
+    for (const a of lists[i]) if (staff || a.publishedAt) out.assignments.push({ id: a.id, title: a.title, type: a.type, className: c.name, draft: !a.publishedAt });
+    if (staff) for (const id of c.studentIds) { const u = own(core.users, id); if (u) out.students.push({ id: u.id, name: fullName(u), classId: c.id, className: c.name }); }
+  });
+  for (const p of Object.values(core.projects)) if (p.studentIds.includes(me.id) || isProjectTeacher(core, p, me.id)) out.projects.push({ id: p.id, name: p.name });
+  res.json(out);
+}));
 
 app.get('/api/classes', requireAuth, ah(async (req, res) => {
   const core = await repo.readCore();
