@@ -590,7 +590,7 @@ function renderProject() {
 
   const actions = [];
   if (p.isTeacher && !p.isDemo) {
-    actions.push(`<button class="code-chip" onclick="copyCode()" title="Project code. Students enter this in the Visor extension to send document data here.">${I.hash}<span id="codeText">${esc(p.code)}</span></button>`);
+    actions.push(copyChipHtml(p.code, 'Project code. Students enter this in the Visor extension to send document data here.'));
     actions.push(`<button class="btn-icon" onclick="toggleMenu('projMenu')" title="Project settings">${I.gear}</button>
       <div id="projMenu" class="menu hidden">
         <button onclick="renameProject()">${I.edit}Rename project</button>
@@ -620,8 +620,16 @@ function switchTab(name) {
   document.querySelectorAll('[data-panel]').forEach(s => s.classList.toggle('hidden', s.dataset.panel !== name));
 }
 
-async function copyCode() {
-  try { await navigator.clipboard.writeText(project.code); toast('Project code copied'); } catch { toast(project.code); }
+// A code to copy: click it, and it says it's copied
+const copyChipLabel = () => `${I.copy}<span>Copy</span>`;
+const copyChipHtml = (code, title) => `<button type="button" class="code-chip copy-chip" data-code="${esc(code)}" title="${esc(title)}" aria-label="Copy ${esc(code)}" onclick="copyChip(this)"><span>${esc(code)}</span><span class="copy-chip-state" aria-live="polite">${copyChipLabel()}</span></button>`;
+async function copyChip(btn) {
+  try { await navigator.clipboard.writeText(btn.dataset.code); } catch { toast(btn.dataset.code); return; }
+  const state = btn.querySelector('.copy-chip-state');
+  btn.classList.add('copied');
+  state.innerHTML = `${I.check}<span>Copied</span>`;
+  clearTimeout(btn.copyTimer);
+  btn.copyTimer = setTimeout(() => { btn.classList.remove('copied'); state.innerHTML = copyChipLabel(); }, 2000);
 }
 
 function openNewProject() {
@@ -957,7 +965,7 @@ function showExtensionData() {
       <ol style="margin:0;padding-left:20px;font-size:14px;line-height:1.7;">
         <li>Open the Doc or Slides file in Chrome and click the <b>Visor</b> button.</li>
         <li>When the analysis finishes, open the <b>Overview</b> tab and use <b>Send to Visor</b>.</li>
-        <li>Enter this project's code${code ? `: <span class="code-chip" style="padding:3px 10px;">${esc(code)}</span>` : ' (ask your teacher for it)'}.</li>
+        <li>${code ? `Copy this project's code and paste it in: ${copyChipHtml(code, 'Copy this project’s code')}` : 'Enter this project’s code (ask your teacher for it).'}</li>
       </ol>
       <div class="muted small" style="margin-top:8px;">The <b>Send to Visor</b> box is on the extension's Overview tab, under Live replay. Connected students pick the project from a list; otherwise they type this code. If the teacher linked the group's Doc to a group project, the extension sends it automatically. Re-sending the same file just updates it.</div>
     </div>

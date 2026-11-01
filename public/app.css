@@ -254,6 +254,11 @@ textarea.input { min-height: 120px; resize: vertical; line-height: 1.5; }
 .code-chip { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: var(--r-ctl); background: #fff; border: 1px solid var(--field-line); font-family: var(--mono); font-weight: 700; letter-spacing: .12em; font-size: 13px; }
 .code-chip:hover { border-color: var(--brand); background: var(--brand-soft); }
 .code-chip svg { width: 15px; height: 15px; color: var(--ink-2); }
+.copy-chip { cursor: pointer; color: var(--ink); }
+.copy-chip-state { display: inline-flex; align-items: center; gap: 4px; padding-left: 8px; border-left: 1px solid var(--field-line); color: var(--brand); font: 600 12px var(--font); letter-spacing: 0; }
+.copy-chip-state svg { width: 14px; height: 14px; color: currentColor; }
+.copy-chip.copied, .copy-chip.copied:hover { border-color: var(--green-deep); background: var(--green-soft); }
+.copy-chip.copied .copy-chip-state { border-left-color: var(--green-deep); color: #2E7A44; }
 
 .tabs { display: flex; width: max-content; max-width: 100%; overflow-x: auto; scrollbar-width: none; gap: 2px; padding: 3px; border-radius: var(--r-ctl); background: #EDF2F4; margin-bottom: 20px; }
 .tab { background: none; border: 0; padding: 5px 12px; border-radius: var(--r-sm); font-weight: 600; font-size: 13px; color: var(--ink-2); display: flex; align-items: center; gap: 8px; white-space: nowrap; transition: color .15s, background-color .2s, box-shadow .2s; }
