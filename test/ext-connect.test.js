@@ -14,7 +14,7 @@ const SOURCE = fs.readFileSync(path.join(__dirname, '..', 'public', 'ext.js'), '
 
 // marked: the page as site-bridge.js leaves it. answer: what the bridge replies
 // to a message, or null for silence.
-function load({ marked = false, answer = null } = {}) {
+function load({ marked = false, answer = null, running = false } = {}) {
   const timers = [], routes = {}, listeners = [];
   const window = {
     addEventListener: (_, fn) => listeners.push(fn),
@@ -29,7 +29,8 @@ function load({ marked = false, answer = null } = {}) {
     setTimeout: (fn, ms) => { timers.push({ fn, ms }); return timers.length; }, clearTimeout: () => {},
     VisorRouter: { add: (p, fn) => { routes[p] = fn; } },
     me: { id: 'u1' }, I: { refresh: '', check: '', puzzle: '' }, esc: String, crumbs: () => '',
-    api: async () => ({ connected: false })
+    api: async () => ({ connected: false }),
+    Image: class { set src(url) { assert.match(url, /^chrome-extension:\/\/mienldgcindjfiinlbmjibgmemnapkog\//); running ? this.onload() : this.onerror(); } }
   });
   vm.runInContext(SOURCE, ctx);
   return { VisorExt: window.VisorExt, timers, route: routes['/extension/connect'] };
@@ -68,6 +69,19 @@ test('/extension/connect offers a real reload, the only thing that brings a brid
   assert.match(el.innerHTML, /onclick="location\.reload\(\)"/);
   assert.match(el.innerHTML, /Site access/);
   assert.doesNotMatch(el.innerHTML, /VisorRouter\.render|isn’t installed/);
+});
+
+test('/extension/connect reports what it found when it can\'t reach the extension', async () => {
+  const run = async opts => {
+    const page = load(opts), el = { innerHTML: '' }, shown = page.route(el);
+    await new Promise(r => setImmediate(r));
+    page.timers[0].fn();
+    await shown;
+    return el.innerHTML;
+  };
+  assert.match(await run({}), /Visor isn’t on this page · no answer · Web Store copy not running/);
+  assert.match(await run({ running: true }), /Visor isn’t on this page · no answer · Web Store copy running/);
+  assert.match(await run({ marked: true, running: true }), /Visor 4\.3\.0 is on this page · no answer · Web Store copy running/);
 });
 
 test('/extension/connect tells an updated extension apart from a missing one', async () => {

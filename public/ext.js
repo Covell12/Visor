@@ -9,6 +9,7 @@
 'use strict';
 
 const VisorExt = (() => {
+  const STORE_ID = 'mienldgcindjfiinlbmjibgmemnapkog';
   let seq = 0;
   const waiting = new Map();
   window.addEventListener('message', e => {
@@ -35,8 +36,16 @@ const VisorExt = (() => {
       // no answer yet only means the extension's worker is still waking up
       const r = await send('PING', {}, installedVersion() ? 5000 : 1500);
       // timeout: no bridge on this page; gone: turned off or updated since this page loaded
-      return r.timeout || r.gone ? { installed: false, gone: !!r.gone } : { installed: true, version: r.version, connected: !!r.connected, user: r.user || null, hasHostPermission: !!r.hasHostPermission, lockActive: !!r.lockActive, session: r.session || null };
+      return r.timeout || r.gone ? { installed: false, gone: !!r.gone, silent: !!r.timeout } : { installed: true, version: r.version, connected: !!r.connected, user: r.user || null, hasHostPermission: !!r.hasHostPermission, lockActive: !!r.lockActive, session: r.session || null };
     },
+    // The Web Store copy's logo is public to every page, and loads whenever that
+    // copy is running in this Chrome profile, even if it's kept off this site
+    storeCopyRunning: () => new Promise(resolve => {
+      const img = new Image();
+      img.onload = () => resolve(true);
+      img.onerror = () => resolve(false);
+      img.src = `chrome-extension://${STORE_ID}/logo.png`;
+    }),
     connect: (token, user) => send('CONNECT', { token, user }),
     disconnect: () => send('DISCONNECT'),
     // Sent twice for each session: first with no token (the extension confirms
@@ -57,7 +66,9 @@ window.VisorExt = VisorExt;
 /* ====================== /extension/connect ====================== */
 VisorRouter.add('/extension/connect', async el => {
   el.innerHTML = `<div class="page narrow"><div class="loading-row"><span class="spinner"></span></div></div>`;
+  const onPage = VisorExt.installedVersion();
   const p = await VisorExt.ping();
+  const running = p.installed ? null : await VisorExt.storeCopyRunning();
   let status = null;
   try { status = await api('/api/ext/token/status'); } catch {}
   const connectedHere = p.installed && p.connected && p.user?.id === me.id;
@@ -76,7 +87,8 @@ VisorRouter.add('/extension/connect', async el => {
           <li>Make sure it’s turned on at <span class="mono">chrome://extensions</span>, and that its <b>Site access</b> (under Details) includes this site.</li>
           <li>Reload this page. Chrome only connects an extension to pages opened after it was installed or updated.</li>
         </ol>
-        <button class="btn btn-ghost" onclick="location.reload()">${I.refresh}Reload this page</button>`
+        <button class="btn btn-ghost" onclick="location.reload()">${I.refresh}Reload this page</button>
+        <p class="tiny muted" style="margin-top:14px;">Technical details: ${onPage ? `Visor ${esc(onPage)} is on this page` : 'Visor isn’t on this page'} · ${p.silent ? 'no answer' : 'answered'} · Web Store copy ${running ? 'running' : 'not running'} in this Chrome profile</p>`
       : connectedHere ? `
         <div class="connected-line">${I.check}<span>Connected as <b>${esc(p.user.name)}</b></span></div>
         <p class="small muted">During a writing session the extension records your research (searches, pages and how long you spent on them, text you copy), adds citations with one click, and keeps a locked session on the allowed sites. Outside a session it records nothing.</p>
