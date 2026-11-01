@@ -31,11 +31,13 @@ AI sites are blocked by default in both (untick **Block AI sites** to only recor
 
 Change anything you like (time limit, the window when sessions can start, allowed sites, citation style, document style, Works Cited, word limits, starter text); the **Preview** beside the form shows what students will see as you go. Then **Save and publish**. Later, change any setting straight from the assignment's page: each control in **Session settings** saves as soon as you change it (a session that's already running keeps its time limit and sites until it ends). **Document style** sets how a new essay looks: an MLA essay (Times New Roman 12, double-spaced) or Docs default (Arial 11, 1.15 spacing). Students write in a Google-Docs-style editor with menus, a toolbar, pictures, tables, find and replace and an outline, and everything they do is recorded as before.
 
-**Folders.** **New → Folder** makes a folder (a unit, a week) with a colour and an optional description; folders can hold folders, three deep. Drag rows to reorder them, drop a row onto a folder (or onto a folder name in the breadcrumb) to move it, or use a row's gear menu: **Move to…**, **Move up**, **Move down**. Deleting a folder never deletes what's in it: its contents move up a level. Students see a folder once something in it is published.
+**Folders.** **New → Folder** makes a folder (a unit, a week) with a color and an optional description; folders can hold folders, three deep. Drag rows to reorder them, drop a row onto a folder (or onto a folder name in the breadcrumb) to move it, or use a row's gear menu: **Move to…**, **Move up**, **Move down**. Deleting a folder never deletes what's in it: its contents move up a level. Students see a folder once something in it is published.
 
 **Announcements.** Post to a class on its **Announcements** page, and pin the important ones to the top. To post the same announcement to several classes at once, use the box on Home's **Activity** tab. Students see announcements on the class page and in their own Activity, next to newly published assignments.
 
 **Calendar.** The **Calendar** in the sidebar shows every due date, discussion date and writing window across your classes (unpublished ones are marked, and only you see them). Filter it to one class, or switch to the list.
+
+**Search.** **Search** in the sidebar, or Cmd+K (Ctrl+K on Windows and Chromebooks), jumps to any class, assignment, group project or student.
 
 ## 3. On the day
 
@@ -49,6 +51,8 @@ Students see what's due under **Coming up** on Home and on their Calendar (with 
 - Each source gets a **reliability grade**, A to D, that students see as they add it and next to it in their sources; you see the same grades on the review page. Click a grade to see what it's based on. Visor grades by the kind of site (a journal or government site, a news outlet, a website it doesn't know, a blog, social media, an AI chatbot…) and whether the source names an author and a date. It doesn't read the page or check its facts, and it uses no AI, so treat it as a starting point for students, not a verdict.
 
 Home's **Live now** box lists every assignment with students writing right now. Open the assignment's **Live** tab to watch: status, time left, words, pastes, time away, and whether the extension and lockdown are on. **Needs attention** filters to students who've been away over a minute, lost the extension, visited an AI site, or pasted a big block from outside. You can pause, message, add time or end a session for one student or everyone.
+
+Time is fair by design. Pausing a student (or everyone) stops their clock, so a fire drill costs nobody any writing time. A session window closes for everyone at the same moment, but extra time from **People**, and any time you add from the Live tab, carries past it. When time runs out or the window closes, **Time up** submits automatically if it's on.
 
 ## 4. Review
 
