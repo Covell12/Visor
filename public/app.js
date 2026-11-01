@@ -21,7 +21,7 @@ const PALETTE = ['#1E9BC4', '#4CA35C', '#E39B2E', '#7C5CD6', '#D9534F', '#2A9D8F
 // Avatar circle: uses the person's chosen color, otherwise the logo gradient
 function avatarHtml(person, size = '') {
   const bg = person?.avatarColor ? `background:${person.avatarColor}` : 'background:var(--grad)';
-  return `<span class="avatar ${size}" style="${bg}">${initials(person?.name)}</span>`;
+  return `<span class="avatar ${size}" style="${bg}">${esc(initials(person?.name))}</span>`;
 }
 // Color for a person in charts/scripts: their chosen color, else a palette slot
 function personColor(person, i) { return person?.avatarColor || PALETTE[i % 8]; }

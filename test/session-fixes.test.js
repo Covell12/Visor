@@ -243,3 +243,10 @@ test('a link with a stray % or a name with a stray hyphen can’t break an essay
     assert.doesNotMatch(f.text, /undefined/);
   }
 });
+
+test('research keeps only web addresses, so a teacher can’t be handed a script as a link', () => {
+  const T = Date.parse('2026-11-02T14:00:00Z');
+  assert.strictEqual(research.cleanEvent({ type: 'search', t: T, query: 'x', engine: 'google', url: 'javascript:alert(1)' }, T).url, undefined);
+  assert.strictEqual(research.cleanEvent({ type: 'search', t: T, query: 'x', engine: 'google', url: 'https://example.com/a' }, T).url, 'https://example.com/a');
+});
+
