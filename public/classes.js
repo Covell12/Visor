@@ -1052,7 +1052,7 @@ function membersHtml() {
     { label: 'New class code', icon: I.refresh, onclick: 'rotateCode()' },
     { label: c.joinOpen ? 'Close joining with the code' : 'Open joining with the code', icon: I.hash, onclick: `setJoinOpen(${!c.joinOpen})` }
   ] });
-  const staffTable = (list, pill) => `<div class="card roster-card"><table class="roster">
+  const staffTable = (list, pill) => `<div class="card roster-card"><table class="roster staff-table">
       <thead><tr><th>Name</th><th>Role</th><th><span class="sr-only">Actions</span></th></tr></thead>
       <tbody>${list.map(t => {
         const self = t.id === me.id;

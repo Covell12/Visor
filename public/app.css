@@ -166,7 +166,7 @@ textarea.input { min-height: 120px; resize: vertical; line-height: 1.5; }
 .school-chip { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: var(--r); background: var(--green-soft); color: var(--green-deep); font-size: 13.5px; font-weight: 600; margin: -6px 0 14px; }
 .school-chip.warn { background: var(--amber-soft); color: var(--amber); }
 .school-chip svg { width: 16px; height: 16px; flex: none; }
-@media (max-width: 860px) { .auth { grid-template-columns: 1fr; padding: 10px; gap: 10px; } .auth-brand { padding: 30px 24px; border-radius: 22px; } .auth-brand .how { display: none; } .auth-card { padding: 26px 20px; } }
+@media (max-width: 860px) { .auth { grid-template-columns: 1fr; align-content: start; padding: 10px; gap: 10px; } .auth-brand { padding: 18px 20px; border-radius: 20px; } .auth-brand .logo-big { width: 56px; padding: 7px 8px; border-radius: 12px; } .auth-brand h1 { margin: 12px 0 0; font-size: 24px; } .auth-brand h1 br { display: none; } .auth-brand p { display: none; } .auth-brand .credit { margin-top: 8px; } .auth-brand .how { display: none; } .auth-card { padding: 26px 20px; } }
 
 /* ---------- layout: app ----------
    The sidebar on the canvas, and the page on its sheet beside it. */

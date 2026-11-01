@@ -1503,7 +1503,9 @@ function writerGetLink() {
   let url = null;
   try { url = q.getFormat(r.index, r.length).link; } catch {}
   if (typeof url !== 'string') return null;
-  const probe = r.length ? r.index : Math.max(0, r.index - 1);   // a caret belongs to the character before it
+  // A caret belongs to the character before it, unless that's on the line above
+  const atLineStart = q.getLine(r.index)[1] === 0;
+  const probe = r.length || atLineStart ? r.index : Math.max(0, r.index - 1);
   // A link never crosses a line break, so its line is enough
   const [line] = q.getLine(probe);
   if (!line) return null;
