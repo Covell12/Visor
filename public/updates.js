@@ -171,7 +171,7 @@ function drawActivity() {
         <span class="grow"></span><button class="btn btn-primary btn-sm" id="actPost" onclick="postActivityUpdate()">${PI.send}Post</button></div></div>` : '';
   let feed;
   if (act.items === null) feed = '<div class="loading-row"><span class="spinner"></span></div>';
-  else if (!act.items.length) feed = `<div class="feed-empty"><b>Nothing yet</b>${me.role === 'teacher' ? 'Announcements and assignments published in your classes (by you or your co-teachers) show up here.' : 'Your teachers’ announcements and new assignments show up here.'}</div>`;
+  else if (!act.items.length) feed = `<div class="feed-empty"><b>No activity</b>${me.role === 'teacher' ? 'Announcements and assignments published in your classes (by you or your co-teachers) show up here.' : 'Your teachers’ announcements and new assignments show up here.'}</div>`;
   else feed = act.items.map(activityItemHtml).join('') + (act.more ? `<div class="upd-more"><button class="btn btn-ghost btn-sm" onclick="loadActivity(true)">Show older activity</button></div>` : '');
   const draft = $('actText')?.value || '';
   el.innerHTML = composer + feed;

@@ -78,7 +78,24 @@ function drawCalendar() {
   const body = cal.events === null ? '<div class="loading-row"><span class="spinner"></span></div>' : cal.view === 'list' ? calListHtml() : calGridHtml();
   const legend = !cal.classId && cal.classes.length > 1 ? `<div class="cal-legend">${cal.classes.map(c => `<span class="cc-${esc(c.color)}"><i></i>${esc(c.name)}</span>`).join('')}</div>` : '';
   const missing = cal.missing ? `<div class="callout amber" style="margin-bottom:12px;">That class isn’t on your calendar: it may be archived. Showing all your classes.</div>` : '';
-  el.innerHTML = `<div class="portal">${crumb}${head}${missing}${body}${legend}</div>`;
+  el.innerHTML = `<div class="portal">${crumb}${head}${missing}${calKpis(monthName)}${body}${legend}</div>`;
+}
+// The month on screen in numbers
+function calKpis(monthName) {
+  if (cal.events === null) return '';
+  const inMonth = calShown().filter(e => { const d = new Date(e.at); return d.getFullYear() === cal.month.getFullYear() && d.getMonth() === cal.month.getMonth(); });
+  const n = (...kinds) => inMonth.filter(e => kinds.includes(e.kind)).length;
+  const last = me.role === 'teacher'
+    ? { label: 'Not published', value: inMonth.filter(e => e.published === false).length, note: 'Hidden from students', tone: 'navy' }
+    : { label: 'Overdue', value: inMonth.filter(e => e.kind === 'due' && isOverdue(e.at, e.status)).length, note: 'Past the due date', tone: 'navy' };
+  return kpiRow([
+    { label: 'Events', value: inMonth.length, note: monthName, tone: 'teal' },
+    { label: 'Due dates', value: n('due'), note: 'Assignments due', tone: 'red' },
+    { label: 'Discussions', value: n('discussion'), note: 'Class meetings', tone: 'amber' },
+    { label: 'Writing windows', value: n('opens', 'closes'), note: 'Opening and closing', tone: 'green' },
+    { label: 'Classes', value: new Set(inMonth.map(e => e.classId)).size, note: 'With events', tone: 'violet' },
+    last
+  ]);
 }
 
 function calGridHtml() {

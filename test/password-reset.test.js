@@ -57,7 +57,6 @@ test('the whole way through: email, new password, signed in', async () => {
   assert.strictEqual((await forgot(email)).status, 200);
   const m = lastTo(email);
   assert.strictEqual(m.subject, 'Reset your Visor password');
-  assert.match(m.text, /^Hi Pat,/);
   assert.match(m.text, /https:\/\/visor\.test\/reset\?token=/, 'the link uses the site’s own address, never the request’s Host');
   assert.strictEqual((m.html.match(/logo\.png/g) || []).length, 1);
   const token = tokenOf(m);
@@ -142,13 +141,6 @@ test('a Google account is told to use Google, and can’t be given a password', 
   assert.doesNotMatch(m.text, /token=/);
   const [rec] = await repo.listRecords('pwreset', { studentId: id });
   assert.strictEqual(rec.usable, false);
-});
-
-test('a name can’t put HTML in the email', async () => {
-  const { email, id } = await account();
-  await repo.withCore(core => { core.users[id].firstName = '<img src=x onerror=alert(1)>'; });
-  await forgot(email);
-  assert.doesNotMatch(lastTo(email).html, /<img src=x/);
 });
 
 test('repeated wrong passwords are slowed down, for that address only', async () => {

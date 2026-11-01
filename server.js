@@ -400,16 +400,15 @@ async function sendResetEmail(u) {
   const recent = mine.filter(r => Date.parse(r.createdAt) > hourAgo);
   for (const r of mine) if (!recent.includes(r)) await repo.deleteRecord('pwreset', r.id);
   if (recent.length >= RESETS_PER_HOUR) return;
-  const hi = `Hi ${u.firstName || 'there'},`;
   const token = crypto.randomBytes(32).toString('base64url');
   // Kept for an account with no password too, so it counts toward the limit
   await repo.putRecord('pwreset', { id: resetId(token), studentId: u.id, createdAt: now(), expiresAt: new Date(Date.now() + RESET_MS).toISOString(), usable: !!u.passwordHash });
   if (!u.passwordHash) {
-    const lines = [hi, 'Someone asked to reset the password for your Visor account, but it signs in with Google, so it has no password to reset. Use the Continue with Google button on the sign-in page.', 'If this wasn’t you, you can ignore this email.'];
+    const lines = ['Someone asked to reset the password for your Visor account, but it signs in with Google, so it has no password to reset. Use the Continue with Google button on the sign-in page.', 'If this wasn’t you, you can ignore this email.'];
     return mail.send({ to: u.email, subject: 'Signing in to Visor', text: lines.join('\n\n'), html: emailHtml(lines) });
   }
   const url = `${siteUrl()}/reset?token=${token}`;
-  const before = [hi, 'Someone asked to reset the password for your Visor account. This link lets you choose a new one. It works for one hour, and only once.'];
+  const before = ['Someone asked to reset the password for your Visor account. This link lets you choose a new one. It works for one hour, and only once.'];
   const after = 'If this wasn’t you, you can ignore this email. Your password stays the same.';
   await mail.send({ to: u.email, subject: 'Reset your Visor password', text: [...before, url, after].join('\n\n'), html: emailHtml(before, { url, label: 'Choose a new password' }, [after]) });
 }
@@ -1380,6 +1379,12 @@ const isLive = s => s.state !== 'ended' && Date.now() - Date.parse(s.lastBeat ||
 
 // Counts and upcoming work for a class card. `loaded` passes on lists the
 // caller already read (the class page), so they aren't read twice.
+// The documents behind a class's numbers: current students, published essays
+function owedDocs(cls, assignments, docs) {
+  const essays = new Set(assignments.filter(a => a.publishedAt && a.type === 'writing').map(a => a.id));
+  return docs.filter(d => essays.has(d.assignmentId) && cls.studentIds.includes(d.studentId));
+}
+
 async function classSummary(cls, isTeacher, meId, loaded = {}) {
   const assignments = (loaded.assignments || await repo.listRecords('assignment', { classId: cls.id })).filter(a => isTeacher || a.publishedAt);
   const out = { assignmentCount: assignments.length, upcoming: [] };
@@ -1388,8 +1393,15 @@ async function classSummary(cls, isTeacher, meId, loaded = {}) {
   if (isTeacher) {
     const sessions = loaded.sessions || await repo.listRecords('session', { classId: cls.id });
     const docs = loaded.docs || await repo.listRecords('doc', { classId: cls.id });
+    // Only work a current student owes on a published essay counts toward "handed in"
+    const owed = owedDocs(cls, assignments, docs), count = status => owed.filter(d => d.status === status).length;
+    const published = assignments.filter(a => a.publishedAt);
     out.activeSessions = sessions.filter(isLive).length;
     out.toReview = docs.filter(d => d.status === 'submitted').length;
+    Object.assign(out, {
+      published: published.length, returned: count('returned'), inProgress: count('in-progress'), handedIn: count('submitted') + count('returned'),
+      expected: published.filter(a => a.type === 'writing').length * cls.studentIds.length, words: owed.reduce((t, d) => t + (d.stats?.words || 0), 0)
+    });
   } else {
     const docs = loaded.docs || await repo.listRecords('doc', { classId: cls.id, studentId: meId });
     const done = docs.filter(d => d.status === 'submitted' || d.status === 'returned');
@@ -1398,8 +1410,10 @@ async function classSummary(cls, isTeacher, meId, loaded = {}) {
   }
   const after = isTeacher ? Date.now() - 864e5 : Date.now();
   const soon = assignments.filter(a => a.publishedAt && a.dueAt && Date.parse(a.dueAt) > after && !handedIn.has(a.id))
-    .sort((a, b) => (a.dueAt < b.dueAt ? -1 : 1)).slice(0, 3);
-  out.upcoming = soon.map(a => ({ id: a.id, title: a.title, type: a.type, dueAt: a.dueAt }));
+    .sort((a, b) => (a.dueAt < b.dueAt ? -1 : 1));
+  out.upcoming = soon.slice(0, 3).map(a => ({ id: a.id, title: a.title, type: a.type, dueAt: a.dueAt }));
+  out.upcomingCount = soon.length;
+  out.dueThisWeek = soon.filter(a => Date.parse(a.dueAt) > Date.now() && Date.parse(a.dueAt) < Date.now() + 7 * 864e5).length;
   return out;
 }
 
@@ -1485,7 +1499,8 @@ app.get('/api/classes/:id', requireAuth, ah(async (req, res) => {
   const core = await repo.readCore();
   const got = classFor(req, core);
   const page = await classPageFor(got);
-  res.json({ class: { ...publicClass(core, got.cls, got.me), ...(await classSummary(got.cls, got.isTeacher, got.me.id, page.loaded)) }, assignments: page.assignments, folders: page.folders });
+  const extra = got.isTeacher ? { rosterStats: rosterStats(got.cls, page.loaded) } : {};
+  res.json({ class: { ...publicClass(core, got.cls, got.me), ...(await classSummary(got.cls, got.isTeacher, got.me.id, page.loaded)), ...extra }, assignments: page.assignments, folders: page.folders });
 }));
 
 function teacherClass(req, core) {
@@ -1683,6 +1698,19 @@ function writingStats(a, docs, sessions) {
 // assignments and the folders holding one; the teacher also gets each writing
 // assignment's counts, a student their own status. `position` is the place in
 // its level (lib/materials.js). `loaded` is handed on to classSummary.
+// Each student's work in a class, for its staff: { id: { handedIn, inProgress, words, lastActive } }
+function rosterStats(cls, { assignments, docs }) {
+  const owed = owedDocs(cls, assignments, docs), out = {};
+  for (const id of cls.studentIds) {
+    const mine = owed.filter(d => d.studentId === id);
+    out[id] = {
+      handedIn: mine.filter(d => d.status === 'submitted' || d.status === 'returned').length, inProgress: mine.filter(d => d.status === 'in-progress').length,
+      words: mine.reduce((t, d) => t + (d.stats?.words || 0), 0), lastActive: mine.map(d => d.updatedAt).filter(Boolean).sort().pop() || null
+    };
+  }
+  return out;
+}
+
 async function classPageFor(got) {
   const { folders, assignments: all } = await classMaterials(got.cls.id);
   const list = all.filter(a => got.isTeacher || a.publishedAt);
@@ -1692,9 +1720,11 @@ async function classPageFor(got) {
   const item = a => {
     const out = {
       id: a.id, type: a.type, title: a.title, publishedAt: a.publishedAt || null, dueAt: a.dueAt || null, createdAt: a.createdAt,
-      folderId: a.folderId, position: materials.effectivePosition(a), discussionDate: a.discussion?.date || null
+      folderId: a.folderId, position: materials.effectivePosition(a), discussionDate: a.discussion?.date || null,
+      mode: a.writing?.mode || null, minWords: a.writing?.minWords || null, maxWords: a.writing?.maxWords || null,
+      groups: a.group?.groups?.length || null
     };
-    if (got.isTeacher) out.stats = a.type === 'writing' ? writingStats(a, docs, sessions) : null;
+    if (got.isTeacher) Object.assign(out, { stats: a.type === 'writing' ? writingStats(a, docs, sessions) : null, timeLimitMin: a.writing?.timeLimitMin || null });
     else out.status = a.type === 'writing' ? (docs.find(d => d.assignmentId === a.id)?.status || 'not-started') : null;
     return out;
   };

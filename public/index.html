@@ -31,13 +31,13 @@
   <div class="auth-brand">
     <div>
       <img class="logo-big" src="/logo.png" alt="Visor" />
-      <h1>Writing you can<br>see happen.</h1>
-      <p>Visor Classroom is where students write, research and discuss, and where teachers see the whole process: every session, every source, every voice.</p>
+      <h1>Visor Classroom</h1>
+      <p>A writing platform for schools, with the full process on record.</p>
     </div>
     <div class="how">
-      <div><b>1</b><span>Teachers create a class and add their students, or give them its class code.</span></div>
-      <div><b>2</b><span>Students write in Visor's editor during a session; the extension records their research and adds citations.</span></div>
-      <div><b>3</b><span>Teachers watch live, replay any essay, and review group projects and class discussions.</span></div>
+      <div><span>Timed and open writing sessions in Visor’s editor</span></div>
+      <div><span>Research and citations recorded by the Chrome extension</span></div>
+      <div><span>Live monitoring, essay replay and group project review</span></div>
     </div>
     <div class="credit credit-light"><a href="/privacy" style="color:inherit;">Privacy</a> · <a href="/terms" style="color:inherit;">Terms</a></div>
   </div>
@@ -45,15 +45,15 @@
     <div class="auth-card">
       <!-- Sign in -->
       <div id="signinForm">
-        <h2>Welcome back</h2>
-        <p class="sub">Sign in with your school email.</p>
+        <h2>Sign in</h2>
+        <p class="sub">Use your school email.</p>
         <div id="signinError" class="form-error hidden"></div>
         <div id="googleSigninBtn" class="google-btn-mount hidden"></div>
         <div id="signinDivider" class="auth-divider"><span>or</span></div>
         <div class="field"><label for="siEmail">Email</label><input id="siEmail" class="input" type="email" autocomplete="email" placeholder="you@school.org" /></div>
         <div class="field"><div class="field-head"><label for="siPassword">Password</label><button type="button" class="linklike" onclick="showAuth('forgot')">Forgot password?</button></div><input id="siPassword" class="input" type="password" autocomplete="current-password" /></div>
         <button class="btn btn-primary btn-lg" style="width:100%;justify-content:center;" onclick="doSignin()">Sign in</button>
-        <div class="auth-switch">New here? <button onclick="showAuth('signup')">Create an account</button></div>
+        <div class="auth-switch">No account? <button onclick="showAuth('signup')">Create one</button></div>
       </div>
 
       <!-- Forgot password -->
@@ -84,7 +84,7 @@
 
       <!-- Create account -->
       <div id="signupForm" class="hidden">
-        <h2>Create your account</h2>
+        <h2>Create an account</h2>
         <p class="sub">Students and teachers use the same sign-up.</p>
         <div id="signupError" class="form-error hidden"></div>
         <div id="googleSignupBtn" class="google-btn-mount hidden"></div>

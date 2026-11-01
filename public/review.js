@@ -48,6 +48,7 @@ function rvRender() {
         <button class="btn btn-ghost btn-sm" onclick="rvPrintDialog()">${I.doc}Print / Save as PDF</button>
       </div>
     </div>
+    ${reviewKpis(report, a)}
     ${pageTabs([['document', 'Document'], ['replay', 'Replay'], ['process', 'Process'], ['research', 'Research', report.research.events.length || null], ['feedback', 'Feedback']], rv.tab, 'rvTab')}
     <div id="rvBody"></div>
     </div></div>
@@ -152,6 +153,20 @@ function rvSourcesCardHtml() {
   const items = bib.items.map(i => `<li><span class="rv-bib-text">${i.html}</span>${rvGradeChip(i.source)}${i.source.check?.length ? `<span class="rv-check" title="The student should check this source">Check: ${esc(i.source.check.join(', '))}</span>` : ''}</li>`).join('');
   return `<section class="card card-pad rv-sources-card" aria-label="Sources"><div class="rv-sources-h"><h3 class="section-title">Sources</h3><span class="tiny muted">${note}</span></div><ol class="rv-bib">${items}</ol></section>`;
 }
+// The essay's measured facts, above every tab
+function reviewKpis(report, a) {
+  const t = report.totals, w = a.writing || {};
+  const time = ms => fmtMins((ms || 0) / 60000);
+  return kpiRow([
+    { label: 'Words', value: t.studentWords.toLocaleString(), note: w.minWords || w.maxWords ? `Asked for ${w.minWords || 0}–${w.maxWords || '∞'}` : 'No length set', tone: 'teal' },
+    { label: 'Time writing', value: time(t.activeMs), note: vcPlural(t.sessions, 'session'), tone: 'navy' },
+    { label: 'Pauses', value: t.pauses, note: `${time(t.awayMs)} away`, tone: 'amber' },
+    { label: 'Pastes', value: t.pastes, note: 'Into the document', tone: 'red' },
+    { label: 'Research', value: time(t.researchMs), note: vcPlural(report.research.events.length, 'event'), tone: 'violet' },
+    { label: 'Typed', value: `${report.survival.pct?.typed ?? 0}%`, note: 'Of the final text', tone: 'green' }
+  ]);
+}
+
 // The legend: each source's share of the text, and pictures as a count
 function rvLegend(surv) {
   const keys = SRC_ORDER.filter(k => k !== 'image' && surv.chars?.[k]).map(k => `<span class="src-key src-${k}"><i></i>${esc(SRC_LABEL[k])} · ${surv.pct?.[k] ?? 0}%</span>`);

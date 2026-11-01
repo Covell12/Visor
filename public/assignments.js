@@ -460,8 +460,8 @@ function assignmentRightHtml() {
   if (!isTeacher) {
     if (a.type !== 'writing') return details;
     const d = ap.data.doc, st = d?.status || 'not-started';
-    const label = st === 'not-started' ? 'Open the editor' : st === 'submitted' ? 'View your essay' : st === 'returned' ? 'See feedback' : 'Keep writing';
-    return `${box('Your work', `<div class="side-box-p your-work">${statusPillDoc(st)}${isOverdue(a.dueAt, st) ? ' <span class="pill pill-red">Overdue</span>' : ''}
+    const label = st === 'not-started' ? 'Open editor' : st === 'submitted' ? 'View essay' : st === 'returned' ? 'View feedback' : 'Continue';
+    return `${box('Status', `<div class="side-box-p your-work">${statusPillDoc(st)}${isOverdue(a.dueAt, st) ? ' <span class="pill pill-red">Overdue</span>' : ''}
       ${d?.words ? `<div class="your-work-line">${d.words.toLocaleString()} words</div>` : ''}
       ${d?.submittedAt ? `<div class="your-work-line">Submitted ${esc(vcDateTime(d.submittedAt))}</div>` : ''}
       ${d?.returnedAt && st === 'returned' ? `<div class="your-work-line">Returned ${esc(vcDateTime(d.returnedAt))}</div>` : ''}
@@ -470,10 +470,10 @@ function assignmentRightHtml() {
   if (a.type === 'writing') {
     const subs = ap.data.submissions || [], n = st => subs.filter(s => s.status === st).length;
     return `${box('Submissions', `<div class="side-box-b">
-        <a class="side-stat" href="/a/${a.id}?tab=submissions" data-link onclick="event.preventDefault();assignmentTab('submissions')"><span>To review</span><b>${n('submitted')}</b></a>
-        <a class="side-stat" href="/a/${a.id}?tab=submissions" data-link onclick="event.preventDefault();assignmentTab('submissions')"><span>Returned</span><b>${n('returned')}</b></a>
-        <a class="side-stat" href="/a/${a.id}?tab=submissions" data-link onclick="event.preventDefault();assignmentTab('submissions')"><span>In progress</span><b>${n('in-progress')}</b></a>
-        <a class="side-stat" href="/a/${a.id}?tab=submissions" data-link onclick="event.preventDefault();assignmentTab('submissions')"><span>Not started</span><b>${n('not-started')}</b></a>
+        <a class="side-stat" href="/a/${a.id}?tab=submissions" data-link onclick="event.preventDefault();assignmentTab('submissions')"><span class="sw"><i class="s-review"></i>To review</span><b>${n('submitted')}</b></a>
+        <a class="side-stat" href="/a/${a.id}?tab=submissions" data-link onclick="event.preventDefault();assignmentTab('submissions')"><span class="sw"><i class="s-done"></i>Returned</span><b>${n('returned')}</b></a>
+        <a class="side-stat" href="/a/${a.id}?tab=submissions" data-link onclick="event.preventDefault();assignmentTab('submissions')"><span class="sw"><i class="s-going"></i>In progress</span><b>${n('in-progress')}</b></a>
+        <a class="side-stat" href="/a/${a.id}?tab=submissions" data-link onclick="event.preventDefault();assignmentTab('submissions')"><span class="sw"><i class="s-rest"></i>Not started</span><b>${n('not-started')}</b></a>
       </div><div class="side-box-p" style="border-top:1px solid var(--line);padding-top:12px;"><button class="btn btn-ghost btn-sm" style="width:100%;justify-content:center;" onclick="assignmentTab('live')">${PI.live}Watch live</button></div>`)}${details}`;
   }
   if (a.type === 'group') {
@@ -483,12 +483,44 @@ function assignmentRightHtml() {
   return `${box('Discussion', `<div class="side-box-b"><div class="side-stat"><span>Date</span><b>${a.discussion?.date ? esc(vcDateTime(a.discussion.date)) : 'Not set'}</b></div><div class="side-stat"><span>Recordings</span><b>${(ap.data.discussions || []).length}</b></div></div>`)}${details}`;
 }
 
+// The numbers at the top of a writing assignment
+function assignmentKpis() {
+  const { assignment: a, isTeacher } = ap.data;
+  const due = { label: 'Due', value: a.dueAt ? vcRelative(a.dueAt) : 'No date', note: a.dueAt ? vcDateTime(a.dueAt) : 'No due date set', tone: 'red' };
+  if (a.type === 'group' && isTeacher) {
+    const groups = ap.data.groups || [], all = ap.data.students?.length || 0, placed = groups.reduce((t, g) => t + g.students.length, 0);
+    return kpiRow([{ label: 'Groups', value: groups.length, note: 'In this project', tone: 'violet' }, { label: 'In a group', value: placed, note: `of ${vcPlural(all, 'student')}`, tone: 'teal' }, due], 'thirds');
+  }
+  if (a.type === 'discussion' && isTeacher) {
+    const date = a.discussion?.date;
+    return kpiRow([{ label: 'Meets', value: date ? vcRelative(date) : 'Not set', note: date ? vcDateTime(date) : 'No date set', tone: 'amber' }, { label: 'Recordings', value: (ap.data.discussions || []).length, note: 'Of this discussion', tone: 'teal' }]);
+  }
+  if (a.type !== 'writing') return '';
+  const length = a.writing.minWords || a.writing.maxWords ? `${a.writing.minWords || 0}–${a.writing.maxWords || '∞'} words` : 'Any length';
+  if (!isTeacher) {
+    const d = ap.data.doc, st = d?.status || 'not-started';
+    return kpiRow([{ label: 'Status', value: STATUS_LABEL[st] || st, note: d?.submittedAt ? `Submitted ${vcDate(d.submittedAt)}` : 'Not handed in', tone: 'teal' },
+      { label: 'Words', value: (d?.words || 0).toLocaleString(), note: length, tone: 'violet' }, due], 'thirds');
+  }
+  const subs = ap.data.submissions || [], n = st => subs.filter(s => s.status === st).length, handed = n('submitted') + n('returned');
+  const words = subs.reduce((t, s) => t + (s.words || 0), 0);
+  return kpiRow([
+    { label: 'To review', value: n('submitted'), note: 'Waiting for you', tone: 'amber' },
+    { label: 'Returned', value: n('returned'), note: 'With feedback', tone: 'green' },
+    { label: 'In progress', value: n('in-progress'), note: `${words.toLocaleString()} words so far`, tone: 'teal' },
+    { label: 'Not started', value: n('not-started'), note: `of ${vcPlural(subs.length, 'student')}`, tone: 'navy' },
+    { label: 'Handed in', value: subs.length ? `${Math.round(100 * handed / subs.length)}%` : '–', note: `${handed} of ${subs.length}`, tone: 'violet',
+      bar: stackBar(classParts(n('returned'), n('submitted'), n('in-progress')), subs.length) },
+    due
+  ], 'thirds');
+}
+
 function renderAssignmentOverview(body) {
   const { assignment: a } = ap.data;
   let settings = '';
   if (a.type === 'writing') settings = asCardHtml(a.writing);
   if (a.type === 'discussion') settings = `<div class="card card-pad"><div class="kicker">Discussion</div><div>${a.discussion.date ? esc(vcDateTime(a.discussion.date)) : 'No date set'}</div><div class="small muted" style="margin-top:6px;">${a.discussion.shareOwnStats ? 'Students can see their own talk time and turns.' : 'Only you see the results.'}</div></div>`;
-  body.innerHTML = `${!a.publishedAt ? `<div class="callout amber" style="margin-bottom:14px;">This assignment isn’t published. Students can’t see it until you publish it.</div>` : ''}
+  body.innerHTML = `${assignmentKpis()}${!a.publishedAt ? `<div class="callout amber" style="margin-bottom:14px;">This assignment isn’t published. Students can’t see it until you publish it.</div>` : ''}
     ${instructionsHtml(a) || `<div class="card card-pad muted small">No instructions. ${a.type === 'discussion' ? 'Add a prompt' : 'Add some'} with Options → Edit.</div>`}
     ${a.type === 'writing' ? `<p class="muted small" id="asDescribe" style="margin:12px 0 0;">${esc(ap.data.describe)}</p>` : ''}
     ${settings}`;
@@ -685,11 +717,14 @@ function asWire() {
 function renderSubmissions(body) {
   const rows = ap.data.submissions;
   if (!rows.length) { body.innerHTML = `<div class="card"><div class="empty"><h4>No students in this class yet</h4></div></div>`; return; }
-  body.innerHTML = `<div class="card" style="overflow-x:auto;position:relative;"><table class="roster subs">
-    <thead><tr><th>Student</th><th>Status</th><th>Words</th><th>Sessions</th><th>Submitted</th><th>Score</th><th><span class="sr-only">Open</span></th></tr></thead>
+  const w = ap.data.assignment.writing, target = w?.minWords || w?.maxWords;
+  const wordBar = n => (target ? `<span class="sbar" aria-hidden="true"><i class="s-going" style="width:${Math.min(100, 100 * n / target).toFixed(1)}%"></i></span>` : '');
+  body.innerHTML = `${assignmentKpis()}<div class="card" style="overflow-x:auto;position:relative;"><table class="roster subs">
+    <thead><tr><th>Student</th><th>Status</th><th>Words</th><th>Sessions</th><th>Last active</th><th>Submitted</th><th>Score</th><th><span class="sr-only">Open</span></th></tr></thead>
     <tbody>${rows.map(r => `<tr>
       <td><div class="roster-name">${avatarHtml(r.student, 'avatar-sm')}<b>${esc(r.student.name)}</b></div></td>
-      <td>${statusPillDoc(r.status)}</td><td class="mono">${r.words.toLocaleString()}</td><td class="mono">${r.sessions}</td>
+      <td>${statusPillDoc(r.status)}</td><td class="roster-num"><b>${r.words.toLocaleString()}</b>${wordBar(r.words)}</td><td class="mono">${r.sessions}</td>
+      <td class="roster-num">${r.updatedAt ? esc(timeAgo(r.updatedAt)) : '—'}</td>
       <td class="small">${r.submittedAt ? esc(vcDateTime(r.submittedAt)) : '—'}</td><td class="mono">${r.score ?? '—'}</td>
       <td>${r.docId ? `<a class="btn btn-ghost btn-sm" href="/review/${r.docId}" data-link>Review</a>` : ''}</td></tr>`).join('')}</tbody></table></div>`;
 }
@@ -697,7 +732,7 @@ function renderSubmissions(body) {
 function renderStudentAssignment(body) {
   const { assignment: a } = ap.data;
   if (a.type === 'writing') {
-    body.innerHTML = `${instructionsHtml(a)}
+    body.innerHTML = `${assignmentKpis()}${instructionsHtml(a)}
       <div class="card card-pad"><div class="kicker" style="margin-bottom:6px;">How this assignment works</div><div class="small">${esc(ap.data.describe)}</div></div>`;
     return;
   }

@@ -51,6 +51,24 @@ const STATUS_PILL = { 'not-started': 'pill-gray', 'in-progress': 'pill-blue', su
 const statusPillDoc = s => `<span class="pill ${STATUS_PILL[s] || 'pill-gray'}">${esc(STATUS_LABEL[s] || s)}</span>`;
 const isDone = status => status === 'submitted' || status === 'returned';
 // A writing assignment the student hasn't handed in, past its due date
+// "in 3 days", "today", "2 days ago", counted in whole calendar days
+function vcRelative(iso) {
+  if (!iso) return '';
+  const day = t => { const d = new Date(t); d.setHours(0, 0, 0, 0); return d.getTime(); };
+  const n = Math.round((day(iso) - day(Date.now())) / 864e5);
+  return n === 0 ? 'today' : n === 1 ? 'tomorrow' : n === -1 ? 'yesterday' : n > 0 ? `in ${n} days` : `${-n} days ago`;
+}
+const relTone = iso => { const left = Date.parse(iso) - Date.now(); return left < 0 ? 'late' : left < 2 * 864e5 ? 'soon' : ''; };
+// A bar split by status. parts: [[count, tone, label], ...]; the rest stays empty.
+function stackBar(parts, total) {
+  const seen = parts.filter(([n]) => n > 0);
+  const text = seen.map(([n, , label]) => `${n} ${label}`).join(', ') || 'None yet';
+  return `<span class="sbar" role="img" aria-label="${esc(text)}" title="${esc(text)}">${seen.map(([n, tone]) => `<i class="s-${tone}" style="width:${(100 * n / Math.max(total, 1)).toFixed(2)}%"></i>`).join('')}</span>`;
+}
+// A row of key numbers: { label, value, note, tone, bar }
+const kpiRow = (items, layout = '') => `<div class="kpis ${layout}">${items.map(k => `<div class="kpi k-${k.tone}"><span class="kpi-k">${esc(k.label)}</span><b class="kpi-v">${esc(String(k.value))}</b>${k.bar || ''}<span class="kpi-n">${esc(k.note || '')}</span></div>`).join('')}</div>`;
+const classParts = (returned, review, going) => [[returned, 'done', 'returned'], [review, 'review', 'to review'], [going, 'going', 'in progress']];
+const statusLegend = () => `<div class="skey" aria-hidden="true">${[['done', 'Returned'], ['review', 'To review'], ['going', 'In progress'], ['rest', 'Not started']].map(([k, t]) => `<span><i class="s-${k}"></i>${t}</span>`).join('')}</div>`;
 const isOverdue = (dueAt, status) => !!dueAt && Date.parse(dueAt) < Date.now() && !!status && !isDone(status);
 
 // Icons the portal adds to app.js's set
@@ -234,8 +252,8 @@ const courseSmall = c => `<span class="vtile cc-${courseColor(c)}" aria-hidden="
 function navPaint(list) {
   const teacher = me.role === 'teacher';
   const active = list.filter(c => !c.archived), archived = list.length - active.length;
-  $('navClasses').innerHTML = active.map(c => `<a class="vnav-item" href="/class/${c.id}" data-link data-class="${c.id}" title="${esc(c.name)}">${courseSmall(c)}<span class="vnav-t">${esc(c.name)}</span>${c.activeSessions ? `<i class="live-dot" title="${vcPlural(c.activeSessions, 'student')} writing now"></i>` : ''}</a>`).join('')
-    + (!active.length ? `<div class="vnav-empty">${archived ? 'All your classes are archived.' : teacher ? 'You haven’t made a class yet.' : 'You’re not in a class yet.'}</div>` : '')
+  $('navClasses').innerHTML = active.map(c => `<a class="vnav-item" href="/class/${c.id}" data-link data-class="${c.id}" title="${esc(c.name)}">${courseSmall(c)}<span class="vnav-t">${esc(c.name)}</span>${c.toReview ? `<span class="vnav-n" title="${vcPlural(c.toReview, 'essay')} to review">${c.toReview}</span>` : ''}${c.activeSessions ? `<i class="live-dot" title="${vcPlural(c.activeSessions, 'student')} writing now"></i>` : ''}</a>`).join('')
+    + (!active.length ? `<div class="vnav-empty">${archived ? 'All your classes are archived.' : teacher ? 'No classes.' : 'No classes.'}</div>` : '')
     + (archived ? `<a class="vnav-more" href="/?archived=1" data-link>Archived (${archived})</a>` : '');
   const add = $('navAddClass');
   add.textContent = teacher ? '+ Add' : '+ Join';
@@ -293,32 +311,55 @@ function homeView(view) {
   renderHome();
 }
 
-// "Good morning, Priya"
-function homeHello() {
-  const h = new Date().getHours();
-  return `${h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening'}, ${me.firstName || me.name}`;
-}
-// Today, and what's waiting: a count from the dashboard, never a judgment
+const homeHello = () => 'Home';
+// Today, and what's open: a count from the dashboard, never a judgment
 function homeSummary() {
   const today = new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
   const d = home.data.dash;
   if (me.role === 'teacher') {
     const live = d.happeningNow?.length || 0, read = d.needsReview?.length || 0;
-    const parts = [live ? `${vcPlural(live, 'session')} ${live === 1 ? 'is' : 'are'} live` : '', read ? `${vcPlural(read, 'essay')} ${read === 1 ? 'is' : 'are'} ready to read` : ''].filter(Boolean);
-    return `${today}. ${parts.length ? `${parts.join(' and ')}.` : 'Nothing is waiting for you.'}`;
+    return [today, live ? `${live} live` : '', read ? `${read} to review` : ''].filter(Boolean).join(' · ');
   }
   const now = Date.now();
   const due = (d.todo || []).filter(t => t.dueAt && !isDone(t.status) && Date.parse(t.dueAt) >= now && Date.parse(t.dueAt) < now + 7 * 864e5).length;
-  return `${today}. ${due ? `You have ${vcPlural(due, 'thing')} due this week.` : 'Nothing is due this week.'}`;
+  return [today, due ? `${due} due this week` : ''].filter(Boolean).join(' · ');
+}
+function homeKpis() {
+  const list = home.data.classes.filter(c => !c.archived), sum = k => list.reduce((t, c) => t + (c[k] || 0), 0);
+  const week = Date.now() + 7 * 864e5;
+  if (me.role === 'teacher') {
+    const expected = sum('expected'), handed = sum('handedIn');
+    const next = list.flatMap(c => c.upcoming || []).filter(u => Date.parse(u.dueAt) >= Date.now()).sort((a, b) => (a.dueAt < b.dueAt ? -1 : 1))[0];
+    return kpiRow([
+      { label: 'Classes', value: list.length, note: vcPlural(sum('assignmentCount'), 'assignment'), tone: 'teal' },
+      { label: 'Students', value: sum('studentCount'), note: `${sum('words').toLocaleString()} words written`, tone: 'navy' },
+      { label: 'Writing now', value: sum('activeSessions'), note: sum('inProgress') ? `${sum('inProgress')} in progress` : 'None in progress', tone: 'green' },
+      { label: 'To review', value: sum('toReview'), note: `${sum('returned')} returned`, tone: 'amber' },
+      { label: 'Handed in', value: expected ? `${Math.round(100 * handed / expected)}%` : '–', note: `${handed} of ${expected}`, tone: 'violet',
+        bar: stackBar(classParts(sum('returned'), handed - sum('returned'), sum('inProgress')), expected) },
+      { label: 'Due in 7 days', value: sum('dueThisWeek'), note: next ? `Next ${vcRelative(next.dueAt)}` : 'Nothing scheduled', tone: 'red' }
+    ]);
+  }
+  const todo = home.data.dash.todo || [], writing = todo.filter(t => t.status), n = s => writing.filter(t => t.status === s).length;
+  const due = todo.filter(t => t.dueAt && !isDone(t.status) && Date.parse(t.dueAt) >= Date.now() && Date.parse(t.dueAt) < week);
+  const late = writing.filter(t => isOverdue(t.dueAt, t.status)).length, handed = n('submitted') + n('returned');
+  return kpiRow([
+    { label: 'Classes', value: list.length, note: vcPlural(todo.length, 'assignment'), tone: 'teal' },
+    { label: 'Due in 7 days', value: due.length, note: due[0] ? `Next ${vcRelative(due[0].dueAt)}` : 'Nothing scheduled', tone: 'amber' },
+    { label: 'Overdue', value: late, note: late ? 'Past the due date' : 'None', tone: 'red' },
+    { label: 'In progress', value: n('in-progress'), note: 'Started, not handed in', tone: 'green' },
+    { label: 'Handed in', value: writing.length ? `${Math.round(100 * handed / writing.length)}%` : '–', note: `${handed} of ${writing.length}`, tone: 'violet',
+      bar: stackBar([[n('returned'), 'done', 'returned'], [n('submitted'), 'review', 'submitted'], [n('in-progress'), 'going', 'in progress']], writing.length) }
+  ]);
 }
 // A student's next piece of work: the soonest not done, then any without a date
 function nextUpHtml() {
   const todo = (home.data.dash.todo || []).filter(t => !isDone(t.status));
   const t = todo.find(x => x.dueAt && Date.parse(x.dueAt) >= Date.now()) || todo.find(x => !x.dueAt);
   if (!t) return '';
-  const label = t.status === 'in-progress' ? 'Keep writing' : 'Open the assignment';
+  const label = t.status === 'in-progress' ? 'Continue' : 'Open';
   return `<section class="next-up" aria-label="Next up">
-    <div class="next-up-t"><span class="next-up-k">Next up · ${esc(t.className)}</span><h2>${esc(t.title)}</h2><p>${esc(TYPE_LABEL[t.type] || '')} · ${esc(vcDue(t.dueAt))}</p></div>
+    <div class="next-up-t"><span class="next-up-k">Next due · ${esc(t.className)}</span><h2>${esc(t.title)}</h2><p>${esc(TYPE_LABEL[t.type] || '')} · ${esc(vcDue(t.dueAt))}</p></div>
     <a class="btn next-up-btn" href="/a/${t.assignmentId}" data-link>${label}${PI.arrow}</a>
   </section>`;
 }
@@ -337,9 +378,10 @@ function renderHome() {
         ${teacher ? `<button class="btn btn-primary" onclick="openCreateClass()">${I.plusSm}Create class</button>` : `<button class="btn btn-ghost" onclick="openJoinClass()">${I.plusSm}Join a class</button>`}
       </div>
     </header>
+    ${homeKpis()}
     ${teacher ? happeningBoxHtml(home.data.dash.happeningNow) : nextUpHtml()}
     <div class="home-grid">
-      <div class="home-main"><h2 class="home-h">${home.view === 'activity' ? 'Activity' : 'Your classes'}</h2><div id="homeBody"></div></div>
+      <div class="home-main"><div class="home-h-row"><h2 class="home-h">${home.view === 'activity' ? 'Activity' : 'Classes'}</h2>${teacher && home.view !== 'activity' ? statusLegend() : ''}</div><div id="homeBody"></div></div>
       <aside class="home-right" aria-label="To do">${teacher ? teacherHomeRight() : studentHomeRight()}</aside>
     </div>
   </div>`;
@@ -352,26 +394,27 @@ function dashboardHtml() {
   const { classes: list } = home.data;
   const teacher = me.role === 'teacher';
   const active = list.filter(c => !c.archived), archived = list.filter(c => c.archived);
-  const newTile = teacher
-    ? `<button class="ct-new" onclick="openCreateClass()">${I.plusSm}Create a class</button>`
-    : `<button class="ct-new" onclick="openJoinClass()">${I.plusSm}Join a class</button>`;
   const empty = !active.length ? (archived.length
     ? `<div class="feed-empty" style="margin-bottom:18px;"><b>All your classes are archived</b>${teacher ? 'Restore one in its Settings, or create a new class.' : 'Join a class with the class code your teacher gives you.'}</div>`
-    : `<div class="feed-empty" style="margin-bottom:18px;"><b>${teacher ? 'Create your first class' : 'You’re not in a class yet'}</b>${teacher ? 'A class holds your roster, its assignments (in-class essays, group projects and discussions, in folders if you like) and its announcements. You can share it with other teachers.' : 'Ask your teacher for the class code, then join with it.'}</div>`) : '';
-  return `${empty}<div class="course-tiles">${active.map(courseTile).join('')}${newTile}</div>
+    : `<div class="feed-empty" style="margin-bottom:18px;"><b>${'No classes'}</b>${teacher ? 'A class holds your roster, its assignments (in-class essays, group projects and discussions, in folders if you like) and its announcements. You can share it with other teachers.' : 'Ask your teacher for the class code, then join with it.'}</div>`) : '';
+  return `${empty}<div class="course-tiles">${active.map(courseTile).join('')}</div>
     ${archived.length ? `<div class="home-more"><button class="btn btn-ghost btn-sm" aria-expanded="${home.showArchived}" onclick="home.showArchived=!home.showArchived;$('homeBody').innerHTML=dashboardHtml()">${home.showArchived ? 'Hide' : 'Show'} archived classes (${archived.length})</button></div>
       ${home.showArchived ? `<div class="course-tiles" style="margin-top:14px;">${archived.map(courseTile).join('')}</div>` : ''}` : ''}`;
 }
 
 function courseTile(c) {
-  const stats = c.isTeacher
-    ? [c.activeSessions ? `<span class="live-dot-text"><i class="live-dot"></i>${c.activeSessions} writing now</span>` : '', c.toReview ? `<span><b>${c.toReview}</b> to review</span>` : '', `<span>${vcPlural(c.assignmentCount || 0, 'assignment')}</span>`]
-    : [c.upcoming?.[0] ? `<span>Next: <b>${esc(c.upcoming[0].title)}</b> · ${esc(vcDate(c.upcoming[0].dueAt))}</span>` : `<span>${vcPlural(c.assignmentCount || 0, 'assignment')}</span>`];
+  const cell = (v, k, tone = '') => `<span class="ct-cell ${tone}"><b>${esc(String(v))}</b>${esc(k)}</span>`;
+  const next = (c.upcoming || []).find(u => Date.parse(u.dueAt) >= Date.now());
+  const cells = c.isTeacher
+    ? [cell(c.assignmentCount || 0, 'Assignments'), cell(c.toReview || 0, 'To review', c.toReview ? 'amber' : ''), cell(c.activeSessions || 0, 'Writing', c.activeSessions ? 'green' : '')]
+    : [cell(c.assignmentCount || 0, 'Assignments'), cell(c.submitted || 0, 'Handed in'), cell(c.upcomingCount || 0, 'Upcoming', c.upcomingCount ? 'amber' : '')];
+  const progress = c.isTeacher && c.expected ? `<span class="ct-bar">${stackBar(classParts(c.returned, c.handedIn - c.returned, c.inProgress), c.expected)}<b>${Math.round(100 * c.handedIn / c.expected)}%</b></span>` : '';
   return `<a class="course-tile cc-${courseColor(c)} ${c.archived ? 'archived' : ''}" href="/class/${c.id}" data-link>
     ${courseArt(c)}
     ${c.archived ? '<span class="pill pill-gray ct-flag">Archived</span>' : ''}
     <span class="ct-body"><span class="ct-name">${esc(c.name)}</span><span class="ct-sub">${c.isTeacher ? vcPlural(c.studentCount, 'student') + (teachersOf(c).length > 1 ? ` · ${vcPlural(teachersOf(c).length, 'teacher')}` : '') : esc(teacherNames(c))}</span>
-      <span class="ct-stats">${stats.filter(Boolean).join('')}</span></span>
+      <span class="ct-cells">${cells.join('')}</span>${progress}
+      <span class="ct-next ${next ? relTone(next.dueAt) : ''}">${next ? `<span>Next due</span><b>${esc(next.title)}</b><em>${esc(vcRelative(next.dueAt))}</em>` : '<span>Nothing due</span>'}</span></span>
   </a>`;
 }
 
@@ -379,10 +422,10 @@ function courseTile(c) {
 function teacherHomeRight() {
   const review = home.data.dash.needsReview || [];
   return `<section class="side-box" id="upcomingBox">${upcomingBoxInner()}</section>
-    <section class="side-box"><div class="side-box-h"><span>Ready to read</span>${review.length ? `<span class="side-n">${review.length}</span>` : ''}</div>
+    <section class="side-box"><div class="side-box-h"><span>To review</span>${review.length ? `<span class="side-n">${review.length}</span>` : ''}</div>
       ${review.length ? `<div class="side-box-b">${review.slice(0, 6).map(r => `<a class="up-row" href="/review/${r.docId}" data-link>${avatarHtml({ name: r.student }, 'avatar-sm')}<span class="ev-main"><span class="ev-title">${esc(r.student)}</span><span class="ev-meta">${esc(r.title)} · ${esc(r.className)}</span></span><span class="up-when">${esc(timeAgo(r.submittedAt))}</span></a>`).join('')}
         ${review.length > 6 ? `<div class="side-empty">and ${review.length - 6} more: see each assignment’s Submissions.</div>` : ''}</div>`
-        : `<div class="side-empty">Nothing waiting. Submitted work shows up here until you return it.</div>`}</section>`;
+        : `<div class="side-empty">No submissions to review.</div>`}</section>`;
 }
 // The live sessions, each a band across the top of Home
 function happeningBoxHtml(list) {
@@ -432,7 +475,7 @@ const EVENT_KIND = { due: 'Due', discussion: 'Discussion', opens: 'Writing opens
 // One event in a right-hand column: its date in a lens, then what it is
 function upRowHtml(ev, { showClass = false } = {}) {
   const d = new Date(ev.at), overdue = ev.kind === 'due' && isOverdue(ev.at, ev.status);
-  const meta = [`${EVENT_KIND[ev.kind] || ''} ${vcTime(ev.at)}`, showClass ? ev.className : '', ev.published === false ? 'Not published' : '', isDone(ev.status) ? STATUS_LABEL[ev.status] : ''].filter(Boolean);
+  const meta = [`${EVENT_KIND[ev.kind] || ''} ${vcTime(ev.at)}`, vcRelative(ev.at), showClass ? ev.className : '', ev.published === false ? 'Not published' : '', isDone(ev.status) ? STATUS_LABEL[ev.status] : ''].filter(Boolean);
   return `<a class="up-row cc-${esc(ev.color || 'slate')}" href="/a/${ev.assignmentId}" data-link><span class="up-date" aria-hidden="true"><i>${esc(d.toLocaleDateString(undefined, { month: 'short' }))}</i><b>${d.getDate()}</b></span><span class="ev-main"><span class="sr-only">${esc(vcDayLabel(ev.at))}: </span><span class="ev-title">${esc(ev.title)}</span><span class="ev-meta ${overdue ? 'red' : ''}">${esc(meta.join(' · '))}</span></span></a>`;
 }
 /* ---- create and join ---- */
@@ -503,10 +546,16 @@ function courseHeroHtml(c, active) {
   return `<header class="course-hero">
       ${courseArt(c, 'course-cover')}
       <div class="course-hero-text"><div class="course-name">${esc(c.name)}${c.archived ? ' <span class="pill pill-gray">Archived</span>' : ''}</div>
-        <div class="course-who">${avatarStack(teachers)}<span>${who}</span></div></div>
+        <div class="course-who">${avatarStack(teachers)}<span>${who}</span></div>${heroStats(c)}</div>
       <div class="course-hero-tools">${invite}${c.isTeacher ? `<button type="button" class="glass-btn icon" onclick="openClassBanner('${c.id}')" aria-label="Change the banner" title="Change the banner">${I.edit}</button>` : ''}</div>
     </header>
     ${courseTabsHtml(c, active)}`;
+}
+function heroStats(c) {
+  const item = (v, k) => `<span class="hs"><b>${esc(String(v))}</b>${esc(k)}</span>`;
+  if (!c.isTeacher) return `<div class="hero-stats">${item(c.assignmentCount ?? 0, 'Assignments')}${item(c.submitted ?? 0, 'Handed in')}${item(c.upcomingCount ?? 0, 'Upcoming')}</div>`;
+  if (c.expected == null) return '';
+  return `<div class="hero-stats">${item(c.studentCount ?? 0, 'Students')}${item(c.published ?? 0, 'Published')}${item(c.expected ? `${Math.round(100 * c.handedIn / c.expected)}%` : '–', 'Handed in')}${item(c.toReview ?? 0, 'To review')}${item(c.activeSessions ?? 0, 'Writing now')}${item((c.words || 0).toLocaleString(), 'Words')}</div>`;
 }
 function courseBarHtml(c, active) {
   return `<header class="course-bar">
@@ -738,7 +787,7 @@ function classRightHtml() {
   const review = list.filter(a => a.stats?.submitted);
   return `${live.length ? `<section class="side-box"><div class="side-box-h live"><span><i class="live-dot"></i> Live now</span></div><div class="side-box-b">
       ${live.map(a => `<a class="ev-row" href="/a/${a.id}?tab=live" data-link><span class="ev-main"><span class="ev-title">${esc(a.title)}</span><span class="ev-meta">${a.stats.live} of ${c.studentCount} writing</span></span></a>`).join('')}</div></section>` : ''}
-    <section class="side-box"><div class="side-box-h"><span>Ready to read</span></div>
+    <section class="side-box"><div class="side-box-h"><span>To review</span></div>
       ${review.length ? `<div class="side-box-b">${review.map(a => `<a class="side-stat" href="/a/${a.id}?tab=submissions" data-link><span>${esc(a.title)}</span><b>${a.stats.submitted}</b></a>`).join('')}</div>` : '<div class="side-empty">Nothing waiting for you.</div>'}</section>
     ${upBox}`;
 }
@@ -826,24 +875,33 @@ function folderMenuHtml(f, where) {
   ] });
 }
 
+// What kind of session it is, at a glance
+function matChips(a) {
+  const chips = [];
+  if (a.mode) chips.push([a.mode === 'locked' ? 'Locked' : 'Open', a.mode === 'locked' ? 'locked' : 'open']);
+  if (a.timeLimitMin) chips.push([`${a.timeLimitMin} min`, '']);
+  if (a.minWords || a.maxWords) chips.push([`${a.minWords || 0}–${a.maxWords || '∞'} words`, '']);
+  if (a.groups) chips.push([vcPlural(a.groups, 'group'), '']);
+  return chips.map(([t, k]) => `<em class="mchip ${k}">${esc(t)}</em>`).join('');
+}
 function assignmentRowHtml(a) {
   const c = cp.cls;
   const when = a.type === 'discussion' && a.discussionDate ? `Meets ${vcDateTime(a.discussionDate)}` : vcDue(a.dueAt);
   const status = !c.isTeacher && a.type === 'writing' ? a.status || 'not-started' : null;
   const overdue = status && isOverdue(a.dueAt, status);
+  const dueOn = a.type === 'discussion' ? a.discussionDate : a.dueAt;
   let side = '';
   if (c.isTeacher) {
     const s = a.stats;
-    side = [!a.publishedAt ? '<span class="pill pill-gray">Not published</span>' : '',
-      s?.live ? `<span class="mat-stat live-dot-text"><i class="live-dot"></i>${s.live} writing now</span>` : '',
-      s?.submitted ? `<span class="mat-stat"><b>${s.submitted}</b> to review</span>` : '',
-      s && a.publishedAt && c.studentCount ? `<span class="mat-progress" title="${s.submitted + s.returned} of ${c.studentCount} handed in"><i><b style="width:${Math.round(100 * Math.min(1, (s.submitted + s.returned) / c.studentCount))}%"></b></i>${s.submitted + s.returned}/${c.studentCount}</span>` : ''].filter(Boolean).join('');
+    const line = [s?.live ? `<span class="mat-stat live-dot-text"><i class="live-dot"></i>${s.live} writing</span>` : '', s?.submitted ? `<span class="mat-stat"><b>${s.submitted}</b> to review</span>` : ''].join('');
+    const bar = s && a.publishedAt && c.studentCount ? `<span class="mat-progress">${stackBar(classParts(s.returned, s.submitted, s.inProgress), c.studentCount)}${s.submitted + s.returned}/${c.studentCount}</span>` : '';
+    side = `${a.publishedAt ? '' : '<span class="pill pill-gray">Not published</span>'}${bar ? `<span class="mat-nums">${line ? `<span class="mat-nums-t">${line}</span>` : ''}${bar}</span>` : ''}`;
   } else if (status) side = `${overdue ? '<span class="pill pill-red">Overdue</span>' : ''}${statusPillDoc(status)}`;
   return `<div class="mat-row ${a.publishedAt ? '' : 'is-draft'}" role="listitem" data-kind="assignment" data-id="${a.id}" ${c.isTeacher ? 'draggable="true"' : ''}>
     ${c.isTeacher ? `<span class="mat-grip" aria-hidden="true">${PI.grip}</span>` : ''}
     ${typeIcon(a.type)}
     <div class="mat-body"><a class="mat-title" href="/a/${a.id}" data-link draggable="false">${esc(a.title)}</a>
-      <div class="mat-meta"><span>${esc(TYPE_LABEL[a.type] || '')}</span><span class="${overdue ? 'overdue' : ''}">${esc(when)}</span></div></div>
+      <div class="mat-meta"><span>${esc(TYPE_LABEL[a.type] || '')}</span><span class="${overdue ? 'overdue' : ''}">${esc(when)}</span>${dueOn ? `<span class="rel ${relTone(dueOn)}">${esc(vcRelative(dueOn))}</span>` : ''}${matChips(a)}</div></div>
     ${side || c.isTeacher ? `<div class="mat-side">${side}${c.isTeacher ? assignmentMenuHtml(a) : ''}</div>` : ''}
   </div>`;
 }
@@ -1035,6 +1093,7 @@ const STAFF_ROLES = {
   advisor: { label: 'Advisor', phrase: 'an advisor', hint: 'Can do everything a co-teacher can, but isn’t listed as a teacher, so students don’t see them on the class.' }
 };
 const staffRoleOptions = () => Object.entries(STAFF_ROLES).map(([k, r]) => `<option value="${k}">${r.label}</option>`).join('');
+const writingDue = c => (c.studentCount ? Math.round((c.expected || 0) / c.studentCount) : 0);
 function membersHtml() {
   const c = cp.cls;
   const acc = c.accommodations || {};
@@ -1067,15 +1126,18 @@ function membersHtml() {
     ${staffTable(advisors, () => '<span class="pill pill-gray">Advisor</span>')}
     <div class="tiny muted" style="margin-top:6px;">Advisors can do everything a teacher can, but they aren’t listed as teachers, so students don’t see them on the class. Anything an advisor posts shows their name.</div>` : '';
   const roster = c.students.length ? `<div class="card roster-card"><table class="roster">
-      <thead><tr><th>Name</th><th>Extra time</th><th>Accommodation note</th><th><span class="sr-only">Actions</span></th></tr></thead>
-      <tbody>${c.students.map(s => `<tr>
+      <thead><tr><th>Name</th><th>Handed in</th><th>Words</th><th>Last active</th><th>Extra time</th><th>Accommodation note</th><th><span class="sr-only">Actions</span></th></tr></thead>
+      <tbody>${c.students.map(s => { const st = c.rosterStats?.[s.id] || {}, due = writingDue(c); return `<tr>
         <td><div class="roster-name">${avatarHtml(s, 'avatar-sm')}<span><b>${esc(s.name)}</b><div class="tiny muted">${esc(s.email)}</div></span></div></td>
+        <td class="roster-num"><b>${st.handedIn || 0}</b> of ${due}${stackBar([[st.handedIn || 0, 'done', 'handed in'], [st.inProgress || 0, 'going', 'in progress']], due)}</td>
+        <td class="roster-num">${(st.words || 0).toLocaleString()}</td>
+        <td class="roster-num">${st.lastActive ? esc(timeAgo(st.lastActive)) : '–'}</td>
         <td><select class="input input-sm" aria-label="Extra time for ${esc(s.name)}" onchange="saveAccommodation('${s.id}')" id="accM-${s.id}">${[1, 1.25, 1.5, 2, 2.5, 3].map(m => `<option value="${m}" ${(acc[s.id]?.timeMultiplier || 1) === m ? 'selected' : ''}>${m === 1 ? 'None' : m + '×'}</option>`).join('')}</select></td>
         <td><input class="input input-sm" id="accN-${s.id}" aria-label="Accommodation note for ${esc(s.name)}" value="${esc(acc[s.id]?.note || '')}" placeholder="e.g. IEP, 504 plan" maxlength="300" onchange="saveAccommodation('${s.id}')" /></td>
         <td class="row-actions">${ddHtml({ id: `mm-${s.id}`, btnClass: 'btn-icon', btn: I.gear, label: `Options: ${s.name}`, right: true, items: [
           { label: 'Remove from class', icon: I.x, onclick: `removeClassStudent('${s.id}')` },
           { label: 'Delete their work in this class', icon: I.trash, onclick: `deleteStudentData('${s.id}')`, danger: true }] })}</td>
-      </tr>`).join('')}</tbody></table></div>`
+      </tr>`; }).join('')}</tbody></table></div>`
     : `<div class="mat-list"><div class="mat-empty"><b>No students yet</b>${c.archived ? 'This class is archived. Restore it in Settings to add students.' : school ? `Add them from ${esc(school.name)} with <button type="button" class="linklike" onclick="openAddFromSchool('${c.id}')">Add people</button>, or give anyone else the class code <b class="mono" style="display:inline;">${esc(c.joinCode)}</b>.` : `Give students the class code <b class="mono" style="display:inline;">${esc(c.joinCode)}</b>, or use Add people to add them by email.`}</div></div>`;
   const invites = (c.pendingInvites || []).length ? `<h2 class="section-title people-h">Invited, not signed up yet</h2>
     <div class="card list-card">${c.pendingInvites.map(i => `<div class="list-row"><span class="grow mono small">${esc(i.email)}</span><span class="tiny muted">invited ${esc(timeAgo(i.invitedAt))}</span><button class="btn-icon" aria-label="Cancel invite for ${esc(i.email)}" data-email="${esc(i.email)}" onclick="removeInvite(this.dataset.email)">${I.x}</button></div>`).join('')}</div>

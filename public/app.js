@@ -18,10 +18,12 @@ const timeAgo = iso => {
 };
 const colorClass = i => `c${i % 8}`;
 const PALETTE = ['#1E9BC4', '#4CA35C', '#E39B2E', '#7C5CD6', '#D9534F', '#2A9D8F', '#B5179E', '#6C757D'];
-// Avatar circle: uses the person's chosen color, otherwise the logo gradient
+// Dark enough for white initials
+const AVATAR_TONES = ['#127C9F', '#2F7F45', '#A5620C', '#6246BE', '#B83F3B', '#1F7F73', '#9C2A87', '#2F5DA8'];
+// Avatar circle: uses the person's chosen color, otherwise one picked from their name
 function avatarHtml(person, size = '') {
-  const bg = person?.avatarColor ? `background:${person.avatarColor}` : 'background:var(--grad)';
-  return `<span class="avatar ${size}" style="${bg}">${esc(initials(person?.name))}</span>`;
+  const hash = [...(person?.name || '')].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7);
+  return `<span class="avatar ${size}" style="background:${person?.avatarColor || AVATAR_TONES[hash % AVATAR_TONES.length]}">${esc(initials(person?.name))}</span>`;
 }
 // Color for a person in charts/scripts: their chosen color, else a palette slot
 function personColor(person, i) { return person?.avatarColor || PALETTE[i % 8]; }
@@ -435,14 +437,14 @@ async function saveProfile() {
 /* ====================== tutorial ====================== */
 const TUTORIAL = {
   teacher: [
-    { icon: 'school', title: '1. Create a class', text: 'Welcome to Visor Classroom. Start on <b>Home</b> with <b>Create class</b>. Each class gets a 6-character class code: put it on the board, or add students by email on the class’s <b>People</b> page (anyone without an account joins automatically when they sign up). Set extra time for students who need it there, and add co-teachers who share the class.' },
+    { icon: 'school', title: '1. Create a class', text: 'Start on <b>Home</b> with <b>Create class</b>. Each class gets a 6-character class code: put it on the board, or add students by email on the class’s <b>People</b> page (anyone without an account joins automatically when they sign up). Set extra time for students who need it there, and add co-teachers who share the class.' },
     { icon: 'pen', title: '2. Make an assignment', text: 'On the class’s <b>Assignments</b> page, use <b>New</b> for a <b>Writing</b> assignment, <b>Group project</b> or <b>Discussion</b>, and folders to keep units together. Post to the class under <b>Announcements</b>. For writing, the <b>In-class essay (locked)</b> preset is a timed session with pasting from outside sources off; <b>Homework essay (open)</b> has no time limit and allows pasting. Both block AI sites unless you untick it. Publish it when you’re ready.' },
     { icon: 'puzzle', title: '3. Students write in Visor', text: 'Students write in Visor’s own editor during a session. Leaving the tab pauses their writing and is recorded. For locked sessions they need the Visor Chrome extension, which also records their research, keeps them on allowed sites and adds citations with one click.' },
     { icon: 'eye', title: '4. Watch live, then review', text: 'The assignment’s <b>Live</b> tab shows every student as they write: words, pauses, pastes, time left, with buttons to pause, message or add time. After they submit, open any essay to replay it keystroke by keystroke, read its research log, and see factual notes about how it was written.' },
     { icon: 'sparkle', title: '5. Feedback, groups and discussions', text: 'Leave a comment and score, then <b>Return to student</b>. Group projects give each group its own project for Google Docs reports, recordings and an AI-written summary. Discussions turn a recording into measured talk time and turns per student. Visor shows what happened; you make the call.' }
   ],
   student: [
-    { icon: 'school', title: '1. Join your class', text: 'Welcome to Visor Classroom. Click <b>Join a class</b> on Home and type the class code your teacher gives you (or your teacher adds you by email). Your classes show up on Home and in the sidebar; what’s due shows under <b>Coming up</b> and on the <b>Calendar</b>.' },
+    { icon: 'school', title: '1. Join your class', text: 'Click <b>Join a class</b> on Home and type the class code your teacher gives you (or your teacher adds you by email). Your classes show up on Home and in the sidebar; what’s due shows under <b>Coming up</b> and on the <b>Calendar</b>.' },
     { icon: 'puzzle', title: '2. Connect the extension', text: 'Some sessions need the Visor Chrome extension. Install it, then use the <b>Visor extension</b> box on Home to connect it. During a session it records the searches and pages you use for research, and its <b>Cite this page</b> button adds a citation to your essay.' },
     { icon: 'pen', title: '3. Write in a session', text: 'Open an assignment, click <b>Open the editor</b>, then <b>Start writing session</b>. Visor records how your writing happens, not just the result. If you leave the Visor tab, writing pauses until you come back, and you see the same pause your teacher sees.' },
     { icon: 'doc', title: '4. Cite and submit', text: 'Use <b>Insert citation</b> or the extension’s cite button to add sources; your Works Cited list builds itself. When you’re done, click <b>Submit</b>. Your teacher can return it with feedback and a score.' },
@@ -483,7 +485,7 @@ async function loadProjects(selectId) {
 
 function renderProjectList() {
   $('projectList').innerHTML = projects.map(p => `
-    <a class="vnav-item" href="/project/${p.id}" data-link data-project="${p.id}" title="${p.students?.length ?? 0} student${(p.students?.length ?? 0) !== 1 ? 's' : ''} · ${p.resourceCount ?? 0} resource${(p.resourceCount ?? 0) !== 1 ? 's' : ''}"><span class="vlens" aria-hidden="true"></span><span class="vnav-t">${esc(p.name)}</span></a>`).join('') || (me?.role === 'teacher' ? '<div class="vnav-empty">No projects yet.</div>' : '');
+    <a class="vnav-item" href="/project/${p.id}" data-link data-project="${p.id}" title="${p.students?.length ?? 0} student${(p.students?.length ?? 0) !== 1 ? 's' : ''} · ${p.resourceCount ?? 0} resource${(p.resourceCount ?? 0) !== 1 ? 's' : ''}"><span class="vlens" aria-hidden="true">${I.users}</span><span class="vnav-t">${esc(p.name)}</span></a>`).join('') || (me?.role === 'teacher' ? '<div class="vnav-empty">No projects yet.</div>' : '');
   $('navProjectsHead').classList.toggle('hidden', !projects.length && me?.role !== 'teacher');
   window.VisorRouter?.paintNav();
 }
@@ -969,7 +971,7 @@ async function openResource(id) {
   const r = project.resources.find(x => x.id === id); if (!r) return;
   if (r.type === 'audio') {
     if (r.status === 'identify') return openSpeakerWizard(id);
-    if (r.status === 'transcribing') return openModal({ title: esc(r.title), sub: 'Still transcribing. Hang tight.', body: `<div style="text-align:center;padding:20px;"><span class="spinner"></span></div>`, footer: `<button class="btn btn-ghost" onclick="closeModal()">Close</button>` });
+    if (r.status === 'transcribing') return openModal({ title: esc(r.title), sub: 'Transcribing.', body: `<div style="text-align:center;padding:20px;"><span class="spinner"></span></div>`, footer: `<button class="btn btn-ghost" onclick="closeModal()">Close</button>` });
     if (r.status === 'error') return openModal({ title: esc(r.title), sub: 'Transcription failed.', body: `<div class="form-error">${esc(r.error || 'Unknown error')}</div><p class="muted small" style="margin:0;">Usually this means the Gemini key is missing, the file format isn't supported, or the recording is too long. Try again or upload as MP3.</p>`, footer: `<button class="btn btn-ghost" onclick="closeModal()">Close</button>${project.isDemo ? '' : `<button class="btn btn-primary" onclick="closeModal();retranscribe('${r.id}')">Try again</button>`}` });
     return openTranscript(r);
   }
