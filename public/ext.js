@@ -31,8 +31,10 @@ const VisorExt = (() => {
   return {
     installedVersion,
     async ping() {
-      const r = await send('PING');
-      // timeout: not installed or turned off; gone: turned off or reloaded since this page loaded
+      // The bridge marks the page before any script runs, so on a marked page
+      // no answer yet only means the extension's worker is still waking up
+      const r = await send('PING', {}, installedVersion() ? 5000 : 1500);
+      // timeout: no bridge on this page; gone: turned off or updated since this page loaded
       return r.timeout || r.gone ? { installed: false, gone: !!r.gone } : { installed: true, version: r.version, connected: !!r.connected, user: r.user || null, hasHostPermission: !!r.hasHostPermission, lockActive: !!r.lockActive, session: r.session || null };
     },
     connect: (token, user) => send('CONNECT', { token, user }),
@@ -64,14 +66,17 @@ VisorRouter.add('/extension/connect', async el => {
     <div class="card card-pad connect-card">
       <img src="/logo.png" alt="" class="connect-logo" />
       <h1>Connect the Visor extension</h1>
-      ${!p.installed ? `
-        <p>The Visor Chrome extension isn’t installed in this browser, or it’s turned off.</p>
+      ${p.gone ? `
+        <p>The Visor extension was updated or turned off after this page opened. Reload this page to reach it again.</p>
+        <button class="btn btn-primary" onclick="location.reload()">${I.refresh}Reload this page</button>`
+      : !p.installed ? `
+        <p>This page can’t reach the Visor Chrome extension.</p>
         <ol class="small" style="line-height:1.8;">
           <li>Install <a href="https://chromewebstore.google.com/detail/mienldgcindjfiinlbmjibgmemnapkog" target="_blank" rel="noopener"><b>Visor — Writing Sessions &amp; Google Docs History</b></a> from the Chrome Web Store (or ask your school; many install it for every student).</li>
-          <li>Make sure it’s turned on at <span class="mono">chrome://extensions</span>.</li>
-          <li>Reload this page.</li>
+          <li>Make sure it’s turned on at <span class="mono">chrome://extensions</span>, and that its <b>Site access</b> (under Details) includes this site.</li>
+          <li>Reload this page. Chrome only connects an extension to pages opened after it was installed or updated.</li>
         </ol>
-        <button class="btn btn-ghost" onclick="VisorRouter.render()">${I.refresh}Check again</button>`
+        <button class="btn btn-ghost" onclick="location.reload()">${I.refresh}Reload this page</button>`
       : connectedHere ? `
         <div class="connected-line">${I.check}<span>Connected as <b>${esc(p.user.name)}</b></span></div>
         <p class="small muted">During a writing session the extension records your research (searches, pages and how long you spent on them, text you copy), adds citations with one click, and keeps a locked session on the allowed sites. Outside a session it records nothing.</p>
@@ -82,7 +87,7 @@ VisorRouter.add('/extension/connect', async el => {
         ${p.connected && p.user ? `<div class="callout amber" style="margin-bottom:12px;">The extension is connected to ${esc(p.user.name)}. Connecting replaces that.</div>` : ''}
         <button class="btn btn-primary btn-lg" onclick="extConnect(this)">${I.puzzle}Connect the Visor extension</button>
         <div id="connectErr" class="form-error hidden" style="margin-top:12px;"></div>`}
-      ${status?.connected && !connectedHere ? `<p class="tiny muted" style="margin-top:14px;">Your account also has an extension connected in another browser.</p>` : ''}
+      ${p.installed && status?.connected && !connectedHere ? `<p class="tiny muted" style="margin-top:14px;">Your account also has an extension connected in another browser.</p>` : ''}
     </div></div>`;
 });
 
