@@ -253,12 +253,13 @@ let home = { data: null, view: 'dashboard', showArchived: false, upcoming: null 
 const homeViewKey = () => `visor.homeView.${me?.id || ''}`;
 
 VisorRouter.add('/', async (el, params, query) => {
+  VisorRouter.title('Home');
   let saved = null;
   try { saved = localStorage.getItem(homeViewKey()); } catch {}
   home.view = query.get('view') || saved || 'dashboard';
   if (!['dashboard', 'activity'].includes(home.view)) home.view = 'dashboard';
   home.showArchived = query.get('archived') === '1';
-  el.innerHTML = `<div class="portal"><div class="loading-row"><span class="spinner"></span></div></div>`;
+  el.innerHTML = VisorRouter.skeleton('home');
   const mine = VisorRouter.seq();
   const [cls, dash] = await Promise.all([api('/api/classes'), api('/api/dashboard')]);
   if (mine !== VisorRouter.seq()) return;
@@ -480,7 +481,7 @@ function courseTabsHtml(c, active) {
   return `<nav class="course-tabs" aria-label="Class pages">
       ${link('materials', `/class/${c.id}`, PI.list, 'Assignments')}
       ${link('updates', `/class/${c.id}?tab=announcements`, PI.megaphone, 'Announcements')}
-      ${c.isTeacher ? link('members', `/class/${c.id}?tab=people`, I.users, 'People', (c.studentCount ?? c.students?.length ?? 0) + teachers.length + (c.advisors?.length || 0)) : ''}
+      ${c.isTeacher ? link('members', `/class/${c.id}?tab=people`, I.users, 'People', (c.studentCount ?? c.students?.length ?? 0) + teachers.length + (c.advisors?.length ?? c.advisorCount ?? 0)) : ''}
       ${c.archived ? '' : link('calendar', `/calendar?class=${c.id}`, PI.cal, 'Calendar')}
       ${c.isTeacher ? link('settings', `/class/${c.id}?tab=settings`, I.gear, 'Settings') : ''}
     </nav>`;
@@ -652,7 +653,7 @@ VisorRouter.add('/class/:id', async (el, { id }, query) => {
   // Same class as last time: draw it straight away, then refresh
   const cached = cp?.cls?.id === id;
   if (cached) { cp.tab = tab; cp.folder = folder; renderClassPage(); }
-  else el.innerHTML = `<div class="portal"><div class="loading-row"><span class="spinner"></span></div></div>`;
+  else el.innerHTML = VisorRouter.skeleton('class');
   const before = cached ? classSnapshot() : null;
   const mine = VisorRouter.seq();
   const r = await api(`/api/classes/${id}`);
@@ -684,6 +685,7 @@ async function refreshClass() {
 
 function renderClassPage() {
   const c = cp.cls;
+  VisorRouter.title(c.name);
   if (cp.folder && !cp.folders.some(f => f.id === cp.folder)) {
     // The folder is gone (deleted, or not visible): back to the top
     cp.folder = null;

@@ -61,14 +61,37 @@ const VisorRouter = (() => {
     if (window.toggleNav) toggleNav(false);
   }
 
+  const title = t => { document.title = t ? `${t} · Visor` : 'Visor'; };
+
+  // A page's shape while it loads. It fades in late, so a quick load shows nothing.
+  const skelRows = n => '<div class="skel skel-row"></div>'.repeat(n);
+  const SKELETONS = {
+    home: `<div class="skel-title skel"></div><div class="skel-line skel"></div><div class="skel-cols"><div class="skel-cards">${'<div class="skel skel-card"></div>'.repeat(2)}</div><div>${skelRows(4)}</div></div>`,
+    class: `<div class="skel skel-hero"></div>${skelRows(5)}`,
+    page: `<div class="skel-title skel"></div><div class="skel-line skel"></div>${skelRows(5)}`
+  };
+  const skeleton = kind => `<div class="portal skel-page" role="status" aria-label="Loading">${SKELETONS[kind]}</div>`;
+
+  // In place of a page: an address that leads nowhere, or one that can't be opened
+  function problemPage(heading, text) {
+    $('routeView').innerHTML = `<div class="page narrow"><div class="problem-page"><img src="/logo.png" alt="" /><h1>${esc(heading)}</h1><p>${esc(text)}</p><a class="btn btn-primary" href="/" data-link>Go to Home</a></div></div>`;
+    title(heading);
+  }
+
   async function render() {
     const mine = ++seq;
     if (cleanup) { try { cleanup(); } catch {} cleanup = null; }
     const path = location.pathname;
     const query = new URLSearchParams(location.search);
     const hit = match(path);
-    if (!hit) { history.replaceState(null, '', '/'); return render(); }
     setNav(path);
+    if (!hit) {
+      document.body.classList.remove('writing', 'writing-focus');
+      showRouteView();
+      window.scrollTo(0, 0);
+      return problemPage('Page not found', 'That link doesn’t lead anywhere in Visor. It may be out of date, or the address may have a typo.');
+    }
+    title('');
     document.body.classList.toggle('writing', /^\/write\//.test(path));
     if (!/^\/write\//.test(path)) document.body.classList.remove('writing-focus');
     // The new page fades up into place (portal.css, .route-enter)
@@ -85,7 +108,7 @@ const VisorRouter = (() => {
       if (typeof out === 'function') cleanup = out;
     } catch (e) {
       if (mine !== seq) return;
-      $('routeView').innerHTML = `<div class="page"><div class="callout red">${esc(e.message || 'This page could not load.')}</div><p><a href="/" data-link>Back to home</a></p></div>`;
+      problemPage('We couldn’t open this page', e.message || 'This page could not load.');
     }
   }
 
@@ -115,6 +138,8 @@ const VisorRouter = (() => {
     // The current navigation's number: a page that awaits something checks it
     // is still current before it draws (VisorRouter.seq() !== mine → leave it)
     seq: () => seq,
+    title,
+    skeleton,
     paintNav,
     markClass(id) { here.class = id; paintNav(); },
     // Called by app.js once someone is signed in

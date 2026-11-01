@@ -9,6 +9,7 @@
 let cal = null; // { month: Date (the 1st), classId, view, events, classes }
 
 VisorRouter.add('/calendar', async (el, params, query) => {
+  VisorRouter.title('Calendar');
   const now = new Date();
   const m = /^(\d{4})-(\d{2})$/.exec(query.get('m') || '');
   const month = m ? new Date(Number(m[1]), Number(m[2]) - 1, 1) : new Date(now.getFullYear(), now.getMonth(), 1);

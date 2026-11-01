@@ -65,6 +65,7 @@ window.VisorExt = VisorExt;
 
 /* ====================== /extension/connect ====================== */
 VisorRouter.add('/extension/connect', async el => {
+  VisorRouter.title('Connect the extension');
   el.innerHTML = `<div class="page narrow"><div class="loading-row"><span class="spinner"></span></div></div>`;
   const onPage = VisorExt.installedVersion();
   const p = await VisorExt.ping();

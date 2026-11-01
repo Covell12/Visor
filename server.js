@@ -1722,7 +1722,7 @@ app.get('/api/assignments/:id', requireAuth, ah(async (req, res) => {
     teacher: { id: cls.teacherId, name: fullName(core.users[cls.teacherId]) }, teachers: publicTeachers(core, cls), isOwner: got.isOwner,
     studentCount: cls.studentIds.length
   };
-  if (got.isTeacher) Object.assign(classInfo, { joinCode: cls.joinCode, joinOpen: cls.joinOpen !== false, canManageStaff: classes.canManageStaff(cls, got.me.id) });
+  if (got.isTeacher) Object.assign(classInfo, { joinCode: cls.joinCode, joinOpen: cls.joinOpen !== false, canManageStaff: classes.canManageStaff(cls, got.me.id), advisorCount: (cls.advisorIds || []).length });
   // The folders above it, top first, for the breadcrumb
   const folderPath = materials.folderPath(materials.tidy(await repo.listRecords('folder', { classId: cls.id }), []).folders, a.folderId);
   if (got.isTeacher) {

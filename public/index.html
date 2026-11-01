@@ -4,7 +4,16 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Visor</title>
+<meta name="description" content="Visor Classroom is where students write, research and discuss, and where teachers see the whole process." />
+<meta name="theme-color" content="#EEF4F6" />
+<meta property="og:site_name" content="Visor" />
+<meta property="og:title" content="Visor Classroom" />
+<meta property="og:description" content="Writing you can see happen. Students write, research and discuss; teachers see the whole process." />
+<meta property="og:type" content="website" />
+<meta property="og:url" content="https://visor-ed.web.app/" />
+<meta property="og:image" content="https://visor-ed.web.app/logo.png" />
 <link rel="icon" href="/favicon.png?v=2" />
+<link rel="apple-touch-icon" href="/logo.png" />
 <link rel="stylesheet" href="/app.css" />
 <link rel="stylesheet" href="/vendor/quill/quill.snow.css" />
 <link rel="stylesheet" href="/doc-format.css" />
@@ -15,6 +24,7 @@
 <link rel="stylesheet" href="/review-doc.css" />
 </head>
 <body>
+<a class="skip-link" href="#routeView" onclick="event.preventDefault();$('routeView').focus();">Skip to content</a>
 
 <!-- ================= AUTH ================= -->
 <div id="authView" class="auth hidden">
@@ -40,8 +50,8 @@
         <div id="signinError" class="form-error hidden"></div>
         <div id="googleSigninBtn" class="google-btn-mount hidden"></div>
         <div id="signinDivider" class="auth-divider"><span>or</span></div>
-        <div class="field"><label>Email</label><input id="siEmail" class="input" type="email" autocomplete="email" placeholder="you@school.org" /></div>
-        <div class="field"><label>Password</label><input id="siPassword" class="input" type="password" autocomplete="current-password" /></div>
+        <div class="field"><label for="siEmail">Email</label><input id="siEmail" class="input" type="email" autocomplete="email" placeholder="you@school.org" /></div>
+        <div class="field"><label for="siPassword">Password</label><input id="siPassword" class="input" type="password" autocomplete="current-password" /></div>
         <button class="btn btn-primary btn-lg" style="width:100%;justify-content:center;" onclick="doSignin()">Sign in</button>
         <div class="auth-switch">New here? <button onclick="showAuth('signup')">Create an account</button></div>
       </div>
@@ -54,29 +64,29 @@
         <div id="googleSignupBtn" class="google-btn-mount hidden"></div>
         <div id="signupDivider" class="auth-divider"><span>or</span></div>
         <div class="field">
-          <label>Email</label>
+          <label for="suEmail">Email</label>
           <input id="suEmail" class="input" type="email" autocomplete="email" placeholder="you@example.org" />
         </div>
         <div class="input-row">
-          <div class="field"><label>First name</label><input id="suFirst" class="input" type="text" autocomplete="given-name" /></div>
-          <div class="field"><label>Last name</label><input id="suLast" class="input" type="text" autocomplete="family-name" /></div>
+          <div class="field"><label for="suFirst">First name</label><input id="suFirst" class="input" type="text" autocomplete="given-name" /></div>
+          <div class="field"><label for="suLast">Last name</label><input id="suLast" class="input" type="text" autocomplete="family-name" /></div>
         </div>
-        <div class="field"><label>Password</label><input id="suPassword" class="input" type="password" autocomplete="new-password" placeholder="At least 6 characters" /></div>
+        <div class="field"><label for="suPassword">Password</label><input id="suPassword" class="input" type="password" autocomplete="new-password" placeholder="At least 6 characters" /></div>
         <div id="suStudentExtras" class="hidden">
           <div class="field"><label for="suClassCode">Class code <span class="label-note">optional</span></label><input id="suClassCode" class="input mono" type="text" autocomplete="off" maxlength="6" placeholder="e.g. 7KQ2MX" style="text-transform:uppercase;" /><div class="hint">Your teacher gives you this. You can also join a class later.</div></div>
           <label class="check-row"><input id="suOver13" type="checkbox" /> <span>I am 13 or older, or my school signed me up for Visor.</span></label>
         </div>
         <div class="field">
-          <label>School <span class="label-note">optional</span></label>
+          <label for="suSchoolPickerInput">School <span class="label-note">optional</span></label>
           <div id="suSchoolPicker" class="school-picker"></div>
         </div>
-        <div class="field" style="margin-bottom:8px;"><label>I am a…</label></div>
-        <div class="role-cards">
-          <button class="role-card" data-role="student" onclick="pickRole('student')">
+        <div class="field" style="margin-bottom:8px;"><label id="suRoleLabel">I am a…</label></div>
+        <div class="role-cards" role="group" aria-labelledby="suRoleLabel">
+          <button type="button" class="role-card" data-role="student" aria-pressed="false" onclick="pickRole('student')">
             <div class="t"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 10v6M2 10l10-5 10 5-10 5z"/><path d="M6 12v5c3 3 9 3 12 0v-5"/></svg>Student</div>
             <div class="d">Join classes, write essays, work on group projects.</div>
           </button>
-          <button class="role-card" data-role="teacher" onclick="pickRole('teacher')">
+          <button type="button" class="role-card" data-role="teacher" aria-pressed="false" onclick="pickRole('teacher')">
             <div class="t"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>Teacher</div>
             <div class="d">Create classes and assignments, watch sessions, review work.</div>
           </button>
@@ -149,7 +159,7 @@
         <section data-panel="members">
           <div id="memberSearch" class="search-wrap hidden">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
-            <input id="memberSearchInput" class="input" placeholder="Add a student: search your school by name, or type their full email…" oninput="onMemberSearch(this.value)" onfocus="onMemberSearch(this.value)" />
+            <input id="memberSearchInput" class="input" aria-label="Add a student" placeholder="Add a student: search your school by name, or type their full email…" oninput="onMemberSearch(this.value)" onfocus="onMemberSearch(this.value)" />
             <div id="memberDropdown" class="dropdown hidden"></div>
           </div>
           <div class="card" id="membersList"></div>
@@ -180,11 +190,11 @@
   </div>
 
   <!-- Visor Classroom pages (dashboard, class, assignment, writer, review…) render here -->
-  <div id="routeView" class="route-view hidden"></div>
+  <div id="routeView" class="route-view hidden" tabindex="-1"></div>
 </div>
 
 <div id="modalRoot"></div>
-<div id="toastRoot"></div>
+<div id="toastRoot" role="status" aria-live="polite"></div>
 
 <script src="/app.js"></script>
 <script src="/router.js"></script>

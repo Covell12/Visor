@@ -52,6 +52,9 @@ a { color: var(--brand); }
 button { font-family: inherit; font-size: inherit; cursor: pointer; }
 input, textarea, select { font-family: inherit; font-size: inherit; color: inherit; }
 .hidden { display: none !important; }
+.skip-link { position: fixed; top: 10px; left: 10px; z-index: 1000; padding: 9px 16px; border-radius: var(--r-pill); background: var(--brand); color: #fff; font-weight: 600; transform: translateY(-200%); }
+.skip-link:focus { transform: none; }
+#routeView:focus { outline: none; }
 .muted { color: var(--ink-2); }
 .small { font-size: 13px; }
 .tiny { font-size: 12px; }

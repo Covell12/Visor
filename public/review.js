@@ -15,8 +15,10 @@ const SRC_ORDER = ['typed', 'pasted-research', 'pasted-outside', 'pasted-interna
 let rv = null;
 
 VisorRouter.add('/review/:docId', async (el, { docId }, query) => {
-  el.innerHTML = `<div class="page"><div class="loading-row"><span class="spinner"></span></div></div>`;
+  el.innerHTML = VisorRouter.skeleton('page');
+  const mine = VisorRouter.seq();
   const data = await api(`/api/review/${docId}`);
+  if (mine !== VisorRouter.seq()) return; // left while it loaded
   rv = { data, tab: query.get('tab') || 'document', colored: true, filter: 'all', stop: null, quill: null };
   rvRender();
   return () => { if (rv?.stop) rv.stop(); rv = null; };
@@ -32,6 +34,7 @@ function rvTab(tab) {
 function rvRender() {
   const { doc, student, assignment: a, class: cls, nav, report } = rv.data;
   VisorRouter.markClass(cls.id);
+  VisorRouter.title(`${student.name}: ${a.title}`);
   $('routeView').innerHTML = `<div class="course compact no-right review cc-${courseColor(cls)}">
     <header class="course-bar">${courseSmall(cls)}${crumbs([[cls.name, `/class/${cls.id}`], [a.title, `/a/${a.id}?tab=submissions`], [student.name]])}</header>
     <div class="course-body"><div class="course-main">

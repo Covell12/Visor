@@ -27,7 +27,7 @@ function load({ marked = false, answer = null, running = false } = {}) {
     window, location: { origin: 'https://visor.test', pathname: '/extension/connect' },
     document: { documentElement: { dataset: marked ? { visorExtension: '4.3.0' } : {} } },
     setTimeout: (fn, ms) => { timers.push({ fn, ms }); return timers.length; }, clearTimeout: () => {},
-    VisorRouter: { add: (p, fn) => { routes[p] = fn; } },
+    VisorRouter: { add: (p, fn) => { routes[p] = fn; }, title: () => {} },
     me: { id: 'u1' }, I: { refresh: '', check: '', puzzle: '' }, esc: String, crumbs: () => '',
     api: async () => ({ connected: false }),
     Image: class { set src(url) { assert.match(url, /^chrome-extension:\/\/mienldgcindjfiinlbmjibgmemnapkog\//); running ? this.onload() : this.onerror(); } }

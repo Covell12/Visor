@@ -419,3 +419,19 @@ details > summary { transition: color .15s; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; transition-delay: 0s !important; scroll-behavior: auto !important; }
 }
+
+/* A page's shape while it loads (router.js). Late fade, so a quick load shows nothing. */
+.skel-page { animation: skelIn .2s ease .18s both; }
+@keyframes skelIn { from { opacity: 0; } to { opacity: 1; } }
+.skel { border-radius: 10px; background: linear-gradient(100deg, var(--surface-2) 30%, #E9F0F3 50%, var(--surface-2) 70%); background-size: 240% 100%; animation: skelGlide 1.5s linear infinite; }
+@keyframes skelGlide { from { background-position: 120% 0; } to { background-position: -120% 0; } }
+.skel-title { width: min(340px, 70%); height: 34px; margin-bottom: 12px; }
+.skel-line { width: min(460px, 90%); height: 16px; margin-bottom: 30px; }
+.skel-row { height: 54px; margin-bottom: 10px; }
+.skel-hero { height: 150px; margin-bottom: 26px; border-radius: 18px; }
+.skel-cols { display: grid; grid-template-columns: minmax(0, 1fr) 312px; gap: 28px; }
+.skel-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; align-content: start; }
+.skel-card { height: 190px; border-radius: 16px; }
+@media (max-width: 900px) { .skel-cols { grid-template-columns: minmax(0, 1fr); } }
+@media (prefers-reduced-motion: reduce) { .skel-page, .skel { animation: none; } }
+

@@ -81,22 +81,37 @@ function toast(msg, kind = '') {
 }
 
 // Modal: openModal({ title, sub, body, footer, wide, onClose }) → returns close()
-let modalOnClose = null;
+let modalOnClose = null, modalReturn = null;
 function openModal({ title, sub = '', body = '', footer = '', wide = false, onClose = null, closable = true }) {
   modalOnClose = onClose;
+  // Where the keyboard goes back to. A dialog opened from another keeps the first one's.
+  if (!$('modalRoot').firstElementChild) modalReturn = document.activeElement;
   $('modalRoot').innerHTML = `
     <div class="overlay" onmousedown="this._downOnBackdrop=event.target===this" onclick="if(event.target===this&&this._downOnBackdrop){${closable ? 'closeModal()' : ''}}">
-      <div class="modal ${wide ? 'wide' : ''}">
-        <div class="mh"><div><h3>${title}</h3>${sub ? `<p>${sub}</p>` : ''}</div>${closable ? `<button class="btn-icon" onclick="closeModal()">${I.x}</button>` : ''}</div>
+      <div class="modal ${wide ? 'wide' : ''}" role="dialog" aria-modal="true" aria-labelledby="modalTitle" tabindex="-1">
+        <div class="mh"><div><h3 id="modalTitle">${title}</h3>${sub ? `<p>${sub}</p>` : ''}</div>${closable ? `<button class="btn-icon" aria-label="Close" onclick="closeModal()">${I.x}</button>` : ''}</div>
         <div class="mb" id="modalBody">${body}</div>
         ${footer ? `<div class="mf" id="modalFooter">${footer}</div>` : '<div id="modalFooter"></div>'}
       </div>
     </div>`;
+  $('modalRoot').querySelector('.modal').focus({ preventScroll: true }); // a caller may then focus its first field
 }
 function closeModal() {
   $('modalRoot').innerHTML = '';
+  if (modalReturn?.isConnected) modalReturn.focus({ preventScroll: true });
+  modalReturn = null;
   if (modalOnClose) { const f = modalOnClose; modalOnClose = null; f(); }
 }
+// Tab stays inside an open dialog (classes.js handles Escape)
+document.addEventListener('keydown', e => {
+  const box = $('modalRoot')?.querySelector('.modal');
+  if (!box || e.key !== 'Tab') return;
+  const stops = [...box.querySelectorAll('a[href],button:not(:disabled),input:not(:disabled):not([type=hidden]),select:not(:disabled),textarea:not(:disabled),[tabindex="0"]')].filter(x => x.offsetParent);
+  if (!stops.length) { e.preventDefault(); return; }
+  const first = stops[0], last = stops[stops.length - 1], at = document.activeElement;
+  if (e.shiftKey && (at === first || at === box)) { e.preventDefault(); last.focus(); }
+  else if (!e.shiftKey && (at === last || !box.contains(at))) { e.preventDefault(); first.focus(); }
+});
 function confirmModal(title, text, { okLabel = 'Confirm', danger = false } = {}) {
   return new Promise(resolve => {
     openModal({ title: esc(title), body: `<p style="margin:0;">${esc(text)}</p>`, footer: `<button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn ${danger ? 'btn-danger' : 'btn-primary'}" id="confirmOk">${esc(okLabel)}</button>`, onClose: () => resolve(false) });
@@ -122,6 +137,7 @@ function showAuth(which) {
   $('signinForm').classList.toggle('hidden', which !== 'signin');
   $('signupForm').classList.toggle('hidden', which !== 'signup');
   $('signinError').classList.add('hidden'); $('signupError').classList.add('hidden');
+  document.title = `${which === 'signup' ? 'Create an account' : 'Sign in'} · Visor`;
   if (which !== 'signup') exitGoogleSignupMode();
 }
 
@@ -173,7 +189,7 @@ function formError(id, msg) { const el = $(id); el.textContent = msg; el.classLi
 
 function pickRole(role) {
   selectedRole = role;
-  document.querySelectorAll('.role-card').forEach(c => c.classList.toggle('selected', c.dataset.role === role));
+  document.querySelectorAll('.role-card').forEach(c => { const on = c.dataset.role === role; c.classList.toggle('selected', on); c.setAttribute('aria-pressed', String(on)); });
   $('suStudentExtras')?.classList.toggle('hidden', role !== 'student');
 }
 // Class code and the 13-or-older confirmation (students only)
@@ -187,7 +203,7 @@ function mountSchoolPicker(id, current) {
   const el = $(id);
   el.innerHTML = `
     <div class="school-picker-box">
-      <input class="input" type="text" autocomplete="off" placeholder="Search for your school, or type its name" value="${esc(current?.name || '')}" />
+      <input id="${id}Input" class="input" type="text" autocomplete="off" placeholder="Search for your school, or type its name" value="${esc(current?.name || '')}" />
       <div class="dropdown hidden"></div>
     </div>
     <div class="school-chosen tiny"></div>
@@ -266,7 +282,9 @@ async function signOut() {
   showAuth('signin');
 }
 document.addEventListener('keydown', e => {
-  if (e.key !== 'Enter') return;
+  // Only from a text box: Enter on a button presses that button, and the school
+  // search box has its own list to pick from
+  if (e.key !== 'Enter' || !e.target.matches?.('input') || e.target.closest('.school-picker')) return;
   if (!$('signinForm').classList.contains('hidden') && $('signinForm').contains(document.activeElement)) doSignin();
   else if (!$('signupForm').classList.contains('hidden') && $('signupForm').contains(document.activeElement)) doSignup();
 });
@@ -423,6 +441,7 @@ async function selectProject(id) {
 
 function renderProject() {
   $('emptyMain').classList.add('hidden'); $('projectView').classList.remove('hidden');
+  VisorRouter.title(project.name);
   const p = project;
   $('projName').textContent = p.name;
   $('projMeta').innerHTML = `<span>${(p.teachers?.length || 0) > 1 ? 'Teachers' : 'Teacher'}: ${esc((p.teachers?.length ? p.teachers : p.teacher ? [p.teacher] : []).map(t => t.name).join(', ') || '—')}</span><span>${p.students.length} student${p.students.length !== 1 ? 's' : ''}</span>${p.docUrl ? `<span><a href="${esc(p.docUrl)}" target="_blank" rel="noopener">Group’s Google Doc ↗</a></span>` : ''}`;

@@ -374,7 +374,7 @@ function autoGroups() {
 let ap = null; // { data, tab }
 
 VisorRouter.add('/a/:id', async (el, { id }, query) => {
-  el.innerHTML = `<div class="portal"><div class="loading-row"><span class="spinner"></span></div></div>`;
+  el.innerHTML = VisorRouter.skeleton('page');
   const mine = VisorRouter.seq();
   const data = await api(`/api/assignments/${id}`);
   if (mine !== VisorRouter.seq()) return; // left while it loaded
@@ -400,6 +400,7 @@ async function reloadAssignment() {
 function renderAssignmentPage() {
   if (ap.stop) { ap.stop(); ap.stop = null; }
   const { assignment: a, class: cls, isTeacher } = ap.data;
+  VisorRouter.title(a.title);
   const course = { ...cls, isTeacher };
   const tabs = !isTeacher ? [] : a.type === 'writing' ? [['overview', 'Overview'], ['live', 'Live'], ['submissions', 'Submissions', ap.data.submissions.filter(s => s.status === 'submitted').length || null]]
     : a.type === 'group' ? [['overview', 'Overview'], ['groups', 'Groups', ap.data.groups.length]]
@@ -473,7 +474,7 @@ function assignmentRightHtml() {
         <a class="side-stat" href="/a/${a.id}?tab=submissions" data-link onclick="event.preventDefault();assignmentTab('submissions')"><span>Returned</span><b>${n('returned')}</b></a>
         <a class="side-stat" href="/a/${a.id}?tab=submissions" data-link onclick="event.preventDefault();assignmentTab('submissions')"><span>In progress</span><b>${n('in-progress')}</b></a>
         <a class="side-stat" href="/a/${a.id}?tab=submissions" data-link onclick="event.preventDefault();assignmentTab('submissions')"><span>Not started</span><b>${n('not-started')}</b></a>
-      </div><div class="side-box-p" style="border-top:1px solid var(--line);"><button class="btn btn-ghost btn-sm" style="width:100%;justify-content:center;" onclick="assignmentTab('live')">${PI.live}Watch live</button></div>`)}${details}`;
+      </div><div class="side-box-p" style="border-top:1px solid var(--line);padding-top:12px;"><button class="btn btn-ghost btn-sm" style="width:100%;justify-content:center;" onclick="assignmentTab('live')">${PI.live}Watch live</button></div>`)}${details}`;
   }
   if (a.type === 'group') {
     const groups = ap.data.groups || [];

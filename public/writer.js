@@ -80,6 +80,7 @@ VisorRouter.add('/write/:id', async (el, { id }, query) => {
     if (e.data?.reviewUrl) { el.innerHTML = `<div class="page"><div class="card card-pad">${esc(e.message)} <a href="${esc(e.data.reviewUrl)}" data-link>Go to the submissions</a></div></div>`; return; }
     throw e;
   }
+  VisorRouter.title(WR.data.assignment?.title);
   WR.doc = WR.data.doc; WR.session = WR.data.session; WR.token = WR.data.token; WR.lease = WR.doc.lease;
   WR.serverOffset = Date.parse(WR.data.serverNow) - Date.now();
   writerRender(el);
