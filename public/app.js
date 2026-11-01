@@ -31,11 +31,14 @@ function projectPerson(idOrName) {
   return all.find(p => p.id === idOrName) || all.find(p => p.name.toLowerCase() === String(idOrName || '').toLowerCase()) || null;
 }
 
+// The server marks a time in a message; the reader sees it in their own time zone
+const localWhen = text => String(text ?? '').replace(/\{\{when:([^}]+)\}\}/g, (_, t) => new Date(t).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }));
+
 async function api(path, { method = 'GET', body } = {}) {
   const r = await fetch(path, { method, headers: body ? { 'Content-Type': 'application/json' } : undefined, body: body ? JSON.stringify(body) : undefined });
   let data = {};
   try { data = await r.json(); } catch {}
-  if (!r.ok) { const e = new Error(data.error || `Request failed (${r.status})`); e.status = r.status; e.data = data; throw e; }
+  if (!r.ok) { const e = new Error(localWhen(data.error) || `Request failed (${r.status})`); e.status = r.status; e.data = data; throw e; }
   return data;
 }
 
@@ -1319,7 +1322,7 @@ function renderWizard() {
   const usedBy = name => Object.entries(wiz.picks).filter(([l, p]) => l !== s.label && p?.name === name).map(([l]) => l);
   const chips = wiz.people.map(p => {
     const sel = pick?.name === p.name; const used = usedBy(p.name);
-    return `<button class="chip ${sel ? 'selected' : ''}" onclick="wizPick(${JSON.stringify(p.name).replace(/"/g, '&quot;')}, '${p.id}')" title="${used.length ? 'Already used for ' + used.join(', ') : ''}">${avatarHtml(p)}${esc(p.name)}${p.role === 'teacher' ? ' <span class="tiny muted">(teacher)</span>' : ''}${used.length ? ' <span class="tiny muted">· also ' + esc(used.join(', ')) + '</span>' : ''}</button>`;
+    return `<button class="chip ${sel ? 'selected' : ''}" onclick="wizPickPerson(${wiz.people.indexOf(p)})" title="${used.length ? 'Already used for ' + used.join(', ') : ''}">${avatarHtml(p)}${esc(p.name)}${p.role === 'teacher' ? ' <span class="tiny muted">(teacher)</span>' : ''}${used.length ? ' <span class="tiny muted">· also ' + esc(used.join(', ')) + '</span>' : ''}</button>`;
   }).join('');
   const otherSel = pick && !wiz.people.some(p => p.name === pick.name);
   const progress = wiz.speakers.map((sp, i) => `<span class="${i < wiz.idx || (wiz.picks[sp.label] && i !== wiz.idx) ? 'done' : ''} ${i === wiz.idx ? 'cur' : ''}"></span>`).join('');
@@ -1340,7 +1343,7 @@ function renderWizard() {
     </div>` });
   if (otherSel) setTimeout(() => $('wizOtherName')?.focus(), 30);
 }
-function wizPick(name, userId) { const s = wiz.speakers[wiz.idx]; wiz.picks[s.label] = { name, userId }; renderWizard(); }
+function wizPickPerson(i) { const p = wiz.people[i], s = wiz.speakers[wiz.idx]; wiz.picks[s.label] = { name: p.name, userId: p.id }; renderWizard(); }
 function wizOther() { const s = wiz.speakers[wiz.idx]; wiz.picks[s.label] = { name: '', userId: null }; renderWizard(); $('wizOtherField').classList.remove('hidden'); $('wizNext').disabled = true; setTimeout(() => $('wizOtherName')?.focus(), 30); }
 function wizOtherTyped(v) { const s = wiz.speakers[wiz.idx]; wiz.picks[s.label] = { name: v.trim(), userId: null }; $('wizNext').disabled = !v.trim(); document.querySelectorAll('#wizChips .chip').forEach(c => c.classList.toggle('selected', c.classList.contains('other'))); }
 function wizSkip() { const s = wiz.speakers[wiz.idx]; wiz.picks[s.label] = null; wizStep(1, true); }

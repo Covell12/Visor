@@ -679,9 +679,10 @@ function projectTeacherIds(core, project) {
 function projectPeople(core, project) {
   const list = project.studentIds.map(id => core.users[id]).filter(Boolean).map(u => ({ id: u.id, name: `${u.firstName} ${u.lastName}`, role: 'student', avatarColor: u.avatarColor || null }));
   const cls = project.classId ? own(core.classes, project.classId) : null;
-  for (const id of new Set([...projectTeacherIds(core, project), ...(cls ? classes.staffIdsOf(cls) : [])])) {
+  const listed = projectTeacherIds(core, project);
+  for (const id of new Set([...listed, ...(cls ? classes.staffIdsOf(cls) : [])])) {
     const t = own(core.users, id);
-    if (t) list.push({ id: t.id, name: `${t.firstName} ${t.lastName}`, role: 'teacher', avatarColor: t.avatarColor || null });
+    if (t) list.push({ id: t.id, name: `${t.firstName} ${t.lastName}`, role: listed.includes(id) ? 'teacher' : 'advisor', avatarColor: t.avatarColor || null });
   }
   return list;
 }
@@ -959,11 +960,13 @@ app.delete('/api/projects/:id/resources/:rid', requireAuth, ah(async (req, res) 
 
 // ---- Document reports (Visor extension, Google Drive, or pasted JSON) ----
 
-// Re-sending the same document replaces its earlier report instead of adding a duplicate.
-async function upsertDocumentResource(project, report, uploadedBy, uploadedByName) {
+// Re-sending the same document replaces its earlier report instead of adding a
+// duplicate. onlyOwn: a report pasted by hand can't be trusted to replace someone
+// else's, so a student's paste only replaces their own.
+async function upsertDocumentResource(project, report, uploadedBy, uploadedByName, { onlyOwn = false } = {}) {
   if (report.fileId) {
     for (const r of await repo.listResources(project.id)) {
-      if (r.type === 'extension' && r.report?.fileId === report.fileId) await repo.deleteResource(r.id);
+      if (r.type === 'extension' && r.report?.fileId === report.fileId && (!onlyOwn || r.uploadedBy === uploadedBy)) await repo.deleteResource(r.id);
     }
   }
   const r = { id: uid(), projectId: project.id, type: 'extension', title: report.title, uploadedBy, uploadedByName, uploadedAt: now(), report };
@@ -978,7 +981,7 @@ app.post('/api/projects/:id/resources/extension', requireAuth, ah(async (req, re
   if (typeof report === 'string') { try { report = JSON.parse(report); } catch { return res.status(400).json({ error: 'That is not valid JSON' }); } }
   const norm = normalizeReport(report);
   if (!norm) return res.status(400).json({ error: 'That does not look like a Visor extension report' });
-  const r = await upsertDocumentResource(got.project, norm, got.me.id, `${got.me.firstName} ${got.me.lastName}`);
+  const r = await upsertDocumentResource(got.project, norm, got.me.id, `${got.me.firstName} ${got.me.lastName}`, { onlyOwn: !isProjectTeacher(await repo.readCore(), got.project, got.me.id) });
   res.json({ resource: publicResource(r) });
 }));
 
@@ -1139,7 +1142,7 @@ async function analyzeProject(core, project) {
   if (sum && sum !== 100 && contributors.length) contributors[0].pct += 100 - sum;
   for (const c of contributors) c.role = classifyRole(c);
   // Teachers are never part of the group's workload
-  const teacherIds = new Set(members.filter(m => m.role === 'teacher').map(m => m.id));
+  const teacherIds = new Set(members.filter(m => m.role !== 'student').map(m => m.id));
   const fairnessScore = calculateFairness(contributors.filter(c => !teacherIds.has(c.id)));
   const silentMembers = students.filter(m => !contributors.some(c => c.id === m.id)).map(m => m.name);
 
@@ -1411,8 +1414,23 @@ app.post('/api/classes/:id/students', requireAuth, ah(async (req, res) => {
   res.json({ class: out.cls, ...out.result });
 }));
 
+// Their work stays with the class. Their place in its group projects goes, and
+// a session still running ends (it would otherwise keep accepting their writing).
 app.delete('/api/classes/:id/students/:userId', requireAuth, ah(async (req, res) => {
-  const out = await repo.withCore(core => { const got = teacherClass(req, core); classes.removeStudent(got.cls, req.params.userId); return publicClass(core, got.cls, got.me); });
+  const userId = String(req.params.userId);
+  let cid = null;
+  const out = await repo.withCore(core => {
+    const got = teacherClass(req, core);
+    cid = got.cls.id;
+    classes.removeStudent(got.cls, userId);
+    for (const p of Object.values(core.projects)) if (p.classId === cid) p.studentIds = p.studentIds.filter(id => id !== userId);
+    return publicClass(core, got.cls, got.me);
+  });
+  for (const s of await repo.listRecords('session', { studentId: userId })) {
+    if (s.classId !== cid || s.state === 'ended') continue;
+    const ended = await repo.updateRecord('session', s.id, x => sessionsLib.endSession(x, 'removed', Date.now()));
+    await afterSessionEnded(ended, await repo.getRecord('assignment', ended.assignmentId));
+  }
   res.json({ class: out });
 }));
 
@@ -2329,7 +2347,7 @@ async function sweepDocSessions(doc, a) {
 // A session just ended: free the lease, refresh the cached figures, and submit
 // if time ran out on an assignment set to submit automatically.
 async function afterSessionEnded(s, a) {
-  const autoSubmit = s.endReason === 'time-limit' && a?.writing?.autoSubmitOnTimeUp;
+  const autoSubmit = ['time-limit', 'window-closed'].includes(s.endReason) && a?.writing?.autoSubmitOnTimeUp;
   await repo.updateRecord('doc', s.docId, d => {
     if (d.lease?.sessionId === s.id) d.lease = null;
     if (autoSubmit && d.status !== 'submitted') { d.status = 'submitted'; d.submittedAt = s.endedAt || now(); d.reopened = false; d.autoSubmitted = true; }
@@ -2345,9 +2363,12 @@ async function syncDocStats(docId) {
 }
 
 // The document as the editor sees it
+const cleanSurfaceId = v => { const id = String(v || '').slice(0, 60); return /^(__proto__|constructor|prototype)$/.test(id) ? '' : id; };
+
 function docView(doc, { withFeedback } = {}) {
   const out = { id: doc.id, assignmentId: doc.assignmentId, text: doc.text, formats: doc.formats, sources: doc.sources || [], seq: doc.seq, status: doc.status, submittedAt: doc.submittedAt, returnedAt: doc.returnedAt, reopened: !!doc.reopened, lease: doc.lease, stats: doc.stats, autoSubmitted: !!doc.autoSubmitted };
-  if (withFeedback && doc.feedback && (doc.status === 'returned' || doc.reopened)) out.feedback = doc.feedback;
+  // Without who gave it: an advisor's feedback mustn't name them to the student
+  if (withFeedback && doc.feedback && (doc.status === 'returned' || doc.reopened)) { const { by, ...feedback } = doc.feedback; out.feedback = feedback; }
   return out;
 }
 
@@ -2398,14 +2419,16 @@ app.post('/api/write/:docId/sessions', ah(async (req, res) => {
   const got = await docFor(req, core);
   if (!got.isOwner) throw new HttpError(403, 'Only the student can write in their document.');
   const body = req.body || {};
-  const surfaceId = String(body.surfaceId || '').slice(0, 60);
+  const surfaceId = cleanSurfaceId(body.surfaceId);
   if (!surfaceId) throw new HttpError(400, 'surfaceId is required');
   const surf = body.surf === 'panel' ? 'panel' : 'tab';
   // A locked session starts in full screen, which the side panel can't do
   if (surf === 'panel' && got.a.writing?.mode === 'locked') throw new HttpError(409, 'Start locked sessions from the Visor tab in full screen.');
+  if (!got.cls?.studentIds.includes(got.me.id)) throw new HttpError(403, 'You’re no longer in this class. Ask your teacher to add you back.');
   const list = await sweepDocSessions(got.doc, got.a);
   const doc = await repo.getRecord('doc', got.doc.id);
   let active = list.find(s => s.state !== 'ended') || null;
+  const timedOut = active;
   const t = Date.now();
   const { takeover } = sessionsLib.checkStart({ doc, assignment: got.a, userId: got.me.id, active, extAck: doc.extAck, body: { ...body, surf }, now: t });
   if (takeover?.end) {
@@ -2424,10 +2447,11 @@ app.post('/api/write/:docId/sessions', ah(async (req, res) => {
       sessionsLib.evaluateFocus(x, t);
     });
   } else {
-    const ended = list.filter(x => x.state === 'ended' || x.id === active?.id);
-    const deadlineAt = sessionsLib.computeDeadline({ timeLimitMin: got.a.writing?.timeLimitMin, multiplier: classes.multiplierFor(got.cls, got.me.id), used: sessionsLib.usedMs(ended), extraMs: doc.extraTimeMs, now: t });
+    const ended = list.filter(x => x.state === 'ended' || x.id === timedOut?.id);
+    const timing = { timeLimitMin: got.a.writing?.timeLimitMin, multiplier: classes.multiplierFor(got.cls, got.me.id) };
+    const deadlineAt = sessionsLib.computeDeadline({ ...timing, used: sessionsLib.usedMs(ended), extraMs: doc.extraTimeMs, windowEnd: got.a.writing?.windowEnd, now: t });
     if (deadlineAt && Date.parse(deadlineAt) <= t + 5000) throw new HttpError(409, 'You’ve used all of your time for this assignment. Ask your teacher if you need more.');
-    s = sessionsLib.newSession({ doc, assignment: got.a, userId: got.me.id, body: { ...body, surf, surfaceId }, deadlineAt, extAck: doc.extAck, now: t });
+    s = sessionsLib.newSession({ doc, assignment: got.a, userId: got.me.id, body: { ...body, surf, surfaceId }, deadlineAt, windowExtraMs: sessionsLib.windowExtra(timing), extAck: doc.extAck, now: t });
     await repo.putRecord('session', s);
   }
   const lease = { surfaceId, sessionId: s.id, surf, at: new Date(t).toISOString() };
@@ -2483,7 +2507,7 @@ app.post('/api/write/:docId/ops', ah(async (req, res) => {
     s.opsTo = doc.seq;
     if (!s.opsFrom || s.opsFrom > stamped[0]?.n) s.opsFrom = stamped[0]?.n || s.opsFrom;
     s.lastBeat = new Date(nowMs).toISOString();
-    if (s.surfaces[surfaceId]) s.surfaces[surfaceId].lastBeat = s.lastBeat;
+    if (own(s.surfaces, surfaceId)) s.surfaces[surfaceId].lastBeat = s.lastBeat;
     t.put('doc', doc); t.put('session', s);
     return { seq: doc.seq, pastes: stamped.filter(o => o.paste).map(o => ({ n: o.n, origin: o.paste.origin, internal: o.paste.internal })) };
   });
@@ -2657,7 +2681,7 @@ app.post('/api/write/:docId/lease', ah(async (req, res) => {
     });
     return res.json({ lease, doc: docView(doc) });
   }
-  const surfaceId = String(body.surfaceId || '').slice(0, 60);
+  const surfaceId = cleanSurfaceId(body.surfaceId);
   if (!surfaceId) throw new HttpError(400, 'surfaceId is required');
   const surf = body.surf === 'panel' ? 'panel' : 'tab';
   if ((surf === 'panel' || tok.surf === 'panel') && !sessionsLib.panelAllowed(s0)) throw new HttpError(409, PANEL_OFF);
@@ -2677,6 +2701,7 @@ app.post('/api/write/:docId/lease', ah(async (req, res) => {
 // The student ends the session
 app.post('/api/write/:docId/end', ah(async (req, res) => {
   const { s: s0 } = await liveSession(req);
+  if (s0.teacherPaused) throw new HttpError(409, 'Your teacher paused this session. You can end it once they resume it.');
   const a = await repo.getRecord('assignment', s0.assignmentId);
   const s = await repo.updateRecord('session', s0.id, x => sessionsLib.endSession(x, 'student', Date.now()));
   await afterSessionEnded(s, a);
@@ -3468,7 +3493,10 @@ async function runRetentionSweep() {
   for (const cls of Object.values(core.classes)) {
     const days = Number(cls.researchRetentionDays) || 180;
     const before = new Date(Date.now() - days * 864e5).toISOString();
-    deleted += await repo.deleteRecords('research', { classId: cls.id }, { updatedBefore: before });
+    const gone = await repo.deleteRecords('research', { classId: cls.id }, { updatedBefore: before });
+    deleted += gone;
+    // Essays keep a copy of their research for the review page: it goes too
+    if (gone) for (const d of await repo.listRecords('doc', { classId: cls.id })) if (d.process) await repo.updateRecord('doc', d.id, x => { delete x.process; });
   }
   if (deleted) console.log(`retention sweep: deleted ${deleted} research record(s)`);
   return deleted;

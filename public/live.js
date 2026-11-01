@@ -13,7 +13,7 @@ const LIVE_STATUS = {
 };
 const REASON_TEXT = { 'left-tab': 'left the tab', 'left-window': 'left the window', 'exit-fullscreen': 'left full screen', 'ext-missing': 'extension off', offline: 'offline', teacher: 'paused by you', 'blocked-site': 'on a blocked site' };
 // Why a session ended (endReason)
-const END_TEXT = { teacher: 'ended by you', student: 'ended by the student', submitted: 'submitted', timeout: 'no check-in for 3 minutes', 'time-limit': 'time ran out', 'window-closed': 'writing window closed' };
+const END_TEXT = { teacher: 'ended by you', student: 'ended by the student', submitted: 'submitted', timeout: 'no check-in for 3 minutes', 'time-limit': 'time ran out', 'window-closed': 'writing window closed', removed: 'removed from the class' };
 let lb = null; // { data, rows, filter, sort, timer, el }
 
 function renderLiveBoard(el, data) {

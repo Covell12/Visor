@@ -117,7 +117,7 @@ async function wapi(path, { method = 'GET', body, raw, headers: extra, keepalive
   }
   let data = {};
   try { data = await r.json(); } catch {}
-  if (!r.ok) { const e = new Error(data.error || `Request failed (${r.status})`); e.status = r.status; e.data = data; throw e; }
+  if (!r.ok) { const e = new Error(localWhen(data.error) || `Request failed (${r.status})`); e.status = r.status; e.data = data; throw e; }
   return data;
 }
 
