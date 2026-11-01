@@ -1,0 +1,47 @@
+# Deploys the site to Firebase every time you push to the web-app branch on GitHub.
+# You can also run it by hand: GitHub → Actions → "Deploy to Firebase" → Run workflow.
+#
+# Needs two secrets (GitHub repo → Settings → Secrets and variables → Actions):
+#   FIREBASE_SERVICE_ACCOUNT  the JSON key of a Google Cloud service account
+#                             that's allowed to deploy (see README)
+#   VISOR_ENV                 the contents of your .env file (it isn't in GitHub,
+#                             because .gitignore leaves it out)
+name: Deploy to Firebase
+
+on:
+  push:
+    branches: [web-app]
+  workflow_dispatch:
+
+# One deploy at a time; a new push waits for the one before it.
+concurrency:
+  group: firebase-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      - name: Write .env
+        env:
+          VISOR_ENV: ${{ secrets.VISOR_ENV }}
+        run: |
+          if [ -z "$VISOR_ENV" ]; then echo "::error::Add the VISOR_ENV secret (the contents of your .env file)."; exit 1; fi
+          printf '%s\n' "$VISOR_ENV" > .env
+
+      - uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+
+      - name: Deploy
+        run: npx --yes firebase-tools@latest deploy --project visor-ed --non-interactive --force

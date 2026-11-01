@@ -88,6 +88,7 @@ test('the AI summary keeps only quotes from the student’s own lines', () => {
 
 /* ---------------- end to end, with a stand-in Gemini ---------------- */
 const prompts = [];
+const audioSent = []; // the type of each recording the stand-in received
 let gemini;
 function standInGemini() {
   return http.createServer((req, res) => {
@@ -97,6 +98,7 @@ function standInGemini() {
       const parts = JSON.parse(body).contents[0].parts;
       const prompt = parts[0].text;
       prompts.push(prompt);
+      if (parts[1]?.inlineData) audioSent.push(parts[1].inlineData.mimeType);
       let out;
       if (/class discussion at school/.test(prompt) && !/continues an earlier part/.test(prompt)) {
         out = { lines: [{ t: '0:00', speaker: 'Speaker 1', text: 'Let us start with chapter four.' }, { t: '0:12', speaker: 'Speaker 2', text: 'Gatsby throws parties for one person.' }],
@@ -111,6 +113,14 @@ function standInGemini() {
       res.end(JSON.stringify({ candidates: [{ content: { parts: [{ text: JSON.stringify(out) }] } }] }));
     });
   });
+}
+
+// A real, short recording, so it goes through the same MP3 step as any other
+function silentWav(samples = 8000) {
+  const h = Buffer.alloc(44);
+  h.write('RIFF', 0); h.writeUInt32LE(36 + samples * 2, 4); h.write('WAVEfmt ', 8); h.writeUInt32LE(16, 16); h.writeUInt16LE(1, 20); h.writeUInt16LE(1, 22);
+  h.writeUInt32LE(16000, 24); h.writeUInt32LE(32000, 28); h.writeUInt16LE(2, 32); h.writeUInt16LE(16, 34); h.write('data', 36); h.writeUInt32LE(samples * 2, 40);
+  return Buffer.concat([h, Buffer.alloc(samples * 2)]);
 }
 
 let server, base;
@@ -152,16 +162,20 @@ test('a two-segment discussion: hints, voices, measured stats, AI summary, stude
   const d = (await T('POST', `/api/assignments/${a.id}/discussions`, { source: 'recorder' })).data.discussion;
   assert.strictEqual(d.status, 'recording');
 
+  const refused = await T('POST', `/api/discussions/${d.id}/uploads`, { filename: 'notes.txt', mime: 'text/plain', size: 10, k: 0 });
+  assert.deepStrictEqual([refused.status, refused.data.unsupportedType], [415, true]);
+
   // Two 10-minute segments, uploaded as the recorder finishes each one
   for (const k of [0, 1]) {
-    const bytes = Buffer.from(`fake webm audio, segment ${k}`);
-    const up = await T('POST', `/api/discussions/${d.id}/uploads`, { filename: `segment-${k}.webm`, mime: 'audio/webm', size: bytes.length, k });
+    const bytes = silentWav();
+    const up = await T('POST', `/api/discussions/${d.id}/uploads`, { filename: `segment-${k}.wav`, mime: 'audio/wav', size: bytes.length, k });
     assert.strictEqual(up.status, 200);
     await T('PUT', `/api/discussions/${d.id}/uploads/chunk?offset=0`, bytes, { 'Content-Type': 'application/octet-stream', 'X-Upload-Token': up.data.uploadToken });
     r = await T('POST', `/api/discussions/${d.id}/segments`, { uploadToken: up.data.uploadToken, duration: 600, last: k === 1 });
     assert.strictEqual(r.status, 200);
   }
   const done = await until(async () => { const x = (await T('GET', `/api/discussions/${d.id}`)).data.discussion; return x.segments.every(s => s.status === 'ready') && x; });
+  assert.deepStrictEqual(audioSent, Array(2).fill(require('../lib/audioConvert').available() ? 'audio/mp3' : 'audio/wav'));
   // Segment 2 was told about segment 1's voices
   const p2 = prompts.find(p => /continues an earlier part/.test(p));
   assert.ok(p2, 'the second segment’s prompt carries hints');

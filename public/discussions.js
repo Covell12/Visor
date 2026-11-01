@@ -163,8 +163,8 @@ async function discStopRecording() {
 }
 
 function discUpload() {
-  openModal({ title: 'Upload a discussion recording', sub: 'MP3, M4A, WAV, WebM or OGG, up to 60 MB.', body: `
-    <div class="field"><label for="duFile">Recording</label><input id="duFile" type="file" accept="audio/*,.m4a,.mp3,.wav,.webm,.ogg" class="input" /></div>
+  openModal({ title: 'Upload a discussion recording', sub: `${audioFormats().label}, up to ${CFG.maxAudioMB} MB.`, body: `
+    <div class="field"><label for="duFile">Recording</label><input id="duFile" type="file" accept="${recordingAccept()}" class="input" /></div>
     <div class="field"><label for="duTitle">Title <span class="label-note">optional</span></label><input id="duTitle" class="input" placeholder="e.g. Socratic seminar, 3rd period" /></div>`,
     footer: `<button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="duBtn" onclick="discDoUpload()">Upload</button>` });
 }
