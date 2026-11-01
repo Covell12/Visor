@@ -86,14 +86,14 @@ function calKpis(monthName) {
   const inMonth = calShown().filter(e => { const d = new Date(e.at); return d.getFullYear() === cal.month.getFullYear() && d.getMonth() === cal.month.getMonth(); });
   const n = (...kinds) => inMonth.filter(e => kinds.includes(e.kind)).length;
   const last = me.role === 'teacher'
-    ? { label: 'Not published', value: inMonth.filter(e => e.published === false).length, note: 'Hidden from students', tone: 'navy' }
-    : { label: 'Overdue', value: inMonth.filter(e => e.kind === 'due' && isOverdue(e.at, e.status)).length, note: 'Past the due date', tone: 'navy' };
+    ? { label: 'Not published', value: inMonth.filter(e => e.published === false).length, note: 'Still hidden', tone: 'blue' }
+    : { label: 'Overdue', value: inMonth.filter(e => e.kind === 'due' && isOverdue(e.at, e.status)).length, note: 'Past the due date', tone: 'red' };
   return kpiRow([
-    { label: 'Events', value: inMonth.length, note: monthName, tone: 'teal' },
-    { label: 'Due dates', value: n('due'), note: 'Assignments due', tone: 'red' },
-    { label: 'Discussions', value: n('discussion'), note: 'Class meetings', tone: 'amber' },
+    { label: 'Events', value: inMonth.length, note: monthName, tone: 'blue' },
+    { label: 'Due dates', value: n('due'), note: 'Assignments due', tone: 'amber' },
+    { label: 'Discussions', value: n('discussion'), note: 'Class meetings', tone: 'blue' },
     { label: 'Writing windows', value: n('opens', 'closes'), note: 'Opening and closing', tone: 'green' },
-    { label: 'Classes', value: new Set(inMonth.map(e => e.classId)).size, note: 'With events', tone: 'violet' },
+    { label: 'Classes', value: new Set(inMonth.map(e => e.classId)).size, note: 'With events', tone: 'green' },
     last
   ]);
 }

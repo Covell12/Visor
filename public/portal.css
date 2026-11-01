@@ -4,13 +4,13 @@
    calendar, in Visor's "lens" look (see app.css). */
 
 /* ---------- course colours (lib/classes.js COURSE_COLORS) ---------- */
-.cc-teal { --cc: #1F8FB5; } .cc-green { --cc: #3C9A5F; } .cc-navy { --cc: #2F5DA8; } .cc-violet { --cc: #7454C6; }
+.cc-teal { --cc: #1E9BC4; } .cc-green { --cc: #3C9A5F; } .cc-navy { --cc: #2F5DA8; } .cc-violet { --cc: #7454C6; }
 .cc-magenta { --cc: #B13F8E; } .cc-red { --cc: #C9483F; } .cc-orange { --cc: #D9772B; } .cc-gold { --cc: #C2961C; }
-.cc-slate { --cc: #5E6E7D; } .cc-forest { --cc: #23887A; }
+.cc-slate { --cc: #5E6E7D; } .cc-forest { --cc: #2E7D4F; }
 
 /* A class's banner: its colour, a lens motif from Visor's logo (picked from
    the class id) and its initials */
-.course-art { position: relative; overflow: hidden; color: #fff; --cc-dark: color-mix(in srgb, var(--cc, #5E6E7D) 60%, #0B1F28);
+.course-art { position: relative; overflow: hidden; color: #fff; --cc-dark: color-mix(in srgb, var(--cc, #5E6E7D) 60%, #14293A);
   background: var(--motif, none) center / cover no-repeat, linear-gradient(180deg, rgba(255,255,255,.10), rgba(255,255,255,0) 55%), linear-gradient(125deg, var(--cc, #5E6E7D), var(--cc-dark)); }
 .course-art.pat-0 { --motif: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 120' preserveAspectRatio='xMidYMid slice'><g fill='none' stroke='white' stroke-opacity='.32' stroke-width='2.5'><circle cx='136' cy='60' r='38'/><circle cx='170' cy='60' r='38'/></g></svg>"); }
 .course-art.pat-1 { --motif: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 120' preserveAspectRatio='xMidYMid slice'><g fill='none' stroke='white' stroke-opacity='.32' stroke-width='2.5'><circle cx='22' cy='112' r='52'/><circle cx='70' cy='112' r='52'/></g></svg>"); }
@@ -50,7 +50,7 @@
 /* ---------- page frames ---------- */
 .portal { max-width: 1320px; margin: 0 auto; padding: 34px 36px 48px; }
 .home-hello { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 22px; }
-.home-hello h1 { margin: 0; font-size: 21px; line-height: 1.25; font-weight: 600; letter-spacing: -0.01em; }
+.home-hello h1 { margin: 0; font-size: 23px; line-height: 1.25; font-weight: 650; letter-spacing: -0.015em; }
 .home-hello p { margin: 3px 0 0; font-size: 14px; color: var(--ink-2); }
 .home-grid { display: grid; grid-template-columns: minmax(0, 1fr) 312px; gap: 28px; align-items: start; }
 .home-h { margin: 0 0 10px; font-size: 14px; font-weight: 600; letter-spacing: 0; }
@@ -59,7 +59,7 @@
 /* A live session: a band across the top of Home */
 .live-bands { display: flex; flex-direction: column; gap: 8px; margin-bottom: 22px; }
 .live-bands:empty { display: none; }
-.live-band { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 12px 14px 12px 18px; border-radius: var(--r-lg); background: linear-gradient(90deg, #DDF3E4, #E0F0F5); box-shadow: inset 0 0 0 1px #BFE3CC, inset 3px 0 0 var(--green-deep); }
+.live-band { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 12px 14px 12px 18px; border-radius: var(--r-lg); background: linear-gradient(90deg, var(--green-soft), var(--blue-soft)); box-shadow: inset 0 0 0 1px #CFE7D6, inset 3px 0 0 var(--green-deep); }
 .live-band .live-tag { background: #fff; }
 .live-band-t { flex: 1 1 300px; min-width: 0; }
 .live-band-t span { color: #38596A; }
@@ -67,7 +67,7 @@
 .live-band .btn svg, .next-up-btn svg { width: 16px; height: 16px; }
 
 /* A student's next piece of work */
-.next-up { display: flex; align-items: center; gap: 14px 24px; flex-wrap: wrap; margin-bottom: 22px; padding: 14px 16px 14px 20px; border-radius: var(--r-lg); background: linear-gradient(90deg, #DCEFF5, #EEF6F9); box-shadow: inset 0 0 0 1px #BEDEE9, inset 3px 0 0 var(--brand); }
+.next-up { display: flex; align-items: center; gap: 14px 24px; flex-wrap: wrap; margin-bottom: 22px; padding: 14px 16px 14px 20px; border-radius: var(--r-lg); background: linear-gradient(90deg, var(--blue-soft), var(--green-soft)); box-shadow: inset 0 0 0 1px #C9E6F1, inset 3px 0 0 var(--blue-deep); }
 .next-up-t { flex: 1 1 320px; min-width: 0; }
 .next-up-k { font-size: 12px; font-weight: 600; color: #38596A; }
 .next-up h2 { margin: 1px 0; font-size: 16px; line-height: 1.3; font-weight: 600; letter-spacing: -0.005em; overflow-wrap: anywhere; }
@@ -117,8 +117,8 @@
 .up-row { display: flex; align-items: center; gap: 12px; padding: 9px 2px; border-bottom: 1px solid var(--line); color: inherit; text-decoration: none; transition: background-color .15s; }
 a.ev-row:hover, a.up-row:hover { background: var(--surface-2); }
 .up-date { display: flex; flex-direction: column; align-items: center; justify-content: center; flex: none; width: 40px; height: 42px; border-radius: 6px; overflow: hidden; background: color-mix(in srgb, var(--cc, #5E6E7D) 10%, #fff); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--cc, #5E6E7D) 34%, #fff); line-height: 1.05; }
-.up-date i { align-self: stretch; padding: 2px 0 1px; background: color-mix(in srgb, var(--cc, #5E6E7D) 74%, #0B1F28); color: #fff; font-style: normal; font-size: 9.5px; font-weight: 700; letter-spacing: .04em; text-align: center; text-transform: uppercase; }
-.up-date b { flex: 1; display: flex; align-items: center; font-size: 14.5px; font-weight: 650; color: color-mix(in srgb, var(--cc, #5E6E7D) 62%, #0B1F28); font-variant-numeric: tabular-nums; }
+.up-date i { align-self: stretch; padding: 2px 0 1px; background: color-mix(in srgb, var(--cc, #5E6E7D) 74%, #14293A); color: #fff; font-style: normal; font-size: 9.5px; font-weight: 700; letter-spacing: .04em; text-align: center; text-transform: uppercase; }
+.up-date b { flex: 1; display: flex; align-items: center; font-size: 14.5px; font-weight: 650; color: color-mix(in srgb, var(--cc, #5E6E7D) 62%, #14293A); font-variant-numeric: tabular-nums; }
 .up-when { flex: none; font-size: 12px; color: var(--ink-2); white-space: nowrap; }
 .ev-main { min-width: 0; flex: 1; }
 .ev-title { display: block; font-size: 14px; font-weight: 600; line-height: 1.3; overflow-wrap: anywhere; }
@@ -132,15 +132,15 @@ a.side-stat:hover { background: var(--surface-2); }
 .ext-line.ok { color: var(--green-deep); }
 
 /* ---------- the class page: its cover, its tabs, then the page ---------- */
-.course { --cc-ink: color-mix(in srgb, var(--cc, var(--brand)) 62%, #0B1F28); --cc-soft: color-mix(in srgb, var(--cc, var(--brand)) 13%, #fff); }
+.course { --cc-ink: color-mix(in srgb, var(--cc, var(--brand)) 62%, #14293A); --cc-soft: color-mix(in srgb, var(--cc, var(--brand)) 13%, #fff); }
 .course-body { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 28px; align-items: start; max-width: 1320px; margin: 0 auto; padding: 24px 36px 48px; }
 .course.no-right .course-body { grid-template-columns: minmax(0, 1fr); }
 .course-main { min-width: 0; }
 .course-right { min-width: 0; }
 
 /* The cover: the class's banner across the top of the sheet, its name on it */
-.course-hero { position: relative; display: flex; align-items: flex-end; min-height: 104px; box-sizing: border-box; padding: 20px 36px 16px; overflow: hidden;  color: #fff; }
-.course-hero::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(8,24,32,.05), rgba(8,24,32,.52)); }
+.course-hero { position: relative; display: flex; align-items: flex-end; min-height: 104px; box-sizing: border-box; padding: 20px 36px 16px; overflow: hidden; border-radius: var(--r-xl) var(--r-xl) 0 0; color: #fff; }
+.course-hero::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(8,24,32,.14), rgba(8,24,32,.56)); }
 .course-cover { position: absolute; inset: 0; }
 .course-cover .course-initials { display: none; }
 .course-hero-text { position: relative; z-index: 1; min-width: 0; max-width: min(760px, 100%); }
@@ -225,15 +225,15 @@ a.side-stat:hover { background: var(--surface-2); }
 .mat-grip { width: 12px; flex: none; margin-right: -4px; color: var(--ink-3); cursor: grab; opacity: 0; display: flex; }
 .mat-grip svg { width: 12px; height: 18px; }
 .mat-row:hover .mat-grip, .mat-row:focus-within .mat-grip { opacity: 1; }
-.mat-ic { width: 30px; height: 30px; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; flex: none; }
-.mat-ic svg { width: 16px; height: 16px; }
-.t-writing { background: #DFF0F6; color: #0F6F90; }
+.mat-ic { width: 36px; height: 36px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; flex: none; }
+.mat-ic svg { width: 18px; height: 18px; }
+.t-writing { background: #E1F2FA; color: #0E6E9C; }
 .t-group { background: var(--violet-soft); color: #5B3FB0; }
 .t-discussion { background: var(--amber-soft); color: #94600E; }
 .t-folder { background: color-mix(in srgb, var(--fc, #8396A3) 14%, #fff); color: var(--fc, #6F8593); }
 .t-folder svg { width: 20px; height: 20px; }
-.fc-teal { --fc: #1F8FB5; } .fc-green { --fc: #3C9A5F; } .fc-navy { --fc: #2F5DA8; } .fc-violet { --fc: #7454C6; } .fc-magenta { --fc: #B13F8E; }
-.fc-red { --fc: #C9483F; } .fc-orange { --fc: #D9772B; } .fc-gold { --fc: #C2961C; } .fc-slate { --fc: #5E6E7D; } .fc-forest { --fc: #23887A; }
+.fc-teal { --fc: #1E9BC4; } .fc-green { --fc: #3C9A5F; } .fc-navy { --fc: #2F5DA8; } .fc-violet { --fc: #7454C6; } .fc-magenta { --fc: #B13F8E; }
+.fc-red { --fc: #C9483F; } .fc-orange { --fc: #D9772B; } .fc-gold { --fc: #C2961C; } .fc-slate { --fc: #5E6E7D; } .fc-forest { --fc: #2E7D4F; }
 .mat-body { flex: 1; min-width: 0; }
 .mat-title { font-weight: 600; font-size: 15px; color: var(--ink); text-decoration: none; overflow-wrap: anywhere; }
 a.mat-title:hover { color: var(--brand); }
@@ -336,8 +336,8 @@ a.mat-title:hover { color: var(--brand); }
 
 /* ---------- the assignment page inside the course ---------- */
 .asg-head { display: flex; align-items: flex-start; gap: 14px; flex-wrap: wrap; }
-.asg-head .mat-ic { width: 38px; height: 38px; border-radius: 6px; }
-.asg-head .mat-ic svg { width: 19px; height: 19px; }
+.asg-head .mat-ic { width: 48px; height: 48px; border-radius: 50%; }
+.asg-head .mat-ic svg { width: 22px; height: 22px; }
 .asg-title { flex: 1; min-width: 220px; }
 .asg-meta { display: flex; align-items: center; gap: 6px 12px; flex-wrap: wrap; margin-top: 5px; font-size: 13.5px; color: var(--ink-2); }
 .asg-meta .overdue { color: #B23B37; font-weight: 600; }
@@ -407,7 +407,7 @@ a.mat-title:hover { color: var(--brand); }
   .course-tabs a { padding: 0 12px; }
   .course-tabs a svg { display: none; }
   /* Title across the row, the settings beside it, the numbers on a line under it */
-  .mat-row { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; gap: 6px 10px; }
+  .mat-row { display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; gap: 6px 10px; }
   .mat-row .mat-side { grid-column: 2 / 4; justify-content: flex-start; gap: 6px; }
   .mat-row .mat-side:has(.dd) { display: contents; }
   .mat-row .dd { grid-column: 3; grid-row: 1; }
@@ -453,7 +453,7 @@ details > summary { transition: color .15s; }
 
 /* Search (search.js): a box, then results grouped by kind */
 .vnav-search { width: 100%; border: 0; background: none; font: inherit; text-align: left; cursor: pointer; }
-.vnav-search kbd { margin-left: auto; padding: 1px 6px; border-radius: 6px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--line); color: var(--ink-2); font: 600 11px var(--font); }
+.vnav-search kbd { margin-left: auto; padding: 1px 6px; border-radius: 6px; background: #fff; box-shadow: inset 0 0 0 1px var(--line); color: var(--ink-2); font: 600 11px var(--font); }
 .jump-box { position: relative; }
 .jump-box svg { position: absolute; left: 13px; top: 50%; width: 18px; height: 18px; transform: translateY(-50%); color: var(--ink-3); pointer-events: none; }
 .jump-box .input { padding-left: 40px; }
@@ -466,11 +466,11 @@ details > summary { transition: color .15s; }
 .jump-empty { padding: 26px 10px; color: var(--ink-2); text-align: center; }
 
 /* ---------- numbers and status ----------
-   One set of status colours everywhere: green returned, amber to review, teal
+   One set of status colours everywhere: green returned, amber to review, blue
    in progress, the empty track not started. */
-.s-done { background: #2F9E5F; }
+.s-done { background: var(--green-deep); }
 .s-review { background: #E9A23A; }
-.s-going { background: #1E9BC4; }
+.s-going { background: var(--blue-deep); }
 .s-rest { background: #DCE6EB; }
 .sbar { display: flex; height: 7px; overflow: hidden; border-radius: 2px; background: #DCE6EB; }
 .sbar i { display: block; min-width: 2px; height: 100%; }
@@ -483,12 +483,16 @@ details > summary { transition: color .15s; }
 
 .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(148px, 1fr)); gap: 10px; margin-bottom: 20px; }
 .kpis.thirds { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-.kpi { --k: var(--brand); --k-ink: color-mix(in srgb, var(--k) 76%, #0B1F28); position: relative; display: flex; flex-direction: column; min-width: 0; padding: 10px 12px 10px 15px; overflow: hidden; border-radius: var(--r); background: linear-gradient(120deg, color-mix(in srgb, var(--k) 12%, #fff), #fff 78%); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--k) 26%, var(--line)), inset 3px 0 0 var(--k); }
+.kpi { --k: var(--brand); --k-bar: var(--k); --k-ink: color-mix(in srgb, var(--k) 80%, #14293A); position: relative; display: flex; flex-direction: column; min-width: 0; padding: 12px 14px 11px; overflow: hidden; border-radius: var(--r-lg); background: linear-gradient(135deg, color-mix(in srgb, var(--k) 8%, #fff), #fff 68%); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--k) 20%, var(--line)); }
+.kpi::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 3px; background: var(--k-bar); }
+/* The logo's two lenses in the corner, in the tile's colour */
+.kpi::after { content: ""; position: absolute; top: -14px; right: -18px; width: 80px; height: 80px; background: var(--k); opacity: .15; pointer-events: none; -webkit-mask: var(--lens) center / contain no-repeat; mask: var(--lens) center / contain no-repeat; --lens: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 92 92'><g fill='none' stroke='black' stroke-width='1.5'><circle cx='36' cy='46' r='30'/><circle cx='56' cy='46' r='30'/></g></svg>"); }
 .kpi-k { color: var(--k-ink); font-size: 11.5px; font-weight: 650; letter-spacing: .01em; }
 .kpi-v { margin: 1px 0 2px; color: var(--ink); font-size: 23px; font-weight: 650; line-height: 1.2; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .kpi .sbar { margin: 2px 0 4px; }
 .kpi-n { margin-top: auto; color: var(--ink-2); font-size: 12px; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.k-teal { --k: #127C9F; } .k-navy { --k: #2F5DA8; } .k-green { --k: #2F8F55; } .k-amber { --k: #C27C12; } .k-violet { --k: #6B4FC8; } .k-red { --k: #C9483F; }
+/* Blue and green are Visor's own and carry its gradient; amber and red mean something needs a look */
+.k-blue { --k: #0E7BAB; --k-bar: var(--grad); } .k-green { --k: #2E8549; --k-bar: var(--grad); } .k-amber { --k: #C27C12; } .k-red { --k: #C9483F; }
 
 /* Fine line-work over a class's colour; a chosen background keeps its own */
 .course-art:not(.has-bg)::before { content: ""; position: absolute; inset: 0; background: repeating-linear-gradient(0deg, rgba(255,255,255,.075) 0 1px, transparent 1px 12px), repeating-linear-gradient(90deg, rgba(255,255,255,.075) 0 1px, transparent 1px 12px), radial-gradient(70% 130% at 100% 0%, rgba(255,255,255,.2), transparent 62%); pointer-events: none; }
@@ -499,7 +503,7 @@ details > summary { transition: color .15s; }
 
 .mchip { display: inline-flex; align-items: center; height: 18px; margin-left: 6px; padding: 0 6px; border-radius: 4px; background: var(--surface); color: var(--ink-2); font-size: 11.5px; font-style: normal; font-weight: 600; white-space: nowrap; }
 .mchip.locked { background: #FBE7E6; color: #A33631; }
-.mchip.open { background: #DFF0F6; color: #0F6F90; }
+.mchip.open { background: #E1F2FA; color: #0E6E9C; }
 .rel { font-weight: 600; color: var(--brand-hover); }
 .rel.soon { color: #A1640B; }
 .rel.late { color: #B23B37; }

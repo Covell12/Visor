@@ -331,24 +331,24 @@ function homeKpis() {
     const expected = sum('expected'), handed = sum('handedIn');
     const next = list.flatMap(c => c.upcoming || []).filter(u => Date.parse(u.dueAt) >= Date.now()).sort((a, b) => (a.dueAt < b.dueAt ? -1 : 1))[0];
     return kpiRow([
-      { label: 'Classes', value: list.length, note: vcPlural(sum('assignmentCount'), 'assignment'), tone: 'teal' },
-      { label: 'Students', value: sum('studentCount'), note: `${sum('words').toLocaleString()} words written`, tone: 'navy' },
+      { label: 'Classes', value: list.length, note: vcPlural(sum('assignmentCount'), 'assignment'), tone: 'blue' },
+      { label: 'Students', value: sum('studentCount'), note: `${sum('words').toLocaleString()} words written`, tone: 'blue' },
       { label: 'Writing now', value: sum('activeSessions'), note: sum('inProgress') ? `${sum('inProgress')} in progress` : 'None in progress', tone: 'green' },
       { label: 'To review', value: sum('toReview'), note: `${sum('returned')} returned`, tone: 'amber' },
-      { label: 'Handed in', value: expected ? `${Math.round(100 * handed / expected)}%` : '–', note: `${handed} of ${expected}`, tone: 'violet',
+      { label: 'Handed in', value: expected ? `${Math.round(100 * handed / expected)}%` : '–', note: `${handed} of ${expected}`, tone: 'green',
         bar: stackBar(classParts(sum('returned'), handed - sum('returned'), sum('inProgress')), expected) },
-      { label: 'Due in 7 days', value: sum('dueThisWeek'), note: next ? `Next ${vcRelative(next.dueAt)}` : 'Nothing scheduled', tone: 'red' }
+      { label: 'Due in 7 days', value: sum('dueThisWeek'), note: next ? `Next ${vcRelative(next.dueAt)}` : 'Nothing scheduled', tone: 'amber' }
     ]);
   }
   const todo = home.data.dash.todo || [], writing = todo.filter(t => t.status), n = s => writing.filter(t => t.status === s).length;
   const due = todo.filter(t => t.dueAt && !isDone(t.status) && Date.parse(t.dueAt) >= Date.now() && Date.parse(t.dueAt) < week);
   const late = writing.filter(t => isOverdue(t.dueAt, t.status)).length, handed = n('submitted') + n('returned');
   return kpiRow([
-    { label: 'Classes', value: list.length, note: vcPlural(todo.length, 'assignment'), tone: 'teal' },
+    { label: 'Classes', value: list.length, note: vcPlural(todo.length, 'assignment'), tone: 'blue' },
     { label: 'Due in 7 days', value: due.length, note: due[0] ? `Next ${vcRelative(due[0].dueAt)}` : 'Nothing scheduled', tone: 'amber' },
     { label: 'Overdue', value: late, note: late ? 'Past the due date' : 'None', tone: 'red' },
     { label: 'In progress', value: n('in-progress'), note: 'Started, not handed in', tone: 'green' },
-    { label: 'Handed in', value: writing.length ? `${Math.round(100 * handed / writing.length)}%` : '–', note: `${handed} of ${writing.length}`, tone: 'violet',
+    { label: 'Handed in', value: writing.length ? `${Math.round(100 * handed / writing.length)}%` : '–', note: `${handed} of ${writing.length}`, tone: 'green',
       bar: stackBar([[n('returned'), 'done', 'returned'], [n('submitted'), 'review', 'submitted'], [n('in-progress'), 'going', 'in progress']], writing.length) }
   ]);
 }

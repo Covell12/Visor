@@ -19,7 +19,7 @@ const timeAgo = iso => {
 const colorClass = i => `c${i % 8}`;
 const PALETTE = ['#1E9BC4', '#4CA35C', '#E39B2E', '#7C5CD6', '#D9534F', '#2A9D8F', '#B5179E', '#6C757D'];
 // Dark enough for white initials
-const AVATAR_TONES = ['#127C9F', '#2F7F45', '#A5620C', '#6246BE', '#B83F3B', '#1F7F73', '#9C2A87', '#2F5DA8'];
+const AVATAR_TONES = ['#0E7BAB', '#2E8549', '#2F5DA8', '#A5620C', '#4E6878'];
 // Avatar circle: uses the person's chosen color, otherwise one picked from their name
 function avatarHtml(person, size = '') {
   const hash = [...(person?.name || '')].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7);

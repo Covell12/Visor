@@ -486,30 +486,30 @@ function assignmentRightHtml() {
 // The numbers at the top of a writing assignment
 function assignmentKpis() {
   const { assignment: a, isTeacher } = ap.data;
-  const due = { label: 'Due', value: a.dueAt ? vcRelative(a.dueAt) : 'No date', note: a.dueAt ? vcDateTime(a.dueAt) : 'No due date set', tone: 'red' };
+  const due = { label: 'Due', value: a.dueAt ? vcRelative(a.dueAt) : 'No date', note: a.dueAt ? vcDateTime(a.dueAt) : 'No due date set', tone: a.dueAt && relTone(a.dueAt) === 'late' ? 'red' : 'amber' };
   if (a.type === 'group' && isTeacher) {
     const groups = ap.data.groups || [], all = ap.data.students?.length || 0, placed = groups.reduce((t, g) => t + g.students.length, 0);
-    return kpiRow([{ label: 'Groups', value: groups.length, note: 'In this project', tone: 'violet' }, { label: 'In a group', value: placed, note: `of ${vcPlural(all, 'student')}`, tone: 'teal' }, due], 'thirds');
+    return kpiRow([{ label: 'Groups', value: groups.length, note: 'In this project', tone: 'green' }, { label: 'In a group', value: placed, note: `of ${vcPlural(all, 'student')}`, tone: 'blue' }, due], 'thirds');
   }
   if (a.type === 'discussion' && isTeacher) {
     const date = a.discussion?.date;
-    return kpiRow([{ label: 'Meets', value: date ? vcRelative(date) : 'Not set', note: date ? vcDateTime(date) : 'No date set', tone: 'amber' }, { label: 'Recordings', value: (ap.data.discussions || []).length, note: 'Of this discussion', tone: 'teal' }]);
+    return kpiRow([{ label: 'Meets', value: date ? vcRelative(date) : 'Not set', note: date ? vcDateTime(date) : 'No date set', tone: 'amber' }, { label: 'Recordings', value: (ap.data.discussions || []).length, note: 'Of this discussion', tone: 'blue' }]);
   }
   if (a.type !== 'writing') return '';
   const length = a.writing.minWords || a.writing.maxWords ? `${a.writing.minWords || 0}–${a.writing.maxWords || '∞'} words` : 'Any length';
   if (!isTeacher) {
     const d = ap.data.doc, st = d?.status || 'not-started';
-    return kpiRow([{ label: 'Status', value: STATUS_LABEL[st] || st, note: d?.submittedAt ? `Submitted ${vcDate(d.submittedAt)}` : 'Not handed in', tone: 'teal' },
-      { label: 'Words', value: (d?.words || 0).toLocaleString(), note: length, tone: 'violet' }, due], 'thirds');
+    return kpiRow([{ label: 'Status', value: STATUS_LABEL[st] || st, note: d?.submittedAt ? `Submitted ${vcDate(d.submittedAt)}` : 'Not handed in', tone: 'blue' },
+      { label: 'Words', value: (d?.words || 0).toLocaleString(), note: length, tone: 'green' }, due], 'thirds');
   }
   const subs = ap.data.submissions || [], n = st => subs.filter(s => s.status === st).length, handed = n('submitted') + n('returned');
   const words = subs.reduce((t, s) => t + (s.words || 0), 0);
   return kpiRow([
     { label: 'To review', value: n('submitted'), note: 'Waiting for you', tone: 'amber' },
     { label: 'Returned', value: n('returned'), note: 'With feedback', tone: 'green' },
-    { label: 'In progress', value: n('in-progress'), note: `${words.toLocaleString()} words so far`, tone: 'teal' },
-    { label: 'Not started', value: n('not-started'), note: `of ${vcPlural(subs.length, 'student')}`, tone: 'navy' },
-    { label: 'Handed in', value: subs.length ? `${Math.round(100 * handed / subs.length)}%` : '–', note: `${handed} of ${subs.length}`, tone: 'violet',
+    { label: 'In progress', value: n('in-progress'), note: `${words.toLocaleString()} words so far`, tone: 'blue' },
+    { label: 'Not started', value: n('not-started'), note: `of ${vcPlural(subs.length, 'student')}`, tone: 'blue' },
+    { label: 'Handed in', value: subs.length ? `${Math.round(100 * handed / subs.length)}%` : '–', note: `${handed} of ${subs.length}`, tone: 'green',
       bar: stackBar(classParts(n('returned'), n('submitted'), n('in-progress')), subs.length) },
     due
   ], 'thirds');

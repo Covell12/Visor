@@ -158,11 +158,11 @@ function reviewKpis(report, a) {
   const t = report.totals, w = a.writing || {};
   const time = ms => fmtMins((ms || 0) / 60000);
   return kpiRow([
-    { label: 'Words', value: t.studentWords.toLocaleString(), note: w.minWords || w.maxWords ? `Asked for ${w.minWords || 0}–${w.maxWords || '∞'}` : 'No length set', tone: 'teal' },
-    { label: 'Time writing', value: time(t.activeMs), note: vcPlural(t.sessions, 'session'), tone: 'navy' },
-    { label: 'Pauses', value: t.pauses, note: `${time(t.awayMs)} away`, tone: 'amber' },
-    { label: 'Pastes', value: t.pastes, note: 'Into the document', tone: 'red' },
-    { label: 'Research', value: time(t.researchMs), note: vcPlural(report.research.events.length, 'event'), tone: 'violet' },
+    { label: 'Words', value: t.studentWords.toLocaleString(), note: w.minWords || w.maxWords ? `Asked for ${w.minWords || 0}–${w.maxWords || '∞'}` : 'No length set', tone: 'blue' },
+    { label: 'Time writing', value: time(t.activeMs), note: vcPlural(t.sessions, 'session'), tone: 'blue' },
+    { label: 'Pauses', value: t.pauses, note: `${time(t.awayMs)} away`, tone: 'blue' },
+    { label: 'Pastes', value: t.pastes, note: 'Into the document', tone: 'amber' },
+    { label: 'Research', value: time(t.researchMs), note: vcPlural(report.research.events.length, 'event'), tone: 'green' },
     { label: 'Typed', value: `${report.survival.pct?.typed ?? 0}%`, note: 'Of the final text', tone: 'green' }
   ]);
 }

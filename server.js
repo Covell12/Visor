@@ -390,7 +390,7 @@ const escHtml = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&
 function emailHtml(paragraphs, button, closing = []) {
   const para = t => `<p style="margin:0 0 16px;font-size:15px;line-height:1.55;color:#12303B;">${escHtml(t)}</p>`;
   const p = paragraphs.map(para).join('');
-  const b = button ? `<p style="margin:24px 0;"><a href="${escHtml(button.url)}" style="display:inline-block;padding:11px 20px;border-radius:8px;background:#127C9F;color:#ffffff;font-size:15px;font-weight:600;text-decoration:none;">${escHtml(button.label)}</a></p>` : '';
+  const b = button ? `<p style="margin:24px 0;"><a href="${escHtml(button.url)}" style="display:inline-block;padding:11px 20px;border-radius:8px;background:#0E7BAB;color:#ffffff;font-size:15px;font-weight:600;text-decoration:none;">${escHtml(button.label)}</a></p>` : '';
   return `<div style="max-width:480px;margin:0 auto;padding:28px 24px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;"><img src="${escHtml(siteUrl())}/logo.png" alt="Visor" width="48" style="display:block;margin-bottom:20px;" />${p}${b}${closing.map(para).join('')}<p style="margin:24px 0 0;font-size:13px;color:#527280;">Visor Classroom</p></div>`;
 }
 
