@@ -1014,11 +1014,12 @@ function writerConflict(data, notLeaseHolder) {
     writerSetSaved('saved');
     return writerRefresh();
   }
-  if (landed >= 0) {
+  if (landed > 0) {
     writerSetSaved(WR.queue.length ? 'saving' : 'saved');
     if (WR.queue.length) writerRetrySoon();
     return;
   }
+  // Nothing arrived, so sending the same edits again would be refused again
   if (writerRebase(data)) return;
   const text = WR.queueDetached ? '' : writerText();
   WR.queue = []; WR.queueDetached = false;

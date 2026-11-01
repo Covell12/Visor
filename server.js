@@ -2492,7 +2492,7 @@ app.post('/api/write/:docId/ops', ah(async (req, res) => {
     endedNow = sessionsLib.sweep(s, nowMs, { windowEnd: a?.writing?.windowEnd });
     // Time ran out with these still on their way: they count, as long as this
     // surface was writing in this session and nothing has been written since
-    const lastWords = sessionsLib.inFinalSave(s, nowMs) && !!own(s.surfaces, String(body.surfaceId || '')) && (!doc.lease || doc.lease.sessionId === s.id) && (doc.status !== 'submitted' || doc.autoSubmitted);
+    const lastWords = sessionsLib.inFinalSave(s, nowMs) && !!own(s.surfaces, String(body.surfaceId || '')) && (!doc.lease || doc.lease.sessionId === s.id) && (doc.status !== 'submitted' || doc.autoSubmitted || doc.submittedBy === 'teacher');
     if (s.state === 'ended' && !lastWords) { t.put('session', s); return { ended: s }; }
     if (lastWords) finished = s;
     if (!lastWords && s.teacherPaused) throw new HttpError(423, 'Your teacher paused the session.');
@@ -2502,7 +2502,7 @@ app.post('/api/write/:docId/ops', ah(async (req, res) => {
     const chunkIds = writing.chunkIdsFor(doc.id, Number(body.baseSeq), body.ops.length);
     const chunks = {};
     if (Number(body.baseSeq) === doc.seq) for (const id of chunkIds) chunks[id] = await t.get('opchunk', id);
-    const stamped = writing.applyBatch(doc, body.ops, { baseSeq: Number(body.baseSeq), textHash: body.textHash, sid: s.id, surf: tok.surf === 'panel' || doc.lease.surf === 'panel' ? 'panel' : 'tab', now: nowMs });
+    const stamped = writing.applyBatch(doc, body.ops, { baseSeq: Number(body.baseSeq), textHash: body.textHash, sid: s.id, surf: tok.surf === 'panel' || doc.lease?.surf === 'panel' ? 'panel' : 'tab', now: nowMs });
     research.matchPasteOrigins(stamped, copies, { studentId: s.studentId, now: nowMs });
     writing.updateStats(doc, stamped);
     for (const c of writing.appendToChunks(doc.id, chunks, stamped)) t.put('opchunk', { ...c, classId: doc.classId, assignmentId: doc.assignmentId, studentId: doc.studentId });

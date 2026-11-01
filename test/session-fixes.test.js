@@ -250,3 +250,15 @@ test('research keeps only web addresses, so a teacher can’t be handed a script
   assert.strictEqual(research.cleanEvent({ type: 'search', t: T, query: 'x', engine: 'google', url: 'https://example.com/a' }, T).url, 'https://example.com/a');
 });
 
+test('“End all and submit” keeps the last words typed before the teacher pressed it', async () => {
+  const { t, st, doc, a } = await essay(null);
+  const r = await st.post(`/api/write/${doc.id}/sessions`, { surfaceId: 'one', surf: 'tab' });
+  const H = { 'X-Visor-Session': r.data.token };
+  const end = await t.post(`/api/assignments/${a.id}/live/action`, { action: 'end-all-submit' });
+  assert.strictEqual(end.status, 200, JSON.stringify(end.data));
+  assert.strictEqual((await repo.getRecord('doc', doc.id)).status, 'submitted');
+  const w = await st.post(`/api/write/${doc.id}/ops`, { baseSeq: 0, ops: [{ k: 'i', at: 0, s: 'Last line', t: Date.now(), src: 'type' }], surfaceId: 'one' }, H);
+  assert.strictEqual(w.status, 200, JSON.stringify(w.data));
+  assert.strictEqual((await repo.getRecord('doc', doc.id)).text, 'Last line');
+});
+
