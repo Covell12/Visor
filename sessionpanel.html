@@ -43,6 +43,15 @@
       </div>
       <div id="sp-cite-status" class="sp-cite-status" role="status" aria-live="polite"></div>
     </section>
+    <!-- The page in front: its reliability grade (source-grade.js) and why -->
+    <section class="sp-card sp-grade" id="sp-grade" aria-label="This page" hidden>
+      <button type="button" class="sp-grade-row" id="sp-grade-btn" aria-expanded="false" aria-controls="sp-grade-more">
+        <span class="sp-grade-letter" id="sp-grade-letter" aria-hidden="true"></span>
+        <span class="sp-grade-text"><b id="sp-grade-word"></b><span id="sp-grade-label"></span></span>
+        <span class="sp-grade-why">Why?</span>
+      </button>
+      <div class="sp-grade-more" id="sp-grade-more" hidden></div>
+    </section>
     <div class="sp-frame-wrap"><iframe id="sp-frame" class="sp-frame" title="Your document" allow="clipboard-read; clipboard-write"></iframe></div>
   </main>
 
@@ -69,6 +78,7 @@
   </footer>
 
   <script src="config.js"></script>
+  <script src="source-grade.js"></script>
   <script src="sessionpanel.js"></script>
 </body>
 </html>
