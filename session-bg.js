@@ -514,7 +514,7 @@ async function requestHostPermission() {
   return new Promise((resolve) => {
     permissionWaiters.push(resolve);
     if (permissionWaiters.length === 1) {
-      chrome.windows.create({ url: 'permission.html', type: 'popup', width: 440, height: 420, focused: true }).catch(() => {
+      chrome.windows.create({ url: 'permission.html', type: 'popup', width: 440, height: 460, focused: true }).catch(() => {
         permissionWaiters.splice(0).forEach((r) => r({ ok: false, granted: false }));
       });
     }
