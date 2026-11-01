@@ -30,8 +30,8 @@
 .dui-mb-item.is-open, .dui-mb-item[aria-expanded="true"] { background: var(--dui-hover); }
 
 /* ---------- toolbar ---------- */
-.dui-toolbar { display: flex; align-items: center; flex-wrap: nowrap; height: 40px; padding: 0 8px; gap: 1px; background: var(--dui-bar); border-radius: 24px; overflow: hidden; white-space: nowrap; font: 14px/20px var(--dui-ui); color: var(--dui-icon); user-select: none; -webkit-user-select: none; box-sizing: border-box; width: 100%; min-width: 0; }
-.dui-toolbar.is-compact { height: 36px; padding: 0 4px; border-radius: 18px; }
+.dui-toolbar { display: flex; align-items: center; flex-wrap: nowrap; height: 40px; padding: 0 8px; gap: 1px; background: var(--dui-bar); border-radius: 10px; overflow: hidden; white-space: nowrap; font: 14px/20px var(--dui-ui); color: var(--dui-icon); user-select: none; -webkit-user-select: none; box-sizing: border-box; width: 100%; min-width: 0; }
+.dui-toolbar.is-compact { height: 36px; padding: 0 4px; border-radius: 10px; }
 .dui-g { display: flex; align-items: center; gap: 1px; flex: none; }
 .dui-sep { width: 1px; height: 20px; margin: 0 4px; background: var(--dui-sep); flex: none; }
 .dui-spacer { flex: 1 1 8px; min-width: 8px; }

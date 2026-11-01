@@ -409,7 +409,7 @@ async function sendResetEmail(u) {
     return mail.send({ to: u.email, subject: 'Signing in to Visor', text: lines.join('\n\n'), html: emailHtml(lines) });
   }
   const url = `${siteUrl()}/reset?token=${token}`;
-  const before = [hi, 'Someone asked to reset the password for your Visor account. Use this button to choose a new one. The link works for one hour, and only once.'];
+  const before = [hi, 'Someone asked to reset the password for your Visor account. This link lets you choose a new one. It works for one hour, and only once.'];
   const after = 'If this wasn’t you, you can ignore this email. Your password stays the same.';
   await mail.send({ to: u.email, subject: 'Reset your Visor password', text: [...before, url, after].join('\n\n'), html: emailHtml(before, { url, label: 'Choose a new password' }, [after]) });
 }

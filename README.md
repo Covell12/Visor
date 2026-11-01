@@ -216,3 +216,19 @@ public/              index.html, app.js, app.css, logos; Visor Classroom: router
 - **Testing:** `VISOR_DEV_LOGIN=1 npm start` enables `GET /dev/login?email=…` for password-free local testing. It never works on Firebase. `GEMINI_BASE_URL` and `DRIVE_API_BASE` can point at stand-in services. `npm test` runs the test suite.
 - **Framing:** the extension's side panel frames `/write/…`, so pages are served with `Content-Security-Policy: frame-ancestors 'self' chrome-extension:` (in `server.js` and in `firebase.json`). There's no `X-Frame-Options`.
 - **Writing limits:** 500 ops per batch, 50,000 characters per insert, 400,000 characters per document; research batches of 200 events, 30 a minute per session.
+
+## Password reset email
+
+Visor sends password reset links from an email account (`lib/mail.js`). Until one is set up, **Forgot password?** tells people to email the contact address instead. Any SMTP account works; these steps use the Gmail address Visor already has.
+
+1. Sign in to Google as `visor.edu.ai@gmail.com`, turn on 2-Step Verification, and create an app password at https://myaccount.google.com/apppasswords.
+2. Store it as a secret, pasting it when asked:
+
+   ```
+   firebase functions:secrets:set MAIL_PASSWORD --project visor-ed
+   ```
+
+3. In `index.js`, uncomment the `MAIL_PASSWORD` line, add it to `api`'s `secrets`, and deploy `functions:visor:api`.
+
+To use another account, also set `MAIL_USER`, `MAIL_HOST`, `MAIL_PORT` or `MAIL_FROM`. For a local run with nothing sent, set `MAIL_TRANSPORT=memory`: the link prints in the server's log.
+
