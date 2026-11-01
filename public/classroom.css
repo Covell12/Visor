@@ -362,12 +362,38 @@ html:has(body.writing), body.writing { scroll-padding-top: calc(var(--dx-sticky-
 .wr-works { background: #fff; border-radius: var(--r); box-shadow: var(--shadow-sm); padding: 22px 64px 26px; margin-top: 16px; }
 .wr-works h2 { font-size: 17px; text-align: center; margin: 0 0 12px; }
 .wr-bib { list-style: none; padding: 0; margin: 0 0 12px; }
-.wr-bib li { display: flex; gap: 10px; align-items: flex-start; padding: 6px 0; line-height: 1.6; }
+.wr-bib li { display: flex; flex-wrap: wrap; gap: 0 10px; align-items: flex-start; padding: 6px 0; line-height: 1.6; }
+/* The grade and the Check chip, on a line of their own under the entry */
+.wr-bib-notes { flex-basis: 100%; display: flex; flex-wrap: wrap; gap: 6px; padding: 2px 0 4px 2em; font-family: var(--font); font-size: 13px; line-height: 1.5; }
 .wr-bib-text { flex: 1; padding-left: 2em; text-indent: -2em; overflow-wrap: anywhere; }
 .wr-bib-tools { display: flex; gap: 2px; align-items: center; flex: none; }
 .chip-check { border: 0; background: var(--amber-soft); color: #9a6212; border-radius: 999px; padding: 3px 10px; font-size: 12px; font-weight: 700; cursor: pointer; }
 .chip-check::before { content: "⚠ "; }
 @media (max-width: 720px) { .wr-works { padding: 18px 20px; } }
+/* Reliability grades (source-grade.js): a chip per source, and what it's based on */
+.src-grade { display: inline-flex; align-items: center; gap: 5px; border: 0; border-radius: 999px; padding: 2px 9px 2px 2px; font: 700 12px/1.4 var(--font); white-space: nowrap; cursor: pointer; text-indent: 0; vertical-align: middle; }
+.src-grade b { display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; color: #fff; font-size: 11px; }
+.src-grade:focus-visible { outline: 2px solid var(--brand, #1E9BC4); outline-offset: 2px; }
+.src-grade.g-A { background: var(--green-soft); color: #2E7A3E; } .src-grade.g-A b, .grade-letter.g-A { background: #3E9A50; }
+.src-grade.g-B { background: var(--blue-soft); color: #17708F; } .src-grade.g-B b, .grade-letter.g-B { background: #1E8DB3; }
+.src-grade.g-C { background: var(--amber-soft); color: #8A5A10; } .src-grade.g-C b, .grade-letter.g-C { background: #C9821F; }
+.src-grade.g-D { background: var(--red-soft); color: #A3322E; } .src-grade.g-D b, .grade-letter.g-D { background: #C9443F; }
+.src-grade.g-none { padding: 2px 9px; background: var(--surface, #F3F5F7); color: var(--ink-3); font-weight: 600; cursor: default; }
+.grade-head { display: flex; align-items: center; gap: 12px; }
+.grade-letter { display: grid; place-items: center; flex: none; width: 38px; height: 38px; border-radius: 50%; color: #fff; font: 800 19px/1 var(--font); }
+.grade-word { font-weight: 700; font-size: 14.5px; }
+.grade-why { margin: 10px 0 0; font-size: 13.5px; line-height: 1.55; }
+.grade-notes { list-style: none; margin: 8px 0 0; padding: 0; font-size: 13px; line-height: 1.5; }
+.grade-notes li { position: relative; padding-left: 20px; margin-top: 3px; }
+.grade-notes li::before { position: absolute; left: 2px; font-weight: 800; }
+.grade-notes .n-up::before { content: "+"; color: #3E9A50; }
+.grade-notes .n-down::before { content: "−"; color: #C9443F; }
+.grade-notes .n-info::before { content: "•"; color: var(--ink-3); }
+.grade-how { margin: 10px 0 0; line-height: 1.5; }
+.src-preview-grade { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); font-family: var(--font); }
+.src-preview-grade:empty { display: none; }
+.src-preview-grade p.small { margin: 0; }
+@media print { .src-grade { display: none !important; } }
 /* In the writer: a page of its own, in the document's style */
 .dx-sources .wr-works { box-sizing: border-box; width: 8.5in; margin: 20px auto; padding: 1in; border-radius: 0; box-shadow: var(--dx-page-shadow); zoom: var(--dx-zoom, 1); color: #000; }
 .dx-sources.doc-style-mla .wr-works { font-family: 'Times New Roman', Tinos, Times, serif; font-size: 12pt; line-height: 2; }
@@ -375,6 +401,7 @@ html:has(body.writing), body.writing { scroll-padding-top: calc(var(--dx-sticky-
 .dx-sources .wr-works h2 { font: inherit; font-weight: normal; text-align: center; margin: 0; }
 .dx-sources .wr-bib li { padding: 0; line-height: inherit; }
 .dx-sources .wr-bib-text { padding-left: .5in; text-indent: -.5in; }
+.dx-sources .wr-bib-notes { padding-left: .5in; }
 .dx-sources .wr-works .muted, .dx-sources .wr-works .btn, .dx-sources .wr-bib-tools { font-family: var(--font); font-size: 13px; line-height: 1.5; }
 .wr-embed .dx-sources .wr-works { width: auto; margin: 8px 0; padding: 16px; box-shadow: var(--shadow-sm); border-radius: var(--r); zoom: 1; }
 

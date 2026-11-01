@@ -30,6 +30,8 @@
 /* The teacher's hint under an entry (not part of the student's page, never printed) */
 .rv-check { display: inline-block; margin: 2px 0 6px .5in; border: 0; background: var(--amber-soft); color: #9a6212; border-radius: 999px; padding: 3px 10px; font: 700 12px/1.4 var(--font); text-indent: 0; }
 .rv-check::before { content: "⚠ "; }
+.rv-grade { display: inline-block; margin: 2px 6px 6px .5in; text-indent: 0; }
+.rv-grade + .rv-check { margin-left: 0; }
 
 /* ---------- colour by source ---------- */
 .src-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12.5px; }

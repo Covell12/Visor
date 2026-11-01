@@ -39,6 +39,7 @@ const sessionsLib = require('./lib/sessions');
 const research = require('./lib/research');
 const citeFormat = require('./lib/cite');
 const citeLookup = require('./lib/cite-lookup');
+const sourceGrade = require('./lib/source-grade');
 const processLib = require('./lib/process');
 const discussionLib = require('./lib/discussion');
 // The document format shared with the editor (a copy of public/doc-format.js)
@@ -2742,7 +2743,8 @@ app.post('/api/write/:docId/sources', ah(async (req, res) => {
 
 // Look a source up from a link, a DOI or an ISBN, for the editor to fill its
 // form from (lib/cite-lookup.js). Nothing is saved. { query } -> { source,
-// found, missing, via }. A page that can't be read is a 422, never a 500.
+// found, missing, via, grade } (grade: lib/source-grade.js, or null). A page
+// that can't be read is a 422, never a 500.
 // Private addresses are let through only for tests on a local stub server.
 app.post('/api/write/:docId/sources/lookup', ah(async (req, res) => {
   const got = await sourceDocFor(req);
@@ -2756,7 +2758,8 @@ app.post('/api/write/:docId/sources/lookup', ah(async (req, res) => {
     if (e instanceof citeLookup.LookupError) throw new HttpError(e.status, e.message);
     throw new HttpError(422, citeLookup.MESSAGES.page);
   }
-  res.json({ source: cleanSource(out.source), found: out.found, missing: out.missing, via: out.via });
+  const source = cleanSource(out.source);
+  res.json({ source, found: out.found, missing: out.missing, via: out.via, grade: sourceGrade.grade(source) });
 }));
 
 // Edit a source by hand (recorded as a session event when one is running)

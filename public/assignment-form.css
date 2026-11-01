@@ -119,7 +119,8 @@
 .rv-sources-card .rv-bib li { padding: 8px 0; border-top: 1px solid var(--line); font-size: 14px; line-height: 1.55; }
 .rv-sources-card .rv-bib li:first-child { border-top: 0; }
 .rv-sources-card .rv-bib-text { padding-left: 1.5em; text-indent: -1.5em; }
-.rv-sources-card .rv-check { margin-left: 1.5em; }
+.rv-sources-card .rv-check, .rv-sources-card .rv-grade { margin-left: 1.5em; }
+.rv-sources-card .rv-grade + .rv-check { margin-left: 0; }
 
 /* ---------- the assignment page: Session settings, edited in place ----------
    (assignments.js: asCardHtml, asSync, asWire). Label and hint on the left,
