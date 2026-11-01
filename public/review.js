@@ -126,11 +126,14 @@ function rvWorksCited() {
   const v = rv?.data?.assignment?.writing?.worksCited;
   return v === 'panel' || v === 'off' ? v : 'page';
 }
+// The reliability grade the student saw for each source (writer.js), never printed
+const rvGradeChip = src => `<span class="rv-grade">${sourceGradeChip(src, `rvGradeInfo('${esc(src.id)}')`)}</span>`;
+function rvGradeInfo(id) { showSourceGrade((rv?.data?.doc?.sources || []).find(x => x.id === id)); }
 function rvBibHtml({ print = false } = {}) {
   const { doc, assignment: a } = rv.data;
   const bib = VisorCiteFormat.bibliography(doc.sources || [], a.writing?.citationStyle || 'mla');
   if (!bib.items.length) return '';
-  const items = bib.items.map(i => `<li><span class="rv-bib-text">${i.html}</span>${!print && i.source.check?.length ? `<span class="rv-check" title="The student should check this source">Check: ${esc(i.source.check.join(', '))}</span>` : ''}</li>`).join('');
+  const items = bib.items.map(i => `<li><span class="rv-bib-text">${i.html}</span>${print ? '' : rvGradeChip(i.source)}${!print && i.source.check?.length ? `<span class="rv-check" title="The student should check this source">Check: ${esc(i.source.check.join(', '))}</span>` : ''}</li>`).join('');
   return `<section class="rv-works ${print ? '' : `rv-page ${rvStyleClass()}`}" aria-label="${esc(bib.heading)}"><h2>${esc(bib.heading)}</h2><ol class="rv-bib">${items}</ol></section>`;
 }
 // Without a Works Cited page the sources aren't part of the essay: a separate
@@ -143,7 +146,7 @@ function rvSourcesCardHtml() {
   const bib = VisorCiteFormat.bibliography(doc.sources || [], a.writing?.citationStyle || 'mla');
   if (!bib.items.length) return '';
   const note = wc === 'panel' ? 'From the side panel next to the essay. Not part of the essay, and not printed.' : 'Added before citations were turned off for this assignment. Not part of the essay, and not printed.';
-  const items = bib.items.map(i => `<li><span class="rv-bib-text">${i.html}</span>${i.source.check?.length ? `<span class="rv-check" title="The student should check this source">Check: ${esc(i.source.check.join(', '))}</span>` : ''}</li>`).join('');
+  const items = bib.items.map(i => `<li><span class="rv-bib-text">${i.html}</span>${rvGradeChip(i.source)}${i.source.check?.length ? `<span class="rv-check" title="The student should check this source">Check: ${esc(i.source.check.join(', '))}</span>` : ''}</li>`).join('');
   return `<section class="card card-pad rv-sources-card" aria-label="Sources"><div class="rv-sources-h"><h3 class="section-title">Sources</h3><span class="tiny muted">${note}</span></div><ol class="rv-bib">${items}</ol></section>`;
 }
 // The legend: each source's share of the text, and pictures as a count

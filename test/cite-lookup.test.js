@@ -468,7 +468,7 @@ test('route: POST /api/write/:docId/sources/lookup', async () => {
   // A page on the stub (private addresses are let through for tests)
   let r = await stu.post(url, { query: `${stubBase}/article` });
   assert.strictEqual(r.status, 200, JSON.stringify(r.data));
-  assert.deepStrictEqual(Object.keys(r.data).sort(), ['found', 'missing', 'source', 'via']);
+  assert.deepStrictEqual(Object.keys(r.data).sort(), ['found', 'grade', 'missing', 'source', 'via']);
   assert.strictEqual(r.data.via, 'page');
   assert.strictEqual(r.data.source.type, 'article');
   assert.strictEqual(r.data.source.title, 'Why Teens Can’t Fall Asleep Before 11');
@@ -476,6 +476,9 @@ test('route: POST /api/write/:docId/sources/lookup', async () => {
   assert.strictEqual(r.data.source.url, `${stubBase}/article`);
   assert.deepStrictEqual(r.data.found, ['title', 'authors', 'published', 'siteName']);
   assert.deepStrictEqual(r.data.missing, []);
+  // Graded as it's found (lib/source-grade.js): a site Visor doesn't know, with an author and a date
+  assert.strictEqual(r.data.grade.letter, 'C');
+  assert.strictEqual(r.data.grade.kind, 'web');
   // Nothing is saved
   assert.strictEqual(((await stu.get(`/api/write/${a.id}`)).data.doc.sources || []).length, 0);
 
@@ -484,6 +487,8 @@ test('route: POST /api/write/:docId/sources/lookup', async () => {
   assert.strictEqual(r.status, 200);
   assert.strictEqual(r.data.via, 'doi');
   assert.strictEqual(r.data.source.journal, 'Journal of Adolescent Health');
+  assert.strictEqual(r.data.grade.letter, 'A');
+  assert.strictEqual(r.data.grade.kind, 'scholarly');
   r = await stu.post(url, { query: '0-8044-2957-X' });
   assert.strictEqual(r.data.via, 'isbn');
   assert.deepStrictEqual(r.data.missing, ['publisher']);

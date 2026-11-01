@@ -2394,7 +2394,8 @@ async function writerCite(meta) {
     WR.doc.sources = r.sources;
     writerInsertCite(r.source.inText);
     writerRenderSources(); writerUpdateCounts();
-    toast(r.existing ? `Cited again: ${r.source.title}` : `Cited: ${r.source.title}`);
+    const g = window.VisorSourceGrade ? VisorSourceGrade.grade(r.source) : null;
+    toast(`${r.existing ? 'Cited again' : 'Cited'}: ${r.source.title}${g ? ` · Reliability ${g.letter} (${g.word})` : ''}`, g && g.letter === 'D' ? 'warn' : '');
     if (r.source.check?.length && !r.existing) setTimeout(() => toast(`Check: ${r.source.check.join(', ')}. Fix it under Sources.`, 'err'), 2600);
   } catch (e) { toast(e.message, 'err'); }
 }
@@ -2448,6 +2449,30 @@ function writerInsertCitationMenu() {
   document.querySelectorAll('.cite-pick').forEach(b => b.onclick = () => { closeModal(); writerCiteSource(b.dataset.id); });
 }
 
+/* ---- reliability grades (source-grade.js) ----
+   Each source's grade, A to D, as a chip next to it in the Sources panel and
+   on the Works Cited page; the chip opens what the grade is based on. The
+   source dialog shows it as the student fills the details in. review.js
+   shows the same chips to the teacher. */
+const SOURCE_GRADE_HOW = 'Visor grades a source by the kind of site it’s on and whether it names an author and a date. It doesn’t read the page or check its facts, so the grade is a place to start: you still decide whether to trust it.';
+function sourceGradeChip(src, onclick) {
+  const g = window.VisorSourceGrade ? VisorSourceGrade.grade(src) : null;
+  if (!g) return `<span class="src-grade g-none" title="Visor grades a source from its link, its DOI or its publisher.">Not graded</span>`;
+  return `<button type="button" class="src-grade g-${g.letter}" onclick="${onclick}" title="${esc(`${g.label}. What this grade is based on`)}" aria-label="${esc(`Reliability ${g.letter}, ${g.word}. What this grade is based on`)}"><b>${g.letter}</b>${esc(g.word)}</button>`;
+}
+function sourceGradeDetails(g) {
+  const cls = { 1: 'up', '-1': 'down', 0: 'info' };
+  return `<div class="grade-head"><span class="grade-letter g-${g.letter}" aria-hidden="true">${g.letter}</span><div><div class="grade-word">Reliability ${g.letter}: ${esc(g.word)}</div><div class="small muted">${esc(g.label)}${g.host ? ` · ${esc(g.host)}` : ''}</div></div></div>
+    <p class="grade-why">${esc(g.why)}</p>
+    ${g.notes.length ? `<ul class="grade-notes">${g.notes.map(n => `<li class="n-${cls[n.effect]}">${esc(n.text)}</li>`).join('')}</ul>` : ''}`;
+}
+function showSourceGrade(src) {
+  const g = src && window.VisorSourceGrade ? VisorSourceGrade.grade(src) : null;
+  if (!g) return;
+  openModal({ title: 'Reliability grade', sub: esc(src.title || g.host || ''), body: `${sourceGradeDetails(g)}<p class="tiny muted grade-how">${SOURCE_GRADE_HOW}</p>`, footer: '<button class="btn btn-primary" onclick="closeModal()">Done</button>' });
+}
+function writerGradeInfo(id) { showSourceGrade((WR.doc?.sources || []).find(x => x.id === id)); }
+
 // The sources: the Works Cited page under the essay ('page'; in the side panel
 // embed, a list there for 'panel' too) and the Sources side panel
 function writerRenderSources() {
@@ -2459,6 +2484,7 @@ function writerRenderSources() {
   const editable = WR.doc.status !== 'submitted' && !(WR.doc.status === 'returned' && !WR.doc.reopened);
   const styleName = esc({ mla: 'MLA', apa: 'APA', chicago: 'Chicago' }[style] || 'MLA');
   const check = i => i.source.check?.length ? `<button class="chip-check" onclick="writerEditSource('${esc(i.source.id)}')">Check: ${esc(i.source.check.join(', '))}</button>` : '';
+  const chip = i => sourceGradeChip(i.source, `writerGradeInfo('${esc(i.source.id)}')`);
   const tools = (i, withCheck = true) => `<span class="wr-bib-tools">${withCheck ? check(i) : ''}
       ${editable ? `<button class="btn-icon" aria-label="Edit this source" title="Edit" onclick="writerEditSource('${esc(i.source.id)}')">${I.edit}</button><button class="btn-icon" aria-label="Remove this source" title="Remove" onclick="writerDeleteSource('${esc(i.source.id)}')">${I.trash}</button>` : ''}</span>`;
   const empty = `${WR.data.assignment.writing.oneClickCite === false ? 'Your sources show up here' : 'Sources you add here or cite with the Visor extension show up here'}, formatted in ${styleName}.`;
@@ -2466,7 +2492,7 @@ function writerRenderSources() {
   if (page) {
     const heading = works === 'page' ? bib.heading : 'Sources';
     page.innerHTML = `<section class="wr-works" aria-label="${esc(heading)}"><h2>${esc(heading)}</h2>
-      ${bib.items.length ? `<ol class="wr-bib">${bib.items.map(i => `<li><span class="wr-bib-text">${i.html}</span>${tools(i)}</li>`).join('')}</ol>`
+      ${bib.items.length ? `<ol class="wr-bib">${bib.items.map(i => `<li><span class="wr-bib-text">${i.html}</span>${tools(i, false)}<span class="wr-bib-notes">${chip(i)}${check(i)}</span></li>`).join('')}</ol>`
         : `<p class="muted small">${empty}</p>`}
       ${editable ? `<div class="wr-works-add"><button class="btn btn-ghost btn-sm" onclick="writerEditSource(null)">${I.plusSm}Add a source</button><button class="btn btn-ghost btn-sm" onclick="writerEditSource(null, 'write')">${I.edit}Write a source</button></div>` : ''}
     </section>`;
@@ -2478,7 +2504,7 @@ function writerRenderSources() {
       ${bib.items.length ? `<ol class="dx-side-list">${bib.items.map(i => `<li class="dx-src">
         <div class="dx-src-text">${i.html}</div>
         ${check(i) ? `<div class="dx-src-check">${check(i)}</div>` : ''}
-        <div class="dx-src-row"><span class="dx-src-in">${esc(i.source.inText || '')}</span>
+        <div class="dx-src-row">${chip(i)}<span class="dx-src-in">${esc(i.source.inText || '')}</span>
           ${editable && canCite ? `<button class="btn btn-ghost btn-sm" onclick="writerCiteSource('${esc(i.source.id)}')" title="Add ${esc(i.source.inText || 'the citation')} where your cursor is">Cite</button>` : ''}${tools(i, false)}</div></li>`).join('')}</ol>`
         : `<div class="dx-side-empty">${empty}</div>`}
       ${editable ? `<div class="dx-side-adds"><button class="btn btn-primary btn-sm" onclick="writerEditSource(null)">${I.plusSm}Add a source</button><button class="btn btn-ghost btn-sm" onclick="writerEditSource(null, 'write')">${I.edit}Write a source</button></div>
@@ -2529,7 +2555,8 @@ function writerEditSource(id, tab) {
       <div class="field"><label for="se-written">The citation</label><textarea id="se-written" class="input" style="min-height:96px;" maxlength="1500" placeholder="Paste a citation, or type it in ${styleName} style. Put a title in *asterisks* to make it italic.">${esc(written ? s.written || '' : '')}</textarea></div>
       <div class="field"><label for="se-inTextWritten">In-text citation <span class="label-note">optional</span></label><input id="se-inTextWritten" class="input" maxlength="120" value="${esc(written ? s.inTextWritten || '' : '')}" placeholder="${style === 'apa' ? '(Smith, 2021)' : '(Smith 12)'}" /><div class="hint">What goes in your essay when you cite it. Left empty, Visor makes one from the first word.</div></div>
     </div>
-    <div class="src-preview" aria-live="polite"><div class="src-preview-k">Preview</div><div id="sePreview" class="src-preview-t"></div><div id="sePreviewIn" class="src-preview-in"></div></div>
+    <div class="src-preview" aria-live="polite"><div class="src-preview-k">Preview</div><div id="sePreview" class="src-preview-t"></div><div id="sePreviewIn" class="src-preview-in"></div>
+      <div id="seGrade" class="src-preview-grade"></div></div>
     <div id="seErr" class="form-error hidden"></div>`,
     footer: `<button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="seSave">${id ? 'Save' : 'Add source'}</button>` });
   const body = $('modalBody');
@@ -2569,6 +2596,7 @@ function writerSourcePreview() {
   const out = $('sePreview'); if (!out || WR.srcTab === 'link') return;
   const src = writerSourceForm();
   const empty = src.type === 'written' ? !src.written.trim() : !src.title.trim() && !src.url.trim();
+  writerGradePreview(empty ? null : src);
   if (empty) { out.innerHTML = '<span class="muted">The citation shows up here as you fill it in.</span>'; $('sePreviewIn').textContent = ''; return; }
   try {
     const f = VisorCiteFormat.format(src, WR.data.assignment.writing.citationStyle || 'mla');
@@ -2576,6 +2604,14 @@ function writerSourcePreview() {
     $('sePreviewIn').textContent = f.inText ? `In your essay: ${f.inText}` : '';
   } catch { out.textContent = ''; }
 }
+// The grade of what the dialog would save, as it changes
+function writerGradePreview(src) {
+  const el = $('seGrade'); if (!el) return;
+  const g = src && window.VisorSourceGrade ? VisorSourceGrade.grade(src) : null;
+  el.innerHTML = g ? `${sourceGradeDetails(g)}<p class="tiny muted grade-how">${SOURCE_GRADE_HOW}</p>`
+    : src ? `<p class="small muted">Not graded yet. Add a link, a DOI or a publisher and Visor gives the source a reliability grade.</p>` : '';
+}
+
 // From a link: ask the server, fill the details, and say what's missing
 async function writerLookupSource() {
   const q = $('seQuery')?.value.trim();
