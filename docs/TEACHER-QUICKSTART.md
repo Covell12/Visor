@@ -10,7 +10,13 @@ One page to get your first class writing in Visor.
 
 When everyone's in, use **Add people → Close joining with the code** so the code stops working.
 
-**Co-teachers.** **Add people → Add a teacher…** shares the class with another teacher (they need a Visor teacher account). Co-teachers can do everything you can (assignments, announcements, people, live sessions, review) except delete the class; the class's owner (whoever made it) can remove them, and they can leave it themselves.
+**Teachers and advisors.** **Add people → Add a teacher or advisor…** shares the class with another Visor teacher account, in one of three roles. All of them can do everything you can (assignments, announcements, people, live sessions, review) except delete the class, which only its owner (whoever made it) can do.
+
+- **Co-teacher:** listed as a teacher, and can add and remove teachers and advisors.
+- **Advisor:** the same as a co-teacher, but not listed as a teacher, so students don't see them on the class. Anything an advisor posts still shows their name.
+- **Assistant teacher:** listed as a teacher, but can't add or remove teachers or advisors.
+
+Nobody can remove the owner, and anyone but the owner can leave a class themselves.
 
 Every class gets a colour and a banner, shown on its tile on Home, in the sidebar and on the **Calendar**. Change them with the pencil at the top right of the class's page (or **Settings → Change background and colour**): keep the colour, pick one of eight designs, or upload your own picture (PNG, JPEG or WebP) and choose which part shows. Everyone in the class sees it.
 

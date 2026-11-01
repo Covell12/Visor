@@ -480,7 +480,7 @@ function courseTabsHtml(c, active) {
   return `<nav class="course-tabs" aria-label="Class pages">
       ${link('materials', `/class/${c.id}`, PI.list, 'Assignments')}
       ${link('updates', `/class/${c.id}?tab=announcements`, PI.megaphone, 'Announcements')}
-      ${c.isTeacher ? link('members', `/class/${c.id}?tab=people`, I.users, 'People', (c.studentCount ?? c.students?.length ?? 0) + teachers.length) : ''}
+      ${c.isTeacher ? link('members', `/class/${c.id}?tab=people`, I.users, 'People', (c.studentCount ?? c.students?.length ?? 0) + teachers.length + (c.advisors?.length || 0)) : ''}
       ${c.archived ? '' : link('calendar', `/calendar?class=${c.id}`, PI.cal, 'Calendar')}
       ${c.isTeacher ? link('settings', `/class/${c.id}?tab=settings`, I.gear, 'Settings') : ''}
     </nav>`;
@@ -1019,35 +1019,46 @@ function wireMaterialsDnD() {
 }
 
 /* ====================== people (teacher) ======================
-   The class's teachers (the owner, who made it, and any co-teachers), then
-   its students with their accommodations, then pending invites. */
+   The class's teachers (the owner, who made it, then co-teachers and assistant
+   teachers), its advisors, its students with their accommodations, then
+   pending invites. Only the class's staff get the advisors. */
+const STAFF_ROLES = {
+  teacher: { label: 'Co-teacher', phrase: 'a co-teacher', hint: 'Listed as a teacher. Can do everything you can, except delete the class.' },
+  assistant: { label: 'Assistant teacher', phrase: 'an assistant teacher', hint: 'Listed as a teacher. Can do everything except delete the class or add and remove teachers and advisors.' },
+  advisor: { label: 'Advisor', phrase: 'an advisor', hint: 'Can do everything a co-teacher can, but isn’t listed as a teacher, so students don’t see them on the class.' }
+};
+const staffRoleOptions = () => Object.entries(STAFF_ROLES).map(([k, r]) => `<option value="${k}">${r.label}</option>`).join('');
 function membersHtml() {
   const c = cp.cls;
   const acc = c.accommodations || {};
   const gcOk = !!CFG.classroomImport;
-  const teachers = teachersOf(c);
+  const teachers = teachersOf(c), advisors = c.advisors || [];
   const school = me?.org;
   const actions = ddHtml({ id: 'addMem', btnClass: 'btn btn-primary btn-sm', btn: `${I.plusSm}Add people ${PI.down}`, right: true, items: [
     school ? { label: `From ${school.name}…`, icon: I.school, onclick: `openAddFromSchool('${c.id}')` }
       : { label: 'From your school…', icon: I.school, disabled: true, note: 'choose your school in Profile settings' },
     { label: 'Add students by email…', icon: I.users, onclick: 'openAddMembers()' },
-    { label: 'Add a teacher…', icon: I.school, onclick: 'openAddTeacher()' },
+    ...(c.canManageStaff ? [{ label: 'Add a teacher or advisor…', icon: I.school, onclick: 'openAddTeacher()' }] : []),
     { label: 'Import students from Google Classroom', icon: I.school, onclick: 'importFromClassroom()', disabled: !gcOk, note: gcOk ? '' : 'not set up' },
     'sep',
     { label: 'Copy the class code', icon: I.copy, onclick: `copyText('${esc(c.joinCode)}','Class code copied')` },
     { label: 'New class code', icon: I.refresh, onclick: 'rotateCode()' },
     { label: c.joinOpen ? 'Close joining with the code' : 'Open joining with the code', icon: I.hash, onclick: `setJoinOpen(${!c.joinOpen})` }
   ] });
-  const teacherRows = `<div class="card" style="overflow-x:auto;position:relative;"><table class="roster">
+  const staffTable = (list, pill) => `<div class="card" style="overflow-x:auto;position:relative;"><table class="roster">
       <thead><tr><th>Name</th><th>Role</th><th><span class="sr-only">Actions</span></th></tr></thead>
-      <tbody>${teachers.map(t => {
+      <tbody>${list.map(t => {
         const self = t.id === me.id;
-        const items = t.owner ? [] : self ? [{ label: 'Leave this class', icon: I.x, onclick: 'leaveClass()', danger: true }] : c.isOwner ? [{ label: 'Remove from class', icon: I.x, onclick: `removeTeacher('${t.id}')`, danger: true }] : [];
+        const items = t.owner ? [] : self ? [{ label: 'Leave this class', icon: I.x, onclick: 'leaveClass()', danger: true }] : c.canManageStaff ? [{ label: 'Remove from class', icon: I.x, onclick: `removeTeacher('${t.id}')`, danger: true }] : [];
         return `<tr>
         <td><div class="roster-name">${avatarHtml(t, 'avatar-sm')}<span><b>${esc(t.name)}${self ? ' (you)' : ''}</b>${t.email ? `<div class="tiny muted">${esc(t.email)}</div>` : ''}</span></div></td>
-        <td>${t.owner ? '<span class="pill pill-blue">Owner</span>' : '<span class="pill pill-gray">Co-teacher</span>'}</td>
+        <td>${pill(t)}</td>
         <td class="row-actions">${items.length ? ddHtml({ id: `tm-${t.id}`, btnClass: 'btn-icon', btn: I.gear, label: `Options: ${t.name}`, right: true, items }) : ''}</td>
       </tr>`; }).join('')}</tbody></table></div>`;
+  const teacherRows = staffTable(teachers, t => (t.owner ? '<span class="pill pill-blue">Owner</span>' : `<span class="pill pill-gray">${t.assistant ? 'Assistant teacher' : 'Co-teacher'}</span>`));
+  const advisorRows = advisors.length ? `<h2 class="section-title people-h">Advisors <span class="muted">${advisors.length}</span></h2>
+    ${staffTable(advisors, () => '<span class="pill pill-gray">Advisor</span>')}
+    <div class="tiny muted" style="margin-top:6px;">Advisors can do everything a teacher can, but they aren’t listed as teachers, so students don’t see them on the class. Anything an advisor posts shows their name.</div>` : '';
   const roster = c.students.length ? `<div class="card" style="overflow-x:auto;position:relative;"><table class="roster">
       <thead><tr><th>Name</th><th>Extra time</th><th>Accommodation note</th><th><span class="sr-only">Actions</span></th></tr></thead>
       <tbody>${c.students.map(s => `<tr>
@@ -1066,7 +1077,8 @@ function membersHtml() {
   return `${courseHead(c, 'People', { actions, sub: school ? `Add people from ${esc(school.name)}. For anyone else: ${codeLine}` : codeLine.replace(/^c/, 'C') })}
     <h2 class="section-title people-h" style="margin-top:0;">Teachers <span class="muted">${teachers.length}</span></h2>
     ${teacherRows}
-    <div class="tiny muted" style="margin-top:6px;">Co-teachers can do everything you can in this class, except delete it${c.isOwner ? '' : ' or remove other teachers'}.</div>
+    <div class="tiny muted" style="margin-top:6px;">Everyone here can do all of the class’s teaching work. Only the owner can delete the class, and assistant teachers can’t add or remove teachers or advisors.</div>
+    ${advisorRows}
     <h2 class="section-title people-h">Students <span class="muted">${c.students.length}</span></h2>
     ${roster}${invites}`;
 }
@@ -1077,11 +1089,15 @@ function openAddMembers() {
   setTimeout(() => $('addEmails')?.focus(), 50);
 }
 function openAddTeacher() {
-  openModal({ title: 'Add a teacher', sub: `They can do everything you can in ${esc(cp.cls.name)}: assignments, announcements, people, live sessions and review. Only the owner can delete the class.`,
-    body: `<div class="field"><label for="atEmail">Their Visor teacher account’s email</label><input id="atEmail" class="input" type="email" autocomplete="off" placeholder="colleague@school.org" /></div><div id="atErr" class="form-error hidden"></div>`,
-    footer: `<button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="atGo">Add teacher</button>` });
+  openModal({ title: 'Add a teacher or advisor', sub: `They can work on everything in ${esc(cp.cls.name)}: assignments, announcements, people, live sessions and review. Only the owner can delete the class.`,
+    body: `<div class="field"><label for="atEmail">Their Visor teacher account’s email</label><input id="atEmail" class="input" type="email" autocomplete="off" placeholder="colleague@school.org" /></div>
+      <div class="field"><label for="atRole">Role</label><select id="atRole" class="input">${staffRoleOptions()}</select><div id="atRoleHint" class="hint">${STAFF_ROLES.teacher.hint}</div></div>
+      <div id="atErr" class="form-error hidden"></div>`,
+    footer: `<button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="atGo">Add to class</button>` });
+  $('atRole').addEventListener('change', e => { $('atRoleHint').textContent = STAFF_ROLES[e.target.value].hint; });
   const go = () => modalBusy(async () => {
-    try { const r = await api(`/api/classes/${cp.cls.id}/teachers`, { method: 'POST', body: { email: $('atEmail').value } }); cp.cls = { ...cp.cls, ...r.class }; closeModal(); forgetCourses(); renderClassPage(); toast('Teacher added'); }
+    const role = $('atRole').value;
+    try { const r = await api(`/api/classes/${cp.cls.id}/teachers`, { method: 'POST', body: { email: $('atEmail').value, role } }); cp.cls = { ...cp.cls, ...r.class }; closeModal(); forgetCourses(); renderClassPage(); toast(`${STAFF_ROLES[role].label} added`); }
     catch (e) { formError('atErr', e.message); }
   });
   $('atGo').onclick = go;
@@ -1091,16 +1107,19 @@ function openAddTeacher() {
 /* ---- Add people from your school ----
    Everyone at the teacher's school (as each person chose it), students and
    teachers on two tabs, with a search. Picks are kept across tabs and
-   searches; students join the class, teachers become co-teachers. */
+   searches; students join the class, teachers join in the role picked, and
+   an assistant teacher only gets the students. */
 let sp = null; // { classId, role, q, picked: Map(id -> role), seq }
 function openAddFromSchool(classId) {
   if (!me?.org) return toast('Choose your school in Profile settings first.', 'err');
   const cls = cp?.cls?.id === classId ? cp.cls : ap?.data?.class?.id === classId ? ap.data.class : null;
+  const canStaff = cls?.canManageStaff !== false;
   sp = { classId, role: 'student', q: '', picked: new Map(), seq: 0, timer: 0 };
   const tab = (k, label) => `<button type="button" role="tab" data-role="${k}" aria-selected="${k === 'student'}" tabindex="${k === 'student' ? 0 : -1}">${label}</button>`;
-  openModal({ title: `Add people from ${esc(me.org.name)}`, sub: `Students join ${cls ? esc(cls.name) : 'the class'} right away; teachers become co-teachers. Only people who chose ${esc(me.org.name)} as their school are listed.`, wide: true,
-    body: `<div class="sp-top"><div class="seg sp-tabs" role="tablist" aria-label="Who to show">${tab('student', 'Students')}${tab('teacher', 'Teachers')}</div>
+  openModal({ title: `Add people from ${esc(me.org.name)}`, sub: `Students join ${cls ? esc(cls.name) : 'the class'} right away.${canStaff ? ' Teachers join in the role you pick.' : ''} Only people who chose ${esc(me.org.name)} as their school are listed.`, wide: true,
+    body: `<div class="sp-top">${canStaff ? `<div class="seg sp-tabs" role="tablist" aria-label="Who to show">${tab('student', 'Students')}${tab('teacher', 'Teachers')}</div>` : ''}
         <input id="spQ" class="input sp-q" type="search" placeholder="Search by name or email" aria-label="Search people at ${esc(me.org.name)}" autocomplete="off" /></div>
+      <div id="spAsRow" class="sp-as hidden"><label for="spAs">Add teachers as</label><select id="spAs" class="input input-sm">${staffRoleOptions()}</select></div>
       <div class="sp-bar"><label class="sp-all"><input type="checkbox" id="spAll" /> <span>Select everyone shown</span></label><span id="spShown" class="tiny muted" aria-live="polite"></span></div>
       <div id="spList" class="sp-list" role="group" aria-label="People"><div class="sp-empty"><span class="spinner spinner-sm"></span></div></div>
       <div id="spErr" class="form-error hidden"></div>`,
@@ -1110,10 +1129,12 @@ function openAddFromSchool(classId) {
   const show = k => {
     sp.role = k;
     tabs.forEach(b => { const on = b.dataset.role === k; b.setAttribute('aria-selected', String(on)); b.tabIndex = on ? 0 : -1; });
+    $('spAsRow').classList.toggle('hidden', k !== 'teacher');
     spLoad();
   };
   tabs.forEach(b => b.addEventListener('click', () => show(b.dataset.role)));
-  body.querySelector('.sp-tabs').addEventListener('keydown', e => {
+  $('spAs').addEventListener('change', spLabel);
+  body.querySelector('.sp-tabs')?.addEventListener('keydown', e => {
     if (!['ArrowLeft', 'ArrowRight'].includes(e.key)) return;
     e.preventDefault(); const n = tabs.find(b => b.dataset.role !== sp.role); show(n.dataset.role); n.focus();
   });
@@ -1147,8 +1168,12 @@ async function spLoad() {
 function spPick(cb) {
   if (cb.disabled) return;
   if (cb.checked) sp.picked.set(cb.value, cb.dataset.role); else sp.picked.delete(cb.value);
+  spLabel();
+}
+const spRoleName = () => STAFF_ROLES[$('spAs').value].label.toLowerCase();
+function spLabel() {
   const n = [...sp.picked.values()], st = n.filter(r => r === 'student').length, te = n.length - st;
-  const label = [st ? vcPlural(st, 'student') : '', te ? vcPlural(te, 'teacher') : ''].filter(Boolean).join(' and ');
+  const label = [st ? vcPlural(st, 'student') : '', te ? vcPlural(te, spRoleName()) : ''].filter(Boolean).join(' and ');
   $('spGo').disabled = !n.length;
   $('spGo').textContent = n.length ? `Add ${label}` : 'Add';
 }
@@ -1159,20 +1184,21 @@ function spSyncAll() {
   all.indeterminate = !all.checked && boxes.some(b => b.checked);
 }
 async function spAdd() {
-  const classId = sp.classId;
+  const classId = sp.classId, roleName = spRoleName();
   try {
-    const r = await api(`/api/classes/${classId}/school-people`, { method: 'POST', body: { userIds: [...sp.picked.keys()] } });
+    const r = await api(`/api/classes/${classId}/school-people`, { method: 'POST', body: { userIds: [...sp.picked.keys()], as: $('spAs').value } });
     closeModal(); forgetCourses();
     if (cp?.cls?.id === classId) { cp.cls = { ...cp.cls, ...r.class }; renderClassPage(); }
-    const parts = [r.students ? `${vcPlural(r.students, 'student')} added` : '', r.teachers ? `${vcPlural(r.teachers, 'co-teacher')} added` : '', r.skipped.length ? `${r.skipped.length} skipped (${[...new Set(r.skipped.map(x => x.why))].join(', ')})` : ''].filter(Boolean);
+    const parts = [r.students ? `${vcPlural(r.students, 'student')} added` : '', r.teachers ? `${vcPlural(r.teachers, roleName)} added` : '', r.skipped.length ? `${r.skipped.length} skipped (${[...new Set(r.skipped.map(x => x.why))].join(', ')})` : ''].filter(Boolean);
     toast(parts.join(' · ') || 'Nobody new to add', r.students || r.teachers ? '' : 'err');
   } catch (e) { formError('spErr', e.message); }
 }
 
 async function removeTeacher(id) {
-  const t = teachersOf(cp.cls).find(x => x.id === id);
-  if (!await confirmModal('Remove this teacher?', `${t?.name || 'They'} will no longer see ${cp.cls.name} or anything in it. Their announcements stay.`, { okLabel: 'Remove', danger: true })) return;
-  try { const r = await api(`/api/classes/${cp.cls.id}/teachers/${id}`, { method: 'DELETE' }); cp.cls = { ...cp.cls, ...r.class }; forgetCourses(); renderClassPage(); toast('Teacher removed'); }
+  const advisor = (cp.cls.advisors || []).find(x => x.id === id);
+  const t = advisor || teachersOf(cp.cls).find(x => x.id === id);
+  if (!await confirmModal(`Remove this ${advisor ? 'advisor' : 'teacher'}?`, `${t?.name || 'They'} will no longer see ${cp.cls.name} or anything in it. Their announcements stay.`, { okLabel: 'Remove', danger: true })) return;
+  try { const r = await api(`/api/classes/${cp.cls.id}/teachers/${id}`, { method: 'DELETE' }); cp.cls = { ...cp.cls, ...r.class }; forgetCourses(); renderClassPage(); toast(`${advisor ? 'Advisor' : 'Teacher'} removed`); }
   catch (e) { toast(e.message, 'err'); }
 }
 async function leaveClass() {
@@ -1249,7 +1275,7 @@ function classSettingsHtml() {
     </section>
     ${c.isOwner === false ? `<section class="card card-pad danger-zone">
       <h2 class="section-title" style="font-size:16px;margin-bottom:6px;color:var(--red);">Leave class</h2>
-      <p class="small muted" style="margin:0 0 12px;">You’re a co-teacher here. Leaving takes the class off your Home; nothing in it is deleted. Only the owner can delete the class.</p>
+      <p class="small muted" style="margin:0 0 12px;">You’re ${STAFF_ROLES[c.staffRole]?.phrase || 'a co-teacher'} here. Leaving takes the class off your Home; nothing in it is deleted. Only the owner can delete the class.</p>
       <button class="btn btn-danger" onclick="leaveClass()">${I.x}Leave class</button>
     </section>` : `<section class="card card-pad danger-zone">
       <h2 class="section-title" style="font-size:16px;margin-bottom:6px;color:var(--red);">Delete class</h2>

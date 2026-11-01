@@ -667,16 +667,18 @@ async function transcribeResource(resourceId) {
   });
 }
 
-// A project's teachers: for a class's group project every teacher of the
-// class (owner first), else the one who made it
+// A project's teachers: for a class's group project everyone listed as teaching
+// the class (owner first), else the one who made it. Students get this list, so
+// advisors aren't in it.
 function projectTeacherIds(core, project) {
   const cls = project.classId ? own(core.classes, project.classId) : null;
   return cls ? [...new Set([project.teacherId, ...classes.teacherIdsOf(cls)])] : [project.teacherId];
 }
-// Everyone who could be a voice in a project's recording
+// Everyone who could be a voice in a project's recording, a class's advisors too
 function projectPeople(core, project) {
   const list = project.studentIds.map(id => core.users[id]).filter(Boolean).map(u => ({ id: u.id, name: `${u.firstName} ${u.lastName}`, role: 'student', avatarColor: u.avatarColor || null }));
-  for (const id of projectTeacherIds(core, project)) {
+  const cls = project.classId ? own(core.classes, project.classId) : null;
+  for (const id of new Set([...projectTeacherIds(core, project), ...(cls ? classes.staffIdsOf(cls) : [])])) {
     const t = own(core.users, id);
     if (t) list.push({ id: t.id, name: `${t.firstName} ${t.lastName}`, role: 'teacher', avatarColor: t.avatarColor || null });
   }
@@ -1303,12 +1305,17 @@ const nameOnly = u => (u ? { id: u.id, name: fullName(u), avatarColor: u.avatarC
 function publicTeachers(core, cls, withEmail = false) {
   return classes.teacherIdsOf(cls).map(id => own(core.users, id)).filter(Boolean).map(u => {
     const t = { id: u.id, name: fullName(u), avatarColor: u.avatarColor || null, owner: u.id === cls.teacherId };
+    if (classes.staffRole(cls, u.id) === 'assistant') t.assistant = true;
     if (withEmail) t.email = u.email;
     return t;
   });
 }
+// Advisors aren't listed as teachers, so only the class's staff get these
+const publicAdvisors = (core, cls) => (cls.advisorIds || []).map(id => own(core.users, id)).filter(Boolean)
+  .map(u => ({ id: u.id, name: fullName(u), email: u.email, avatarColor: u.avatarColor || null }));
 
-// teacher: the owner. isTeacher: the owner or a co-teacher.
+// teacher: the owner. teachers: everyone listed as teaching it. isTeacher: anyone
+// on the staff, advisors included.
 function publicClass(core, cls, me) {
   const isTeacher = classes.isClassTeacher(cls, me.id);
   const base = {
@@ -1319,6 +1326,7 @@ function publicClass(core, cls, me) {
   if (!isTeacher) return base;
   return {
     ...base,
+    staffRole: classes.staffRole(cls, me.id), canManageStaff: classes.canManageStaff(cls, me.id), advisors: publicAdvisors(core, cls),
     joinCode: cls.joinCode, joinOpen: cls.joinOpen !== false,
     students: cls.studentIds.map(id => publicUser(core.users[id])).filter(Boolean).sort((a, b) => a.lastName.localeCompare(b.lastName) || a.firstName.localeCompare(b.firstName)),
     pendingInvites: cls.pendingInvites || [],
@@ -1360,6 +1368,7 @@ function teacherClass(req, core) {
   if (!got.isTeacher) throw new HttpError(403, 'only the class teacher can do that');
   return got;
 }
+const STAFF_ONLY_MESSAGE = 'Assistant teachers can’t add or remove teachers or advisors.';
 
 app.patch('/api/classes/:id', requireAuth, ah(async (req, res) => {
   const out = await repo.withCore(core => { const got = teacherClass(req, core); classes.patchClass(got.cls, req.body || {}); return publicClass(core, got.cls, got.me); });
@@ -1395,9 +1404,14 @@ app.delete('/api/classes/:id/invites', requireAuth, ah(async (req, res) => {
 // Any teacher of a class can add another teacher account by email. Only the
 // owner removes other teachers; a co-teacher can remove themselves (leave).
 
-// { email }
+// { email, role? } role: 'teacher' (a co-teacher, the default), 'assistant' or 'advisor'
 app.post('/api/classes/:id/teachers', requireAuth, ah(async (req, res) => {
-  const out = await repo.withCore(core => { const got = teacherClass(req, core); classes.addTeacher(core, got.cls, req.body?.email); return publicClass(core, got.cls, got.me); });
+  const out = await repo.withCore(core => {
+    const got = teacherClass(req, core);
+    if (!got.canManageStaff) throw new HttpError(403, STAFF_ONLY_MESSAGE);
+    classes.addTeacher(core, got.cls, req.body?.email, req.body?.role ?? 'teacher');
+    return publicClass(core, got.cls, got.me);
+  });
   res.json({ class: out });
 }));
 
@@ -1406,11 +1420,11 @@ app.delete('/api/classes/:id/teachers/:userId', requireAuth, ah(async (req, res)
     const got = teacherClass(req, core);
     const userId = String(req.params.userId);
     // Removing the owner is refused below (400), whoever asks
-    if (!got.isOwner && userId !== got.me.id && userId !== got.cls.teacherId) throw new HttpError(403, 'Only the class owner can remove another teacher.');
+    if (!got.canManageStaff && userId !== got.me.id && userId !== got.cls.teacherId) throw new HttpError(403, STAFF_ONLY_MESSAGE);
     classes.removeTeacher(got.cls, userId);
     // They saw the class's group-project codes, which work without signing in: new codes
     for (const p of Object.values(core.projects)) if (p.classId === got.cls.id) p.code = newProjectCode(core);
-    return got.isOwner ? { class: publicClass(core, got.cls, got.me) } : { ok: true, left: true };
+    return userId === got.me.id ? { ok: true, left: true } : { class: publicClass(core, got.cls, got.me) };
   });
   res.json(out);
 }));
@@ -1501,7 +1515,7 @@ app.get('/api/classes/:id/school-people', requireAuth, ah(async (req, res) => {
 app.post('/api/classes/:id/school-people', requireAuth, ah(async (req, res) => {
   const out = await repo.withCore(core => {
     const got = teacherClass(req, core);
-    const result = classes.addFromSchool(core, got.cls, got.me, req.body?.userIds);
+    const result = classes.addFromSchool(core, got.cls, got.me, req.body?.userIds, req.body?.as ?? 'teacher');
     return { result, cls: publicClass(core, got.cls, got.me) };
   });
   res.json({ class: out.cls, ...out.result });
@@ -1707,7 +1721,7 @@ app.get('/api/assignments/:id', requireAuth, ah(async (req, res) => {
     teacher: { id: cls.teacherId, name: fullName(core.users[cls.teacherId]) }, teachers: publicTeachers(core, cls), isOwner: got.isOwner,
     studentCount: cls.studentIds.length
   };
-  if (got.isTeacher) Object.assign(classInfo, { joinCode: cls.joinCode, joinOpen: cls.joinOpen !== false });
+  if (got.isTeacher) Object.assign(classInfo, { joinCode: cls.joinCode, joinOpen: cls.joinOpen !== false, canManageStaff: classes.canManageStaff(cls, got.me.id) });
   // The folders above it, top first, for the breadcrumb
   const folderPath = materials.folderPath(materials.tidy(await repo.listRecords('folder', { classId: cls.id }), []).folders, a.folderId);
   if (got.isTeacher) {
@@ -3165,9 +3179,9 @@ async function teacherDiscussion(req, core) {
   return got;
 }
 const rosterOf = (core, cls) => cls.studentIds.map(id => core.users[id]).filter(Boolean).map(u => ({ id: u.id, name: fullName(u) }));
-// The class's teachers as voices: [{ id, name }], the owner first, then the
-// co-teachers (any of them may be heard leading a discussion)
-const teachersOf = (core, cls) => classes.teacherIdsOf(cls).map(id => own(core.users, id)).filter(Boolean).map(t => ({ id: t.id, name: fullName(t) }));
+// The class's staff as voices: [{ id, name }], the owner first (any of them may
+// be heard leading a discussion). Only the staff see this list.
+const teachersOf = (core, cls) => classes.staffIdsOf(cls).map(id => own(core.users, id)).filter(Boolean).map(t => ({ id: t.id, name: fullName(t) }));
 
 // Segments that have been "transcribing" longer than a job may run were cut off
 async function reconcileDiscussion(d) {
@@ -3372,7 +3386,7 @@ app.post('/api/discussions/:did/segments/:k/retranscribe', requireAuth, ah(async
 app.post('/api/discussions/:did/speakers', requireAuth, ah(async (req, res) => {
   const core = await repo.readCore();
   const got = await teacherDiscussion(req, core);
-  const allowed = new Set([...got.cls.studentIds, ...classes.teacherIdsOf(got.cls)]);
+  const allowed = new Set([...got.cls.studentIds, ...classes.staffIdsOf(got.cls)]);
   const assignments = req.body?.assignments || {};
   const d = await repo.updateRecord('discussion', got.d.id, x => {
     for (const sp of x.speakers || []) {

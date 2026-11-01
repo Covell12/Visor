@@ -441,7 +441,7 @@ test('a co-teacher opens the owner’s group projects; projects outside a class 
 
 /* ---------------- delete, remove and leave ---------------- */
 
-test('deleting the class and removing teachers: owner only; a co-teacher may leave', async () => {
+test('deleting the class: owner only; nobody removes the owner; a co-teacher may leave', async () => {
   const owner = client(), co = client(), co2 = client(), stu = client();
   const O = await signup(owner, 'teacher', 'Cal', 'Owner');
   const T = await signup(co, 'teacher', 'Dee', 'Co');
@@ -459,9 +459,7 @@ test('deleting the class and removing teachers: owner only; a co-teacher may lea
   r = await owner.del(`/api/classes/${cls.id}`, { confirmName: 'art' });
   assert.deepStrictEqual([r.status, r.data.error], [400, 'Type the class name exactly to delete it.']);
 
-  // nor remove another teacher; nobody removes the owner
-  r = await co.del(`/api/classes/${cls.id}/teachers/${T2.id}`);
-  assert.deepStrictEqual([r.status, r.data.error], [403, 'Only the class owner can remove another teacher.']);
+  // nobody removes the owner (test/class-roles.test.js has who may remove whom)
   r = await co.del(`/api/classes/${cls.id}/teachers/${O.id}`);
   assert.deepStrictEqual([r.status, r.data.error], [400, "The class’s owner can’t be removed."]);
   r = await owner.del(`/api/classes/${cls.id}/teachers/${O.id}`);

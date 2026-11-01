@@ -443,7 +443,7 @@ test('class page: the teacher gets counts per writing assignment, each student t
   const teacherInfo = { id: me.id, name: 'Tara Teacher' };
   const teachers = [{ id: me.id, name: 'Tara Teacher', avatarColor: null, owner: true }];
   r = await teacher.get(`/api/assignments/${essay.id}`);
-  assert.deepStrictEqual(r.data.class, { id: cls.id, name: 'Writing lab', color: cls.color, background: null, archived: false, teacher: teacherInfo, teachers, isOwner: true, studentCount: 4, joinCode: cls.joinCode, joinOpen: true });
+  assert.deepStrictEqual(r.data.class, { id: cls.id, name: 'Writing lab', color: cls.color, background: null, archived: false, teacher: teacherInfo, teachers, isOwner: true, studentCount: 4, joinCode: cls.joinCode, joinOpen: true, canManageStaff: true });
   assert.deepStrictEqual(r.data.folderPath, []);
   r = await s1.get(`/api/assignments/${essay.id}`);
   assert.deepStrictEqual(r.data.class, { id: cls.id, name: 'Writing lab', color: cls.color, background: null, archived: false, teacher: teacherInfo, teachers, isOwner: false, studentCount: 4 });
