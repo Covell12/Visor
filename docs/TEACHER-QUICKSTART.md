@@ -74,11 +74,19 @@ To set up a school, choose **Create a new school** when you sign up, or use the 
 
 Once a school has a facilitator, it only takes people through invites. Picking its name isn't enough, and neither is signing up with an address on the list: the link is what proves it's them. Each link works for 30 days, for that one address. A student invited this way doesn't need to confirm they're 13 or older, because their school signed them up.
 
+A student can't take themselves out of their school, in Profile or by accepting another school's invite. Their facilitator takes them off the list. In a school nobody runs yet, they stay until their teacher takes them out of its classes. Someone moving schools needs that first, and then the new school's invite works.
+
+Facilitators also get a **Classes** tab: every class at the school, with its teachers, term and students. Click a class to choose who teaches it: change its owner, add a teacher, change their role, move them to another class, or take them off. It shows who's in a class, not their work. Only a class's own teachers can open it.
+
+Facilitators can give a teacher a **title**, such as Head of English, under **Edit role, grades and title**. It shows with their name in Your School and in their classes.
+
+A teacher can click **Ask to be a facilitator** on Your School. The request appears under Requests for the school's facilitators to approve or decline.
+
 Select several people in the list to change their role or grades together, invite them, or remove them. Removing someone takes them out of the school; their account, classes and work stay. A school always keeps at least one facilitator who has joined, and a joined student can't be made a teacher here.
 
 **Requests.** Anyone who isn't on your list can ask to join your school, from Home, from sign-up, or by trying a class code. Requests appear at the top of Your School. Approve one with a role and grades, or decline it. If they used a class code, approving puts them in that class too. Visor hasn't confirmed an email address unless it came from Google, and each request says which, so check before approving anyone as a teacher.
 
-**Terms.** A school starts with the current school year as its term. Add terms like Fall 2026 under Your School. Every class belongs to your school and a term. A class in a past term keeps working; it just moves off Home, into the term filter.
+**Terms.** Terms are yours, not the school's. You start with the current school year; add your own, like Fall 2026, from **Terms** on Home or while creating a class. Every class belongs to your school, and sits in a term of whoever owns it. A class in a past term keeps working; it just moves off Home, into the term picker there.
 
 **Who can be in a class.** Only people in the class's school. Students there join with the class code, or a teacher adds them. Someone on the list who hasn't joined yet is added as soon as they do. Anyone else is refused and can ask to join the school. Taking someone off the school's list takes them out of its classes too; their work stays with each class. Someone who owns a class has to archive it first.
 

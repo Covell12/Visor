@@ -257,7 +257,7 @@ function publicOrg(o) {
 }
 
 function createOrg(core, name) {
-  const org = { id: uid(), name, createdAt: now(), terms: [schools.yearTerm()] };
+  const org = { id: uid(), name, createdAt: now() };
   core.orgs[org.id] = org;
   return org;
 }
@@ -323,6 +323,16 @@ function leaveSchoolClasses(core, orgId, userId) {
   }
   return left;
 }
+const askFacilitator = org => `Ask ${org.name}’s facilitator to take you off its list.`;
+// Why a student can't get out of their school, if they can't: it's one someone
+// runs, or they have a class there. Only the facilitator or teacher takes them out.
+function schoolHold(core, u) {
+  const org = u.role === 'student' && u.orgId ? own(core.orgs, u.orgId) : null;
+  if (!org) return null;
+  if (schools.isManaged(org)) return askFacilitator(org);
+  const inClass = Object.values(core.classes).some(c => c.orgId === org.id && c.studentIds.includes(u.id));
+  return inClass ? `You have a class at ${org.name}. Your teacher has to take you out of it first.` : null;
+}
 // Someone leaving their school. A school can't be left with nobody running it.
 function leaveSchool(core, u) {
   const org = u.orgId ? own(core.orgs, u.orgId) : null;
@@ -332,12 +342,18 @@ function leaveSchool(core, u) {
     org.facilitatorIds = org.facilitatorIds.filter(id => id !== u.id);
   }
   if (schools.isManaged(org)) leaveSchoolClasses(core, org.id, u.id);
+  delete u.title;
 }
 function joinSchool(core, u, org, person) {
   const before = u.orgId;
-  if (before !== org.id) leaveSchool(core, u);
+  if (before !== org.id) {
+    const held = schoolHold(core, u);
+    if (held) throw new HttpError(409, held);
+    leaveSchool(core, u);
+  }
   u.orgId = org.id;
   delete u.schoolRequest;
+  if (person.title) u.title = person.title;
   if (person.role === 'facilitator' && !schools.isFacilitator(org, u.id)) org.facilitatorIds = [...(org.facilitatorIds || []), u.id];
   if (before !== org.id) dropSchoolIfEmpty(core, before);
   classes.joinPendingInvites(core, u, cls => schoolAdmits(core, cls, u));
@@ -392,7 +408,9 @@ const avatarField = u => (u?.avatar?.id ? { avatarUrl: `/api/users/${u.id}/avata
 function selfUser(u, core) {
   const out = publicUser(u, core), r = u.schoolRequest, org = r ? own(core.orgs, r.orgId) : null;
   if (org) out.schoolRequest = { school: publicOrg(org), status: r.status, at: r.at };
-  if (out.facilitator) out.schoolRequests = Object.values(core.users).filter(x => x.schoolRequest?.orgId === u.orgId && x.schoolRequest.status === 'pending').length;
+  if (out.facilitator) out.schoolRequests = Object.values(core.users).filter(x => x.schoolRequest?.orgId === u.orgId && x.schoolRequest.status === 'pending').length + facilitatorAsks(core, own(core.orgs, u.orgId)).length;
+  const held = schoolHold(core, u);
+  if (held) out.schoolHold = held;
   return out;
 }
 
@@ -412,7 +430,7 @@ function joinClassesOnSignIn(core, user, classCode) {
   const cls = classes.findByCode(core, classCode);
   // A code for a class at a school they aren't in asks that school, and approving
   // the request puts them in the class
-  if (cls && !admits(cls)) return requestSchool(user, own(core.orgs, cls.orgId), { classId: cls.id });
+  if (cls && !admits(cls)) return user.orgId ? undefined : requestSchool(user, own(core.orgs, cls.orgId), { classId: cls.id });
   classes.joinByCode(core, user, classCode);
 }
 
@@ -645,8 +663,9 @@ app.patch('/api/me', requireAuth, ah(async (req, res) => {
       const before = u.orgId;
       const org = school ? resolveSchoolChoice(core, { schoolId: school.id, schoolName: school.name }, u) : null;
       if ((org ? org.id : null) !== before) {
-        const was = before ? own(core.orgs, before) : null;
-        if (schools.isManaged(was)) throw new HttpError(409, `Ask ${was.name}’s facilitator to take you off its list.`);
+        const was = before ? own(core.orgs, before) : null, held = schoolHold(core, u);
+        if (held) throw new HttpError(409, held);
+        if (schools.isManaged(was)) throw new HttpError(409, askFacilitator(was));
         if (!org) u.orgId = null; else placeInSchool(u, org);
         dropSchoolIfEmpty(core, before);
       }
@@ -743,7 +762,7 @@ async function fillRoster(core, org, roster) {
 function schoolRows(core, org, roster, canRun) {
   const members = new Map(membersOf(core, org).map(u => [u.email, u]));
   const row = (p, u) => ({
-    id: p?.id || `u-${u.id}`, email: p?.email || u.email, name: u ? fullName(u) : p.name, role: p?.role || roleOfMember(org, u), grades: p?.grades || [],
+    id: p?.id || `u-${u.id}`, email: p?.email || u.email, name: u ? fullName(u) : p.name, role: p?.role || roleOfMember(org, u), grades: p?.grades || [], title: p?.title || '',
     status: u ? 'joined' : !canRun ? 'waiting' : p.invitedAt ? 'invited' : 'added',
     ...(canRun && p?.invitedAt ? { invitedAt: p.invitedAt } : {}), avatarColor: u?.avatarColor || null, ...avatarField(u)
   });
@@ -781,6 +800,14 @@ async function syncFacilitators(orgId) {
     if (ids.length) org.facilitatorIds = ids;
   });
 }
+// A teacher's title, as the facilitators gave it. On the account too, so a class
+// can show it without reading the list.
+async function syncTitles(orgId) {
+  const titles = new Map((await schoolRoster(orgId)).people.map(p => [p.email, p.title]));
+  await repo.withCore(core => {
+    for (const u of membersOf(core, { id: orgId })) { if (titles.get(u.email)) u.title = titles.get(u.email); else delete u.title; }
+  });
+}
 // A facilitator's request: the school, with everyone in it on its list first
 async function schoolToRun(req) {
   const core = await repo.readCore();
@@ -789,22 +816,62 @@ async function schoolToRun(req) {
   return { core, ...got };
 }
 
+// Every class at a school, for its facilitators: who's in each, not their work.
+// A class from before classes had to be in a school counts by its owner.
+function schoolClasses(core, org, me) {
+  const members = new Set(membersOf(core, org).map(u => u.id));
+  const order = { current: 0, upcoming: 1, past: 2 }, rank = c => (c.archived ? 4 : order[c.term?.state] ?? 3);
+  const names = ids => ids.map(id => fullName(core.users[id])).filter(Boolean);
+  const staff = c => classes.staffIdsOf(c).map(id => own(core.users, id)).filter(Boolean).map(u => ({ id: u.id, name: fullName(u), title: u.title || '', role: classes.staffRole(c, u.id) }));
+  return Object.values(core.classes).filter(c => c.orgId === org.id || (!c.orgId && members.has(c.teacherId)))
+    .map(c => { const term = termOfClass(core, c); return { id: c.id, name: c.name, archived: !!c.archived, inSchool: c.orgId === org.id, term: term ? publicTerm(term) : null, staff: staff(c), students: names(c.studentIds).sort((a, b) => a.localeCompare(b)), mine: classes.isClassTeacher(c, me.id) }; })
+    .sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
+}
+
 app.get('/api/school', requireAuth, ah(async (req, res) => {
   const core = await repo.readCore();
   const me = meOrThrow(req, core);
   if (me.role !== 'teacher') throw new HttpError(403, 'Your School is for teachers.');
   const base = { roles: Object.entries(schools.ROLES).map(([id, r]) => ({ id, label: r.label, about: r.about })), grades: schools.GRADES, mailReady: mail.ready() };
   const org = me.orgId ? own(core.orgs, me.orgId) : null;
-  if (!org) return res.json({ ...base, school: null, people: [], canRun: false, terms: [], requests: [] });
+  if (!org) return res.json({ ...base, school: null, people: [], canRun: false, requests: [], facilitatorRequests: [], classes: [], teachers: [] });
   const canRun = schools.isFacilitator(org, me.id);
   const saved = await schoolRoster(org.id);
   const roster = canRun ? await fillRoster(core, org, saved) : saved;
-  const inSchool = Object.values(core.classes).filter(c => c.orgId === org.id && !c.archived);
   res.json({
     ...base, school: { ...publicOrg(org), facilitators: (org.facilitatorIds || []).map(id => fullName(core.users[id])).filter(Boolean) }, canRun, people: schoolRows(core, org, roster, canRun),
-    terms: schools.termsOf(org).map(t => ({ ...publicTerm(t), classes: inSchool.filter(c => c.termId === t.id).length })), classCount: inSchool.length,
-    requests: canRun ? schoolRequests(core, org) : []
+    classCount: Object.values(core.classes).filter(c => c.orgId === org.id && !c.archived).length,
+    requests: canRun ? schoolRequests(core, org) : [],
+    facilitatorRequests: canRun ? facilitatorAsks(core, org).map(publicAsk) : [],
+    myFacilitatorRequest: canRun || me.facilitatorRequest?.orgId !== org.id ? null : { status: me.facilitatorRequest.status },
+    classes: canRun ? schoolClasses(core, org, me) : [],
+    teachers: canRun ? membersOf(core, org).filter(u => u.role === 'teacher').map(u => ({ id: u.id, name: fullName(u), title: u.title || '' })).sort((a, b) => a.name.localeCompare(b.name)) : []
   });
+}));
+
+// A facilitator choosing who teaches a class. { userId, role } puts a teacher at
+// the school in that role ('owner' hands them the class), role null takes them
+// off it, and { userId, moveTo } moves them to another class in the same role.
+app.post('/api/school/classes/:id/teachers', requireAuth, ah(async (req, res) => {
+  await repo.withCore(core => {
+    const { org } = schoolFor(req, core, { run: true });
+    const here = id => { const c = own(core.classes, id); if (c?.orgId !== org.id) throw new HttpError(404, 'That class isn’t in this school.'); return c; };
+    const cls = here(req.params.id), u = own(core.users, req.body?.userId), { role, moveTo } = req.body || {};
+    if (!u || u.orgId !== org.id || u.role !== 'teacher') throw new HttpError(400, 'Pick a teacher at this school.');
+    if (moveTo) {
+      const to = here(moveTo), was = classes.staffRole(cls, u.id);
+      if (!was) throw new HttpError(404, 'That teacher isn’t in this class');
+      classes.removeTeacher(cls, u.id);
+      if (!classes.staffRole(to, u.id)) classes.assignTeacher(to, u.id, was);
+    } else if (role === null) classes.removeTeacher(cls, u.id);
+    else {
+      // A class's term is its owner's, so a new owner gets it too
+      const term = role === 'owner' ? termOfClass(core, cls) : null;
+      if (term && !schools.termsOf(u).some(t => t.id === term.id)) schools.ensureTerms(u).push({ ...term });
+      classes.assignTeacher(cls, u.id, role);
+    }
+  });
+  res.json({ ok: true });
 }));
 
 // Create a school (or take over one with that name that nobody runs): { name }
@@ -921,10 +988,12 @@ app.post('/api/school/people/update', requireAuth, ah(async (req, res) => {
       if (role) p.role = role;
       if (b.grades !== undefined) p.grades = schools.cleanGrades(b.grades);
       if (typeof b.name === 'string' && ids.size === 1) p.name = cleanText(b.name, 120);
+      if (typeof b.title === 'string' && ids.size === 1 && p.role !== 'student') p.title = cleanText(b.title, 60);
     }
     checkRoster(core, org, roster.people);
   });
   await syncFacilitators(org.id);
+  await syncTitles(org.id);
   res.json({ ok: true });
 }));
 
@@ -950,6 +1019,7 @@ app.post('/api/school/people/remove', requireAuth, ah(async (req, res) => {
     for (const u of Object.values(c.users)) {
       if (u.orgId !== org.id || !gone.includes(u.email)) continue;
       u.orgId = null;
+      delete u.title;
       for (const classId of leaveSchoolClasses(c, org.id, u.id)) out.push({ userId: u.id, classId });
     }
     return out;
@@ -960,39 +1030,55 @@ app.post('/api/school/people/remove', requireAuth, ah(async (req, res) => {
 }));
 
 // ---- Terms ----
+// A teacher's own, on their account (lib/schools.js)
 const publicTerm = t => ({ id: t.id, name: t.name, startsOn: t.startsOn, endsOn: t.endsOn, state: schools.termState(t) });
-app.get('/api/school/terms', requireAuth, ah(async (req, res) => {
-  const { org } = schoolFor(req, await repo.readCore());
-  res.json({ terms: schools.termsOf(org).map(publicTerm), current: schools.currentTerm(org).id });
+// The term a class sits in. Classes from when terms belonged to the school keep theirs.
+function termOfClass(core, cls) {
+  const org = cls.orgId ? own(core.orgs, cls.orgId) : null;
+  return [...schools.termsOf(own(core.users, cls.teacherId)), ...(org?.terms || [])].find(t => t.id === cls.termId) || null;
+}
+// A class's term: the one asked for, or the one running now
+function termForClass(owner, termId) {
+  schools.ensureTerms(owner);
+  if (termId == null || termId === '') return schools.currentTerm(owner).id;
+  if (!schools.termsOf(owner).some(t => t.id === termId)) throw new HttpError(400, 'Pick one of the terms for this class.');
+  return termId;
+}
+// Your terms, or with ?classId= those of whoever owns that class
+app.get('/api/terms', requireAuth, requireTeacher, ah(async (req, res) => {
+  const core = await repo.readCore(), me = meOrThrow(req, core);
+  const cls = req.query.classId ? own(core.classes, String(req.query.classId)) : null;
+  if (req.query.classId && !classes.isClassTeacher(cls, me.id)) throw new HttpError(403, 'you are not in this class');
+  const holder = cls ? own(core.users, cls.teacherId) : me, list = schools.termsOf(holder), kept = cls ? termOfClass(core, cls) : null;
+  if (kept && !list.some(t => t.id === kept.id)) list.push(kept);
+  const using = t => Object.values(core.classes).filter(c => c.teacherId === holder.id && c.termId === t.id && !c.archived).length;
+  res.json({ terms: list.map(t => ({ ...publicTerm(t), classes: using(t) })), current: schools.currentTerm(holder).id });
 }));
-app.post('/api/school/terms', requireAuth, ah(async (req, res) => {
+app.post('/api/terms', requireAuth, requireTeacher, ah(async (req, res) => {
   const term = await repo.withCore(core => {
-    const { org } = schoolFor(req, core, { run: true });
     const t = { id: crypto.randomBytes(8).toString('hex'), ...schools.cleanTerm(req.body) };
-    schools.ensureTerms(org).push(t);
+    schools.ensureTerms(meOrThrow(req, core)).push(t);
     return publicTerm(t);
   });
   res.json({ term });
 }));
-app.patch('/api/school/terms/:id', requireAuth, ah(async (req, res) => {
+app.patch('/api/terms/:id', requireAuth, requireTeacher, ah(async (req, res) => {
   const term = await repo.withCore(core => {
-    const { org } = schoolFor(req, core, { run: true });
-    const t = schools.ensureTerms(org).find(x => x.id === req.params.id);
+    const t = schools.ensureTerms(meOrThrow(req, core)).find(x => x.id === req.params.id);
     if (!t) throw new HttpError(404, 'term not found');
     Object.assign(t, schools.cleanTerm(req.body));
     return publicTerm(t);
   });
   res.json({ term });
 }));
-app.delete('/api/school/terms/:id', requireAuth, ah(async (req, res) => {
+app.delete('/api/terms/:id', requireAuth, requireTeacher, ah(async (req, res) => {
   await repo.withCore(core => {
-    const { org } = schoolFor(req, core, { run: true });
-    const list = schools.ensureTerms(org);
+    const me = meOrThrow(req, core), list = schools.ensureTerms(me);
     if (!list.some(x => x.id === req.params.id)) throw new HttpError(404, 'term not found');
-    if (list.length === 1) throw new HttpError(409, 'A school needs at least one term.');
-    const using = Object.values(core.classes).filter(c => c.orgId === org.id && c.termId === req.params.id).length;
+    if (list.length === 1) throw new HttpError(409, 'You need at least one term.');
+    const using = Object.values(core.classes).filter(c => c.teacherId === me.id && c.termId === req.params.id).length;
     if (using) throw new HttpError(409, `${using === 1 ? 'A class is' : `${using} classes are`} in this term. Move ${using === 1 ? 'it' : 'them'} to another term first.`);
-    org.terms = list.filter(x => x.id !== req.params.id);
+    me.terms = list.filter(x => x.id !== req.params.id);
   });
   res.json({ ok: true });
 }));
@@ -1028,6 +1114,7 @@ app.post('/api/school/requests/:userId', requireAuth, ah(async (req, res) => {
   const { core, me, org } = await schoolToRun(req);
   const asking = own(core.users, req.params.userId);
   if (asking?.schoolRequest?.orgId !== org.id || asking.schoolRequest.status !== 'pending') throw new HttpError(404, 'That request has already been answered.');
+  if (req.body?.approve && schoolHold(core, asking)) throw new HttpError(409, `${fullName(asking)} is in another school and has to leave it first.`);
   if (!req.body?.approve) {
     await repo.withCore(c => { const u = own(c.users, asking.id); if (u?.schoolRequest?.orgId === org.id) u.schoolRequest.status = 'declined'; });
     return res.json({ ok: true });
@@ -1041,6 +1128,45 @@ app.post('/api/school/requests/:userId', requireAuth, ah(async (req, res) => {
     const cls = u.schoolRequest?.classId ? own(c.classes, u.schoolRequest.classId) : null;
     joinSchool(c, u, o, person);
     if (cls?.orgId === o.id && !cls.archived && u.role === 'student') classes.enroll(cls, u.id);
+  });
+  res.json({ ok: true });
+}));
+
+// ---- Asking to be a facilitator ----
+// A teacher at a school someone runs can ask its facilitators. One request at a
+// time, kept on the account: { orgId, status: 'pending' | 'declined', at, note }.
+function facilitatorAsks(core, org) {
+  return Object.values(core.users).filter(u => u.orgId === org?.id && u.facilitatorRequest?.orgId === org.id && u.facilitatorRequest.status === 'pending' && !schools.isFacilitator(org, u.id))
+    .sort((a, b) => (a.facilitatorRequest.at < b.facilitatorRequest.at ? -1 : 1));
+}
+const publicAsk = u => ({ id: u.id, name: fullName(u), email: u.email, at: u.facilitatorRequest.at, note: u.facilitatorRequest.note || '', avatarColor: u.avatarColor || null, ...avatarField(u) });
+app.post('/api/school/facilitator-request', requireAuth, ah(async (req, res) => {
+  const user = await repo.withCore(core => {
+    const { me, org } = schoolFor(req, core);
+    if (!schools.isManaged(org)) throw new HttpError(409, 'Nobody runs this school yet, so you can take it over.');
+    if (schools.isFacilitator(org, me.id)) throw new HttpError(409, 'You’re already a facilitator here.');
+    me.facilitatorRequest = { orgId: org.id, status: 'pending', at: now(), note: cleanText(req.body?.note, 300) };
+    return selfUser(me, core);
+  });
+  res.json({ user });
+}));
+app.delete('/api/school/facilitator-request', requireAuth, ah(async (req, res) => {
+  const user = await repo.withCore(core => { const me = meOrThrow(req, core); delete me.facilitatorRequest; return selfUser(me, core); });
+  res.json({ user });
+}));
+// Answer one: { approve: true } or { approve: false }
+app.post('/api/school/facilitator-requests/:userId', requireAuth, ah(async (req, res) => {
+  const { core, org } = await schoolToRun(req);
+  const asking = own(core.users, req.params.userId);
+  if (!asking || !facilitatorAsks(core, org).includes(asking)) throw new HttpError(404, 'That request has already been answered.');
+  if (req.body?.approve) {
+    await changeRoster(org.id, roster => { const p = roster.people.find(x => x.email === asking.email); if (p) p.role = 'facilitator'; });
+    await syncFacilitators(org.id);
+  }
+  await repo.withCore(c => {
+    const u = own(c.users, asking.id);
+    if (!u?.facilitatorRequest) return;
+    if (req.body?.approve) delete u.facilitatorRequest; else u.facilitatorRequest.status = 'declined';
   });
   res.json({ ok: true });
 }));
@@ -1992,6 +2118,7 @@ function publicTeachers(core, cls, withEmail = false) {
   return classes.teacherIdsOf(cls).map(id => own(core.users, id)).filter(Boolean).map(u => {
     const t = { id: u.id, name: fullName(u), avatarColor: u.avatarColor || null, ...avatarField(u), owner: u.id === cls.teacherId };
     if (classes.staffRole(cls, u.id) === 'assistant') t.assistant = true;
+    if (u.title) t.title = u.title;
     if (withEmail) t.email = u.email;
     return t;
   });
@@ -2004,7 +2131,7 @@ const publicAdvisors = (core, cls) => (cls.advisorIds || []).map(id => own(core.
 // on the staff, advisors included.
 // Where a class sits: its school and term, once it has them
 function classPlace(core, cls) {
-  const org = cls.orgId ? own(core.orgs, cls.orgId) : null, term = org ? schools.termsOf(org).find(t => t.id === cls.termId) : null;
+  const org = cls.orgId ? own(core.orgs, cls.orgId) : null, term = termOfClass(core, cls);
   return { ...(org ? { school: publicOrg(org) } : {}), ...(term ? { term: publicTerm(term) } : {}) };
 }
 function publicClass(core, cls, me) {
@@ -2060,29 +2187,25 @@ app.post('/api/classes', requireAuth, requireTeacher, ah(async (req, res) => {
     const me = meOrThrow(req, core), org = me.orgId ? own(core.orgs, me.orgId) : null;
     if (!org && classesNeedSchool()) throw new HttpError(409, 'Classes belong to a school. Create yours, or ask to join it, on the Your School page.');
     const cls = classes.createClass(core, me, req.body?.name);
-    if (org) cls.termId = termForClass(org, req.body?.termId);
+    cls.termId = termForClass(me, req.body?.termId);
     return publicClass(core, cls, me);
   });
   res.json({ class: out });
 }));
 // (Only for test files about something else, and it can't be turned on elsewhere.)
 const classesNeedSchool = () => !(process.env.NODE_ENV === 'test' && process.env.VISOR_SCHOOL_OPTIONAL === '1');
-// A class's term: the one asked for, or the one running now
-function termForClass(org, termId) {
-  schools.ensureTerms(org);
-  if (termId == null || termId === '') return schools.currentTerm(org).id;
-  if (!schools.termsOf(org).some(t => t.id === termId)) throw new HttpError(400, 'Pick one of your school’s terms.');
-  return termId;
-}
-
 // Join with a class code (students). A class at a school they aren't in answers
 // with that school, so the page can offer to ask it.
 app.post('/api/classes/join', requireAuth, ah(async (req, res) => {
   const out = await repo.withCore(core => {
     const me = meOrThrow(req, core), found = classes.findByCode(core, req.body?.code);
-    if (found && !found.archived && me.role === 'student' && !schoolAdmits(core, found, me)) return { blocked: { school: publicOrg(own(core.orgs, found.orgId)), classId: found.id, className: found.name } };
+    if (found && !found.archived && me.role === 'student' && !schoolAdmits(core, found, me)) {
+      const place = { school: publicOrg(own(core.orgs, found.orgId)), classId: found.id, className: found.name }, mine = own(core.orgs, me.orgId);
+      return mine ? { inSchool: { ...place, mine: mine.name } } : { blocked: place };
+    }
     return { cls: publicClass(core, classes.joinByCode(core, me, req.body?.code), me) };
   });
+  if (out.inSchool) return res.status(403).json({ error: `${out.inSchool.className} is part of ${out.inSchool.school.name}, and you’re in ${out.inSchool.mine}.` });
   if (out.blocked) return res.status(403).json({ error: `${out.blocked.className} is part of ${out.blocked.school.name}, and you aren’t in that school yet.`, needsSchool: out.blocked });
   res.json({ class: out.cls });
 }));
@@ -2094,7 +2217,7 @@ app.post('/api/classes/:id/school', requireAuth, ah(async (req, res) => {
     if (got.cls.orgId) throw new HttpError(409, 'This class is already in a school.');
     if (!org) throw new HttpError(409, 'You aren’t in a school yet.');
     got.cls.orgId = org.id;
-    got.cls.termId = termForClass(org, req.body?.termId);
+    got.cls.termId = got.cls.termId || termForClass(own(core.users, got.cls.teacherId), req.body?.termId);
     if (schools.isManaged(org)) pullClassStudents(core, org);
     return publicClass(core, got.cls, got.me);
   });
@@ -2120,11 +2243,7 @@ app.patch('/api/classes/:id', requireAuth, ah(async (req, res) => {
   const out = await repo.withCore(core => {
     const got = teacherClass(req, core);
     classes.patchClass(got.cls, req.body || {});
-    if (req.body?.termId !== undefined) {
-      const org = got.cls.orgId ? own(core.orgs, got.cls.orgId) : null;
-      if (!org) throw new HttpError(400, 'Add this class to a school first.');
-      got.cls.termId = termForClass(org, req.body.termId);
-    }
+    if (req.body?.termId !== undefined) got.cls.termId = termForClass(own(core.users, got.cls.teacherId), req.body.termId);
     return publicClass(core, got.cls, got.me);
   });
   res.json({ class: out });

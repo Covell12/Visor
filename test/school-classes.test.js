@@ -180,26 +180,227 @@ test('members can’t walk out of a school someone runs from Profile', async () 
   assert.match(r.data.error, /facilitator/);
 });
 
-test('terms: facilitators set them, classes pick one, and one in use stays', async () => {
+test('a student can’t leave for another school until they’re taken off the list', async () => {
+  const a = await school(), b = await school();
+  await a.f.post(`/api/classes/${a.cls.id}/students`, { emails: [a.sUser.email] });
+  await b.f.post('/api/school/people', { people: [{ email: a.sUser.email, role: 'student', grades: ['9'] }] });
+  const row = (await b.f.get('/api/school')).data.people.find(p => p.email === a.sUser.email);
+  const token = (await b.f.post('/api/school/invites', { ids: [row.id], copy: true })).data.links[0].link.split('/invite/')[1];
+  const r = await a.s.post(`/api/invite/${token}/accept`);
+  assert.strictEqual(r.status, 409);
+  assert.match(r.data.error, /facilitator/);
+  const self = (await a.s.get('/api/me')).data.user;
+  assert.strictEqual(self.orgId, a.orgId);
+  assert.match(self.schoolHold, /facilitator/);
+  assert.strictEqual((await a.f.get(`/api/classes/${a.cls.id}`)).data.class.students.length, 1, 'still in the class');
+  const code = (await b.f.post('/api/classes', { name: 'Elsewhere' })).data.class.joinCode;
+  const join = await a.s.post('/api/classes/join', { code });
+  assert.strictEqual(join.status, 403);
+  assert.strictEqual(join.data.needsSchool, undefined, 'and a code doesn’t offer a way out');
+  assert.strictEqual((await a.s.get('/api/me')).data.user.schoolRequest, undefined);
+  const onList = (await a.f.get('/api/school')).data.people.find(p => p.email === a.sUser.email);
+  await a.f.post('/api/school/people/remove', { ids: [onList.id] });
+  assert.strictEqual((await a.s.get('/api/me')).data.user.orgId, null);
+  assert.strictEqual((await a.s.post(`/api/invite/${token}/accept`)).status, 200, 'the same link works once they’re out');
+  assert.strictEqual((await a.s.get('/api/me')).data.user.orgId, b.orgId);
+});
+
+test('in a school nobody runs, a student stays while they have a class there', async () => {
+  const { f, s, sUser, cls, orgId } = await school();
+  await f.post(`/api/classes/${cls.id}/students`, { emails: [sUser.email] });
+  await repo.withCore(core => { core.orgs[orgId].facilitatorIds = []; });
+  const r = await s.patch('/api/me', { school: null });
+  assert.strictEqual(r.status, 409);
+  assert.match(r.data.error, /teacher/);
+  assert.match((await s.get('/api/me')).data.user.schoolHold, /class at/);
+  await repo.withCore(core => { core.classes[cls.id].studentIds = []; });
+  assert.strictEqual((await s.get('/api/me')).data.user.schoolHold, undefined);
+  assert.strictEqual((await s.patch('/api/me', { school: null })).status, 200, 'one they picked themselves can still be changed');
+});
+
+test('whoever creates a school runs it, however they create it', async () => {
+  const signedUp = client(), name = `Creators High ${++n}`;
+  const a = (await signup(signedUp, 'teacher', 'Ada', { schoolName: name })).data.user;
+  assert.strictEqual(a.facilitator, true);
+  const d = (await signedUp.get('/api/school')).data;
+  assert.strictEqual(d.canRun, true);
+  assert.deepStrictEqual(d.people.map(p => p.role), ['facilitator']);
+  const later = client();
+  await signup(later, 'teacher', 'Ben');
+  assert.strictEqual((await later.post('/api/school', { name: `Creators Middle ${++n}` })).data.user.facilitator, true);
+  const fromProfile = client();
+  await signup(fromProfile, 'teacher', 'Cal');
+  assert.strictEqual((await fromProfile.patch('/api/me', { school: { name: `Creators Prep ${++n}` } })).data.user.facilitator, true);
+  const pupil = client();
+  const st = (await signup(pupil, 'student', 'Eve', { schoolName: `Pupils School ${++n}` }));
+  assert.strictEqual(st.status, 403, 'students don’t create schools');
+});
+
+test('facilitators see every class at the school; other teachers don’t', async () => {
+  const { f, s, sUser, cls, orgId } = await school();
+  await f.post(`/api/classes/${cls.id}/students`, { emails: [sUser.email] });
+  const t = client(), tr = await signup(t, 'teacher', 'Tom');
+  await f.post('/api/school/people', { people: [{ email: tr.data.user.email, role: 'teacher' }] });
+  await accept(f, tr.data.user.email, t);
+  const theirs = (await t.post('/api/classes', { name: 'Biology' })).data.class;
+  const hidden = (await t.post('/api/classes', { name: 'Archived Art' })).data.class;
+  await repo.withCore(core => { core.classes[hidden.id].archived = true; });
+  const other = await school();
+  await other.f.post('/api/classes', { name: 'Not this school' });
+  const d = (await f.get('/api/school')).data;
+  assert.deepStrictEqual(d.classes.map(c => c.name), ['Biology', 'English', 'Archived Art']);
+  const bio = d.classes[0], eng = d.classes[1];
+  assert.deepStrictEqual([bio.staff.map(x => [x.name, x.role]), bio.students, bio.mine, bio.term.state], [[['Tom Tester', 'owner']], [], false, 'current']);
+  assert.deepStrictEqual([eng.students, eng.mine], [['Sia Tester'], true]);
+  assert.strictEqual(d.classes[2].archived, true);
+  assert.strictEqual(JSON.stringify(d.classes).includes('joinCode'), false);
+  assert.deepStrictEqual((await t.get('/api/school')).data.classes, []);
+  assert.strictEqual((await f.get(`/api/classes/${theirs.id}`)).status, 403, 'seeing a class isn’t opening it');
+  assert.ok(orgId && s);
+});
+
+test('a teacher can ask to be a facilitator, and the facilitators decide', async () => {
+  const { f, s, orgId, fUser } = await school();
+  const t = client(), tr = await signup(t, 'teacher', 'Tia');
+  await f.post('/api/school/people', { people: [{ email: tr.data.user.email, role: 'teacher' }] });
+  await accept(f, tr.data.user.email, t);
+  assert.strictEqual((await s.post('/api/school/facilitator-request', {})).status, 403);
+  assert.strictEqual((await f.post('/api/school/facilitator-request', {})).status, 409, 'not if they already are');
+  assert.strictEqual((await t.post(`/api/school/facilitator-requests/${tr.data.user.id}`, { approve: true })).status, 403, 'they can’t answer their own');
+  await t.post('/api/school/facilitator-request', { note: 'I run the English department' });
+  assert.deepStrictEqual((await t.get('/api/school')).data.myFacilitatorRequest, { status: 'pending' });
+  const list = (await f.get('/api/school')).data.facilitatorRequests;
+  assert.deepStrictEqual(list.map(r => [r.name, r.note]), [['Tia Tester', 'I run the English department']]);
+  assert.strictEqual((await f.get('/api/me')).data.user.schoolRequests, 1);
+  const other = await school();
+  assert.strictEqual((await other.f.post(`/api/school/facilitator-requests/${tr.data.user.id}`, { approve: true })).status, 404);
+  await f.post(`/api/school/facilitator-requests/${tr.data.user.id}`, { approve: false });
+  assert.deepStrictEqual((await t.get('/api/school')).data.myFacilitatorRequest, { status: 'declined' });
+  assert.deepStrictEqual((await f.get('/api/school')).data.facilitatorRequests, []);
+  await t.post('/api/school/facilitator-request', {});
+  await t.del('/api/school/facilitator-request');
+  assert.strictEqual((await t.get('/api/school')).data.myFacilitatorRequest, null);
+  await t.post('/api/school/facilitator-request', {});
+  assert.strictEqual((await f.post(`/api/school/facilitator-requests/${tr.data.user.id}`, { approve: true })).status, 200);
+  const made = (await t.get('/api/me')).data.user;
+  assert.strictEqual(made.facilitator, true);
+  const d = (await t.get('/api/school')).data;
+  assert.deepStrictEqual([d.canRun, d.people.find(p => p.email === made.email).role, d.myFacilitatorRequest], [true, 'facilitator', null]);
+  assert.strictEqual((await f.get('/api/me')).data.user.facilitator, true, 'the first one still is too');
+  assert.strictEqual((await f.post(`/api/school/facilitator-requests/${tr.data.user.id}`, { approve: true })).status, 404, 'answered once');
+  await repo.withCore(core => { core.orgs[orgId].facilitatorIds = []; });
+  assert.strictEqual((await t.post('/api/school/facilitator-request', {})).status, 409, 'in a school nobody runs they just take it over');
+  assert.ok(fUser);
+});
+
+test('terms are each teacher’s own: they set them, classes pick one, and one in use stays', async () => {
   const { f, s, cls } = await school();
-  assert.strictEqual((await s.post('/api/school/terms', { name: 'X', startsOn: '2026-01-01', endsOn: '2026-02-01' })).status, 403);
-  const bad = await f.post('/api/school/terms', { name: 'Back to front', startsOn: '2026-05-01', endsOn: '2026-01-01' });
-  assert.strictEqual(bad.status, 400);
-  const fall = (await f.post('/api/school/terms', { name: 'Fall', startsOn: '2020-09-01', endsOn: '2020-12-20' })).data.term;
+  assert.strictEqual((await s.post('/api/terms', { name: 'X', startsOn: '2026-01-01', endsOn: '2026-02-01' })).status, 403);
+  const t = client(), tu = (await signup(t, 'teacher', 'Una')).data.user;
+  await f.post('/api/school/people', { people: [{ email: tu.email, role: 'teacher' }] });
+  await accept(f, tu.email, t);
+  assert.strictEqual((await t.post('/api/terms', { name: 'Back to front', startsOn: '2026-05-01', endsOn: '2026-01-01' })).status, 400);
+  const fall = (await t.post('/api/terms', { name: 'Fall', startsOn: '2020-09-01', endsOn: '2020-12-20' })).data.term;
   assert.strictEqual(fall.state, 'past');
-  const list = (await f.get('/api/school/terms')).data;
-  assert.strictEqual(list.terms.length, 2);
-  const moved = await f.patch(`/api/classes/${cls.id}`, { termId: fall.id });
-  assert.deepStrictEqual([moved.data.class.term.name, moved.data.class.term.state], ['Fall', 'past']);
-  assert.strictEqual((await f.patch(`/api/classes/${cls.id}`, { termId: 'nope' })).status, 400);
-  assert.strictEqual((await f.del(`/api/school/terms/${fall.id}`)).status, 409, 'a class is using it');
-  await f.patch(`/api/classes/${cls.id}`, { termId: list.terms.find(t => t.id !== fall.id).id });
-  assert.strictEqual((await f.del(`/api/school/terms/${fall.id}`)).status, 200);
-  const last = (await f.get('/api/school/terms')).data.terms[0];
-  await f.patch(`/api/classes/${cls.id}`, { name: 'English' });
-  assert.strictEqual((await f.del(`/api/school/terms/${last.id}`)).status, 409, 'a school keeps one');
-  const renamed = await f.patch(`/api/school/terms/${last.id}`, { name: 'This year', startsOn: last.startsOn, endsOn: last.endsOn });
+  assert.strictEqual((await f.get('/api/terms')).data.terms.length, 1, 'a teacher’s terms are theirs alone');
+  assert.strictEqual((await t.get('/api/terms')).data.terms.length, 2);
+  assert.strictEqual((await f.get('/api/school')).data.terms, undefined, 'and the school has none');
+  const made = await t.post('/api/classes', { name: 'History', termId: fall.id });
+  assert.deepStrictEqual([made.data.class.term.name, made.data.class.term.state], ['Fall', 'past']);
+  assert.strictEqual((await f.patch(`/api/classes/${cls.id}`, { termId: fall.id })).status, 400, 'someone else’s term can’t be used');
+  assert.strictEqual((await t.patch(`/api/classes/${made.data.class.id}`, { termId: 'nope' })).status, 400);
+  assert.strictEqual((await t.del(`/api/terms/${fall.id}`)).status, 409, 'a class is using it');
+  const year = (await t.get('/api/terms')).data.terms.find(x => x.id !== fall.id);
+  await t.patch(`/api/classes/${made.data.class.id}`, { termId: year.id });
+  assert.strictEqual((await t.del(`/api/terms/${fall.id}`)).status, 200);
+  assert.strictEqual((await f.del(`/api/terms/${(await f.get('/api/terms')).data.terms[0].id}`)).status, 409, 'everyone keeps one');
+  const renamed = await t.patch(`/api/terms/${year.id}`, { name: 'This year', startsOn: year.startsOn, endsOn: year.endsOn });
   assert.strictEqual(renamed.data.term.name, 'This year');
+  // A co-teacher picks from the owner's terms, and a class keeps a term from when schools had them
+  await t.post(`/api/classes/${made.data.class.id}/teachers`, { email: (await f.get('/api/me')).data.user.email, role: 'teacher' });
+  assert.deepStrictEqual((await f.get(`/api/terms?classId=${made.data.class.id}`)).data.terms.map(x => x.name), ['This year']);
+  assert.strictEqual((await s.get(`/api/terms?classId=${made.data.class.id}`)).status, 403);
+  await repo.withCore(core => { const c = core.classes[cls.id]; core.orgs[c.orgId].terms = [{ id: 'old-term', name: 'Old', startsOn: '2025-01-01', endsOn: '2025-05-01' }]; c.termId = 'old-term'; });
+  assert.strictEqual((await f.get(`/api/classes/${cls.id}`)).data.class.term.name, 'Old');
+  assert.ok((await f.get(`/api/terms?classId=${cls.id}`)).data.terms.some(x => x.name === 'Old'));
+});
+
+test('facilitators choose who teaches each class', async () => {
+  const { f, s, fUser, cls, orgId } = await school();
+  const hire = async name => {
+    const c = client(), u = (await signup(c, 'teacher', name)).data.user;
+    await f.post('/api/school/people', { people: [{ email: u.email, role: 'teacher' }] });
+    await accept(f, u.email, c);
+    return { c, u };
+  };
+  const a = await hire('Ann'), b = await hire('Bob');
+  const bio = (await a.c.post('/api/classes', { name: 'Biology' })).data.class;
+  const assign = (id, body, who = f) => who.post(`/api/school/classes/${id}/teachers`, body);
+  const staff = async id => (await f.get('/api/school')).data.classes.find(c => c.id === id).staff.map(t => [t.name.split(' ')[0], t.role]);
+  assert.strictEqual((await assign(bio.id, { userId: b.u.id, role: 'teacher' }, a.c)).status, 403, 'only a facilitator');
+  assert.strictEqual((await assign(bio.id, { userId: (await s.get('/api/me')).data.user.id, role: 'teacher' })).status, 400, 'teachers only');
+  const outsider = await school();
+  assert.strictEqual((await assign(bio.id, { userId: outsider.fUser.id, role: 'teacher' })).status, 400, 'at this school');
+  assert.strictEqual((await assign(outsider.cls.id, { userId: b.u.id, role: 'teacher' })).status, 404);
+  assert.strictEqual((await assign(bio.id, { userId: b.u.id, role: 'boss' })).status, 400);
+  assert.strictEqual((await assign(bio.id, { userId: b.u.id, role: 'teacher' })).status, 200);
+  assert.deepStrictEqual(await staff(bio.id), [['Ann', 'owner'], ['Bob', 'teacher']]);
+  assert.strictEqual((await b.c.get(`/api/classes/${bio.id}`)).status, 200, 'and they’re really in it');
+  await assign(bio.id, { userId: b.u.id, role: 'assistant' });
+  assert.deepStrictEqual(await staff(bio.id), [['Ann', 'owner'], ['Bob', 'assistant']]);
+  assert.strictEqual((await assign(bio.id, { userId: a.u.id, role: null })).status, 400, 'an owner has to be replaced first');
+  const fall = (await a.c.post('/api/terms', { name: 'Ann’s fall', startsOn: '2026-08-01', endsOn: '2026-12-20' })).data.term;
+  await a.c.patch(`/api/classes/${bio.id}`, { termId: fall.id });
+  assert.strictEqual((await assign(bio.id, { userId: b.u.id, role: 'owner' })).status, 200);
+  assert.deepStrictEqual(await staff(bio.id), [['Bob', 'owner'], ['Ann', 'teacher']]);
+  assert.strictEqual((await b.c.get(`/api/classes/${bio.id}`)).data.class.term.name, 'Ann’s fall', 'the class keeps its term');
+  assert.strictEqual((await assign(bio.id, { userId: a.u.id, moveTo: outsider.cls.id })).status, 404);
+  assert.strictEqual((await assign(bio.id, { userId: a.u.id, moveTo: cls.id })).status, 200);
+  assert.deepStrictEqual(await staff(bio.id), [['Bob', 'owner']]);
+  assert.deepStrictEqual(await staff(cls.id), [['Fay', 'owner'], ['Ann', 'teacher']]);
+  assert.strictEqual((await a.c.get(`/api/classes/${bio.id}`)).status, 403, 'they left the old class');
+  assert.strictEqual((await assign(bio.id, { userId: b.u.id, moveTo: cls.id })).status, 400, 'an owner can’t be moved away');
+  assert.strictEqual((await assign(cls.id, { userId: a.u.id, role: null })).status, 200);
+  assert.deepStrictEqual(await staff(cls.id), [['Fay', 'owner']]);
+  assert.ok(fUser && orgId);
+});
+
+test('all of a school’s classes show, even one its teacher hasn’t added yet', async () => {
+  const { f, fUser } = await school();
+  const old = client(), u = (await signup(old, 'teacher', 'Lee')).data.user;
+  await f.post('/api/school/people', { people: [{ email: u.email, role: 'teacher' }] });
+  await accept(f, u.email, old);
+  const id = 'legacy-class';
+  await repo.withCore(core => { core.classes[id] = { id, name: 'From before schools', teacherId: u.id, orgId: null, studentIds: [], coTeacherIds: [], assistantIds: [], advisorIds: [], joinCode: 'LEGACY', createdAt: new Date().toISOString() }; });
+  const row = (await f.get('/api/school')).data.classes.find(c => c.id === id);
+  assert.strictEqual(row.inSchool, false);
+  assert.strictEqual((await f.post(`/api/school/classes/${id}/teachers`, { userId: fUser.id, role: 'teacher' })).status, 404, 'its owner adds it first');
+});
+
+test('a facilitator can give a teacher a title, and it follows them', async () => {
+  const { f, s, sUser, cls } = await school();
+  const t = client(), u = (await signup(t, 'teacher', 'Ivy')).data.user;
+  await f.post('/api/school/people', { people: [{ email: u.email, role: 'teacher' }] });
+  const row = async email => (await f.get('/api/school')).data.people.find(p => p.email === email);
+  // Given before they've joined, it's there when they do
+  await f.post('/api/school/people/update', { ids: [(await row(u.email)).id], title: '  Head of   English ' });
+  assert.strictEqual((await row(u.email)).title, 'Head of English');
+  await accept(f, u.email, t);
+  await f.post(`/api/classes/${cls.id}/teachers`, { email: u.email, role: 'teacher' });
+  await f.post(`/api/classes/${cls.id}/students`, { emails: [sUser.email] });
+  const seen = async who => (await who.get(`/api/classes/${cls.id}`)).data.class.teachers.find(x => x.id === u.id).title;
+  assert.strictEqual(await seen(s), 'Head of English', 'a student sees it in the class');
+  assert.strictEqual((await f.get('/api/school')).data.teachers.find(x => x.id === u.id).title, 'Head of English');
+  assert.strictEqual((await t.post('/api/school/people/update', { ids: [(await row(u.email)).id], title: 'Principal' })).status, 403, 'a teacher can’t give themselves one');
+  await f.post('/api/school/people/update', { ids: [(await row(u.email)).id], title: 'Dean' });
+  assert.strictEqual(await seen(f), 'Dean');
+  await f.post('/api/school/people/update', { ids: [(await row(sUser.email)).id], title: 'Captain' });
+  assert.strictEqual((await row(sUser.email)).title, '', 'students don’t get them');
+  await f.post('/api/school/people/update', { ids: [(await row(u.email)).id], title: '' });
+  assert.strictEqual(await seen(f), undefined, 'and it can be taken away');
+  await f.post('/api/school/people/update', { ids: [(await row(u.email)).id], title: 'Dean' });
+  await f.post('/api/school/people/remove', { ids: [(await row(u.email)).id] });
+  assert.strictEqual((await repo.readCore()).users[u.id].title, undefined, 'leaving the school drops it');
 });
 
 test('a class from before schools joins its teacher’s, and brings its students', async () => {

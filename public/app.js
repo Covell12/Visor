@@ -236,7 +236,7 @@ function mountSchoolPicker(id, current) {
     </div>
     <div class="school-chosen tiny"></div>
     <button type="button" class="linklike school-new hidden">Create a new school</button>
-    <div class="hint">Leave this blank if you'd rather not pick a school. You can change it any time in Profile settings.</div>`;
+    <div class="hint">Leave this blank if you'd rather not pick a school.</div>`;
   el.dataset.schoolId = current?.id || '';
   el.dataset.managed = current?.managed ? '1' : '';
   el.dataset.create = '';
@@ -278,6 +278,8 @@ function mountSchoolPicker(id, current) {
   showChosen();
 }
 // What the person chose: { schoolId }, { schoolName }, or {} for no school.
+// Profile shows a school someone can't change themselves as plain text
+const schoolFixed = () => !!(me.org?.managed || me.schoolHold);
 function schoolChoice(id) {
   const el = $(id), name = el.querySelector('input').value.trim();
   if (!name) return {};
@@ -496,12 +498,12 @@ function openProfile() {
       </div>
       <div id="profIcon"></div>
     </div>
-    ${me.org?.managed ? `<div class="field"><label>School</label><div class="small">${esc(me.org.name)}</div><div class="hint">Its facilitator manages who’s in it.</div></div>` : `<div class="field"><label>School <span class="label-note">optional</span></label><div id="profSchoolPicker" class="school-picker"></div></div>`}
+    ${schoolFixed() ? `<div class="field"><label>School</label><div class="small">${esc(me.org.name)}</div><div class="hint">${esc(me.schoolHold || 'Its facilitator manages who’s in it.')}</div></div>` : `<div class="field"><label>School <span class="label-note">optional</span></label><div id="profSchoolPicker" class="school-picker"></div></div>`}
     <div id="profExtras" class="prof-extras"></div>
     <div id="profErr" class="form-error hidden"></div>`,
     footer: `<button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="saveProfile()">Save</button>` });
   profDrawIcon();
-  if (!me.org?.managed) mountSchoolPicker('profSchoolPicker', me.org);
+  if (!schoolFixed()) mountSchoolPicker('profSchoolPicker', me.org);
   if (window.profileExtras) profileExtras($('profExtras')); // Visor Classroom: extension + "Download my data" (ext.js)
 }
 function profTab(tab) { prof.tab = tab; profDrawIcon(); }
@@ -564,7 +566,7 @@ async function saveProfileIcon() {
 }
 async function saveProfile() {
   try {
-    const sc = me.org?.managed ? null : schoolChoice('profSchoolPicker');
+    const sc = schoolFixed() ? null : schoolChoice('profSchoolPicker');
     const school = !sc ? undefined : sc.schoolId ? { id: sc.schoolId } : sc.schoolName ? { name: sc.schoolName } : null;
     await saveProfileIcon();
     const r = await api('/api/me', { method: 'PATCH', body: { firstName: $('profFirst').value, lastName: $('profLast').value, avatarColor: prof.color, school } });
@@ -580,7 +582,7 @@ async function saveProfile() {
 // The first-run tour: a few short steps, one idea each
 const TUTORIAL = {
   teacher: [
-    { icon: 'school', title: 'Create a class', text: 'Classes belong to your school and a term. Students at your school join with its code, or you add them.' },
+    { icon: 'school', title: 'Create a class', text: 'Classes belong to your school, and you choose their term. Students at your school join with its code, or you add them.' },
     { icon: 'pen', title: 'Add an assignment', text: 'Choose a locked in-class essay or an open homework essay, then set the time and rules.' },
     { icon: 'eye', title: 'Watch students write', text: 'The Live tab shows words, pauses and pastes. Pause a student, send a message or add time.' },
     { icon: 'doc', title: 'Review and return', text: 'Replay any essay, check its research, then return it with feedback and a score.' }

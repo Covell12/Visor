@@ -208,7 +208,7 @@ function courseInitials(name) {
 // A class's teachers, owner first ([{ id, name, avatarColor, owner }]); older
 // payloads only have `teacher`
 const teachersOf = c => (c?.teachers?.length ? c.teachers : c?.teacher ? [{ ...c.teacher, owner: true }] : []);
-const teacherNames = c => teachersOf(c).map(t => (t.id === me?.id ? 'You' : t.name)).join(', ');
+const teacherNames = c => teachersOf(c).map(t => (t.id === me?.id ? 'You' : t.title ? `${t.name} (${t.title})` : t.name)).join(', ');
 // The banner: the class colour with its lens art, or a background the
 // teachers chose (one of Visor's designs, or their own picture, centred at
 // pos% down; the colour stays underneath while the picture loads)
@@ -382,7 +382,7 @@ function renderHome() {
     ${homeKpis()}
     ${teacher ? happeningBoxHtml(home.data.dash.happeningNow) : nextUpHtml()}
     <div class="home-grid">
-      <div class="home-main"><div class="home-h-row"><h2 class="home-h">${home.view === 'activity' ? 'Activity' : 'Classes'}</h2>${home.view === 'activity' ? '' : homeTermSelect()}</div><div id="homeBody"></div></div>
+      <div class="home-main"><div class="home-h-row"><h2 class="home-h">${home.view === 'activity' ? 'Activity' : 'Classes'}</h2>${home.view === 'activity' ? '' : `<span class="home-h-tools">${homeTermSelect()}${me.role === 'teacher' ? '<button class="btn btn-ghost btn-sm" onclick="openTerms()">Terms</button>' : ''}</span>`}</div><div id="homeBody"></div></div>
       <aside class="home-right" aria-label="To do">${teacher ? teacherHomeRight() : studentHomeRight()}</aside>
     </div>
   </div>`;
@@ -489,9 +489,9 @@ function upRowHtml(ev, { showClass = false } = {}) {
 function openCreateClass() {
   if (!me.org) return openModal({ title: 'Classes belong to a school', body: '<p>Create your school, or ask to join it, and you can make classes straight away.</p>',
     footer: `<button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="closeModal();VisorRouter.go('/school')">Go to Your School</button>` });
-  openModal({ title: 'Create a class', sub: `Part of ${esc(me.org.name)}. Students there join with its class code, or you add them.`, body: `<div class="field"><label for="ncTerm">Term</label><select id="ncTerm" class="input"></select></div><div class="field"><label for="ncName">Class name</label><input id="ncName" class="input" placeholder="English 10 – Period 3" maxlength="120" /></div>`,
+  openModal({ title: 'Create a class', sub: `Part of ${esc(me.org.name)}. Students there join with its class code, or you add them.`, body: `<div class="field"><label for="ncTerm">Term</label><select id="ncTerm" class="input" onchange="$('ncNewTerm').classList.toggle('hidden', this.value !== 'new')"></select></div><div id="ncNewTerm" class="hidden">${termFieldsHtml()}</div><div class="field"><label for="ncName">Class name</label><input id="ncName" class="input" placeholder="English 10 – Period 3" maxlength="120" /></div>`,
     footer: `<button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="createClass()">Create class</button>` });
-  fillTermSelect('ncTerm');
+  fillTermSelect('ncTerm', null, null, true);
   setTimeout(() => $('ncName')?.focus(), 50);
   $('ncName').addEventListener('keydown', e => { if (e.key === 'Enter') createClass(); });
 }
@@ -499,19 +499,48 @@ async function createClass() {
   const name = $('ncName').value.trim();
   if (!name) return $('ncName').classList.add('error');
   await modalBusy(async () => {
-    try { const r = await api('/api/classes', { method: 'POST', body: { name, termId: $('ncTerm').value || undefined } }); forgetCourses(); closeModal(); VisorRouter.go(`/class/${r.class.id}?tab=people`); toast('Class created. Add your students.'); }
-    catch (e) { toast(e.message, 'err'); }
+    try {
+      const termId = $('ncTerm').value === 'new' ? (await api('/api/terms', { method: 'POST', body: termFields() })).term.id : $('ncTerm').value || undefined;
+      const r = await api('/api/classes', { method: 'POST', body: { name, termId } }); forgetCourses(); closeModal(); VisorRouter.go(`/class/${r.class.id}?tab=people`); toast('Class created. Add your students.');
+    } catch (e) { toast(e.message, 'err'); }
   });
 }
 
-// The school's terms in a <select>, on the given term or the one running now
-async function fillTermSelect(id, chosen) {
+/* ---- a teacher's own terms ---- */
+const TERM_PILL = { current: ['Now', 'pill-green'], upcoming: ['Upcoming', 'pill-blue'], past: ['Past', 'pill-gray'] };
+const termDate = d => new Date(`${d}T12:00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+let myTerms = [];
+// Your terms, or a class owner's, in a <select>, on the given term or the one running now
+async function fillTermSelect(id, chosen, classId, canAdd) {
   try {
-    const { terms, current } = await api('/api/school/terms'), el = $(id);
+    const { terms, current } = await api(`/api/terms${classId ? `?classId=${classId}` : ''}`), el = $(id);
     if (!el) return;
-    el.innerHTML = terms.map(t => `<option value="${esc(t.id)}">${esc(t.name)}${t.state === 'past' ? ' (past)' : ''}</option>`).join('');
+    el.innerHTML = terms.map(t => `<option value="${esc(t.id)}">${esc(t.name)}${t.state === 'past' ? ' (past)' : ''}</option>`).join('') + (canAdd ? '<option value="new">New term…</option>' : '');
     el.value = chosen || current;
   } catch { $(id)?.closest('.field')?.classList.add('hidden'); }
+}
+const termFieldsHtml = t => `<div class="field"><label for="teName">Term name</label><input id="teName" class="input" maxlength="60" value="${esc(t?.name || '')}" placeholder="Fall 2026" /></div>
+    <div class="input-row"><div class="field"><label for="teStart">Starts</label><input id="teStart" class="input" type="date" value="${esc(t?.startsOn || '')}" /></div>
+      <div class="field"><label for="teEnd">Ends</label><input id="teEnd" class="input" type="date" value="${esc(t?.endsOn || '')}" /></div></div>`;
+const termFields = () => ({ name: $('teName').value, startsOn: $('teStart').value, endsOn: $('teEnd').value });
+async function openTerms() {
+  try { myTerms = (await api('/api/terms')).terms; } catch (e) { return toast(e.message, 'err'); }
+  openModal({ title: 'Your terms', sub: 'Put each of your classes in a term. A class in a past term moves off Home and keeps working.',
+    body: `<div class="term-list">${myTerms.map(t => `<button type="button" class="term-chip" onclick="openTermEdit('${esc(t.id)}')"><b>${esc(t.name)}</b><span class="pill ${TERM_PILL[t.state][1]}">${TERM_PILL[t.state][0]}</span><span class="tiny muted">${termDate(t.startsOn)} to ${termDate(t.endsOn)} · ${vcPlural(t.classes, 'class', 'classes')}</span></button>`).join('')}</div>`,
+    footer: `<button class="btn btn-ghost" onclick="closeModal()">Close</button><button class="btn btn-primary" onclick="openTermEdit()">Add term</button>` });
+}
+function openTermEdit(id) {
+  const t = id ? myTerms.find(x => x.id === id) : null;
+  openModal({ title: t ? `Edit ${esc(t.name)}` : 'Add a term', body: `${termFieldsHtml(t)}<div id="teErr" class="form-error hidden"></div>`,
+    footer: `${t ? `<button class="btn btn-ghost" style="margin-right:auto;" onclick="deleteTerm('${esc(t.id)}')">Delete</button>` : ''}<button class="btn btn-ghost" onclick="openTerms()">Cancel</button><button class="btn btn-primary" onclick="saveTerm(${t ? `'${esc(t.id)}'` : ''})">Save</button>` });
+}
+async function saveTerm(id) {
+  try { await api(id ? `/api/terms/${id}` : '/api/terms', { method: id ? 'PATCH' : 'POST', body: termFields() }); VisorRouter.render(); await openTerms(); }
+  catch (e) { formError('teErr', e.message); }
+}
+async function deleteTerm(id) {
+  try { await api(`/api/terms/${id}`, { method: 'DELETE' }); VisorRouter.render(); await openTerms(); }
+  catch (e) { formError('teErr', e.message); }
 }
 function openJoinClass() {
   openModal({ title: 'Join a class', sub: 'Type the 6-character class code your teacher gave you.', body: `<div class="field"><label for="jcCode">Class code</label><input id="jcCode" class="input mono" maxlength="6" autocomplete="off" style="text-transform:uppercase;font-size:20px;letter-spacing:.2em;" /></div><div id="jcErr" class="form-error hidden"></div>`,
@@ -814,7 +843,7 @@ function renderClassPage() {
   const tab = cp.tab;
   let main = '', right = '';
   if (tab === 'members' && c.isTeacher) main = membersHtml();
-  else if (tab === 'settings' && c.isTeacher) { main = classSettingsHtml(); if (c.school) setTimeout(() => fillTermSelect('csTerm', c.term?.id), 0); }
+  else if (tab === 'settings' && c.isTeacher) { main = classSettingsHtml(); setTimeout(() => fillTermSelect('csTerm', c.term?.id, c.id), 0); }
   else if (tab === 'updates') { main = `${courseHead(c, 'Announcements')}<div id="classUpdates"></div>`; right = classRightHtml(); }
   else { main = materialsHtml(); right = classRightHtml(); }
   $('routeView').innerHTML = courseFrame(c, { active: tab === 'updates' || tab === 'members' || tab === 'settings' ? tab : 'materials', main, right });
@@ -1183,7 +1212,7 @@ function membersHtml() {
         const self = t.id === me.id;
         const items = t.owner ? [] : self ? [{ label: 'Leave this class', icon: I.x, onclick: 'leaveClass()', danger: true }] : c.canManageStaff ? [{ label: 'Remove from class', icon: I.x, onclick: `removeTeacher('${t.id}')`, danger: true }] : [];
         return `<tr>
-        <td><div class="roster-name">${avatarHtml(t, 'avatar-sm')}<span><b>${esc(t.name)}${self ? ' (you)' : ''}</b>${t.email ? `<div class="tiny muted">${esc(t.email)}</div>` : ''}</span></div></td>
+        <td><div class="roster-name">${avatarHtml(t, 'avatar-sm')}<span><b>${esc(t.name)}${self ? ' (you)' : ''}</b>${t.title ? `<div class="tiny muted">${esc(t.title)}</div>` : ''}${t.email ? `<div class="tiny muted">${esc(t.email)}</div>` : ''}</span></div></td>
         <td>${pill(t)}</td>
         <td class="row-actions">${items.length ? ddHtml({ id: `tm-${t.id}`, btnClass: 'btn-icon', btn: I.gear, label: `Options: ${t.name}`, right: true, items }) : ''}</td>
       </tr>`; }).join('')}</tbody></table></div>`;
@@ -1394,7 +1423,7 @@ function classSettingsHtml() {
     <section class="card card-pad">
       <h2 class="section-title" style="font-size:16px;margin-bottom:14px;">Class details</h2>
       <div class="field"><label for="csName">Class name</label><input id="csName" class="input" value="${esc(c.name)}" maxlength="120" /></div>
-      ${c.school ? `<div class="field"><label for="csTerm">Term</label><select id="csTerm" class="input" onchange="classPatch({ termId: this.value }, 'Term changed')"><option>${esc(c.term?.name || '')}</option></select><div class="hint">${esc(c.school.name)}. A class in a past term keeps working; it just moves off Home.</div></div>` : ''}
+      <div class="field"><label for="csTerm">Term</label><select id="csTerm" class="input" onchange="classPatch({ termId: this.value }, 'Term changed')"><option>${esc(c.term?.name || '')}</option></select><div class="hint">A class in a past term keeps working; it just moves off Home.${c.isOwner ? ' <button type="button" class="linklike" onclick="openTerms()">Your terms</button>' : ''}</div></div>
       <div class="field"><label>Banner</label>
         <div class="color-preview cs-banner">${courseArt(c, '', 'div', 'id="csPreview"')}<div><div class="small">${esc(c.background?.kind === 'preset' ? BG_NAME[c.background.preset] : c.background?.kind === 'upload' ? 'Your picture' : 'Class color')} · ${esc(COLOR_NAME[courseColor(c)] || '')}</div>
           <button type="button" class="btn btn-ghost btn-sm" style="margin-top:6px;" onclick="openClassBanner('${c.id}')">${I.edit}Change background and color</button>

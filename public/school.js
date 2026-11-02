@@ -1,10 +1,11 @@
 /* Visor Classroom — Your School. Every teacher sees the school's people; its
    facilitators also run it: logo, the list of who can join, each person's role
-   and grades, and invites. The rules are in lib/schools.js. */
+   and grades, and invites, and they see every class at the school. The rules are
+   in lib/schools.js. */
 
 'use strict';
 
-const sq = { data: null, q: '', who: 'all', grade: '', status: '', picked: new Set(), shown: 200, add: null };
+const sq = { data: null, tab: 'people', q: '', who: 'all', grade: '', status: '', picked: new Set(), shown: 200, add: null, classQ: '' };
 const ROLE_PILL = { facilitator: 'pill-violet', teacher: 'pill-blue', assistant: 'pill-blue', advisor: 'pill-blue', student: 'pill-gray' };
 const SCHOOL_STATUS = { joined: ['Joined', 'pill-green'], invited: ['Invited', 'pill-blue'], added: ['Not invited', 'pill-gray'], waiting: ['Not joined yet', 'pill-gray'] };
 const INVITE_BATCH = 25;
@@ -24,7 +25,8 @@ VisorRouter.add('/school', async el => {
 });
 async function schoolLoad() {
   sq.data = await api('/api/school');
-  if (me.facilitator && me.schoolRequests !== sq.data.requests.length) { me.schoolRequests = sq.data.requests.length; paintSchool(); }
+  const waiting = sq.data.requests.length + sq.data.facilitatorRequests.length;
+  if (me.facilitator && me.schoolRequests !== waiting) { me.schoolRequests = waiting; paintSchool(); }
   const ids = new Set(sq.data.people.map(p => p.id));
   sq.picked = new Set([...sq.picked].filter(id => ids.has(id)));
 }
@@ -47,30 +49,108 @@ function schoolDraw() {
         ${uninvited ? `<button class="btn btn-ghost" onclick="schoolInviteAll()">${d.mailReady ? 'Send' : 'Copy'} ${vcPlural(uninvited, 'invite')}</button>` : ''}
         <button class="btn btn-ghost" onclick="openSchoolSettings()">${I.gear}Settings</button>
         <button class="btn btn-primary" onclick="openAddPeople()">${I.plusSm}Add people</button></div>` : ''}
+      ${!d.canRun && s.managed && d.myFacilitatorRequest?.status !== 'pending' ? `<div class="school-actions"><button class="btn btn-ghost" onclick="openFacilitatorAsk()">Ask to be a facilitator</button></div>` : ''}
     </header>
+    ${facilitatorAskNote()}
     ${!s.managed ? `<div class="callout" style="margin-bottom:16px;"><b>Nobody runs this school yet.</b> Anyone can join it by picking its name. Take it over to add a logo and control who can join. <button class="btn btn-primary btn-sm" style="margin-left:8px;" onclick="schoolClaim()">Become its facilitator</button></div>` : ''}
     ${d.canRun ? schoolSetupCard(s, people) : ''}
     ${schoolRequestsHtml()}
     ${kpiRow([
       { label: 'Students', value: students.length, note: `${students.filter(p => p.status === 'joined').length} joined`, tone: 'blue' },
       { label: 'Teachers and staff', value: staff.length, note: `${staff.filter(p => p.status === 'joined').length} joined`, tone: 'blue' },
-      { label: 'Classes', value: d.classCount, note: vcPlural(d.terms.length, 'term'), tone: 'blue' },
+      { label: 'Classes', value: d.classCount, note: 'At this school', tone: 'blue' },
       { label: 'Joined', value: people.length ? `${Math.round(100 * joined / people.length)}%` : '–', note: `${joined} of ${people.length}`, tone: 'green', bar: stackBar([[joined, 'done', 'joined'], [invited, 'going', 'invited']], people.length) },
       ...(d.canRun ? [{ label: 'Still to invite', value: uninvited, note: invited ? `${invited} invited` : 'None invited yet', tone: uninvited ? 'amber' : 'blue' }] : [])
     ])}
-    <div class="school-bar">
+    ${d.canRun ? `<div class="seg school-tabs" role="group" aria-label="Show">${[['people', 'People'], ['classes', `Classes (${d.classes.length})`]].map(([k, t]) => `<button aria-pressed="${sq.tab === k}" onclick="sq.tab='${k}';schoolDraw()">${t}</button>`).join('')}</div>` : ''}
+    ${d.canRun && sq.tab === 'classes' ? schoolClassesHtml() : `<div class="school-bar">
       <input class="input" id="schoolQ" type="search" placeholder="Search names and emails" aria-label="Search people" value="${esc(sq.q)}" oninput="sq.q=this.value;sq.shown=200;schoolDrawRows()" />
       <div class="seg" role="group" aria-label="Show">${[['all', 'Everyone'], ['staff', 'Teachers and staff'], ['student', 'Students']].map(([k, t]) => `<button aria-pressed="${sq.who === k}" onclick="sq.who='${k}';sq.shown=200;schoolDraw()">${t}</button>`).join('')}</div>
       <select class="input" aria-label="Grade" onchange="sq.grade=this.value;sq.shown=200;schoolDrawRows()"><option value="">All grades</option>${d.grades.map(g => `<option value="${g}" ${sq.grade === g ? 'selected' : ''}>Grade ${g}</option>`).join('')}</select>
       ${d.canRun ? `<select class="input" aria-label="Status" onchange="sq.status=this.value;sq.shown=200;schoolDrawRows()"><option value="">Any status</option>${['joined', 'invited', 'added'].map(k => `<option value="${k}" ${sq.status === k ? 'selected' : ''}>${SCHOOL_STATUS[k][0]}</option>`).join('')}</select>` : ''}
     </div>
-    ${schoolTermsHtml()}
     <div id="schoolBulk"></div>
     <div id="schoolRows"></div>
     <details class="school-roles"><summary>What each role means</summary>
-      <dl>${d.roles.map(r => `<dt>${esc(r.label)}</dt><dd>${esc(r.about)}</dd>`).join('')}</dl></details>
+      <dl>${d.roles.map(r => `<dt>${esc(r.label)}</dt><dd>${esc(r.about)}</dd>`).join('')}</dl></details>`}
   </div>`;
-  schoolDrawRows();
+  if (d.canRun && sq.tab === 'classes') schoolDrawClasses(); else schoolDrawRows();
+}
+
+/* ---- every class at the school (facilitators) ---- */
+const CLASS_ROLES = [['teacher', 'Co-teacher'], ['assistant', 'Assistant teacher'], ['advisor', 'Advisor']];
+const listedTeachers = c => c.staff.filter(t => t.role !== 'advisor');
+const withTitle = t => (t.title ? `${t.name}, ${t.title}` : t.name);
+const nameOptions = (list, chosen) => list.map(t => `<option value="${t.id}" ${t.id === chosen ? 'selected' : ''}>${esc(withTitle(t))}</option>`).join('');
+const classRoleOptions = chosen => CLASS_ROLES.map(([k, label]) => `<option value="${k}" ${k === chosen ? 'selected' : ''}>${label}</option>`).join('');
+function schoolClassesHtml() {
+  return `<div class="school-bar">
+      <input class="input" type="search" placeholder="Search classes and teachers" aria-label="Search classes" value="${esc(sq.classQ)}" oninput="sq.classQ=this.value;schoolDrawClasses()" />
+    </div>
+    <div id="schoolClasses"></div>`;
+}
+function schoolDrawClasses() {
+  const all = sq.data.classes, q = sq.classQ.trim().toLowerCase();
+  const list = all.filter(c => !q || `${c.name} ${c.staff.map(t => t.name).join(' ')}`.toLowerCase().includes(q));
+  $('schoolClasses').innerHTML = !list.length
+    ? `<div class="feed-empty"><b>${all.length ? 'No classes match that' : 'No classes yet'}</b>${all.length ? 'Try a different search.' : 'Classes your teachers create show up here.'}</div>`
+    : `<div class="card roster-card"><table class="roster school-table">
+      <thead><tr><th>Class</th><th>Teachers</th><th>Term</th><th>Students</th></tr></thead>
+      <tbody>${list.map(c => `<tr>
+        <td><button class="linklike" onclick="openSchoolClass('${c.id}')">${esc(c.name)}</button>${c.archived ? ' <span class="pill pill-gray">Archived</span>' : ''}${c.inSchool ? '' : ' <span class="pill pill-gray">Not in the school yet</span>'}</td>
+        <td>${esc(listedTeachers(c).map(withTitle).join('; ')) || '–'}</td>
+        <td>${c.term ? `<span class="pill ${TERM_PILL[c.term.state][1]}">${esc(c.term.name)}</span>` : '–'}</td>
+        <td class="roster-num">${c.students.length}</td>
+      </tr>`).join('')}</tbody></table></div>`;
+}
+function schoolClassStaffHtml(c) {
+  const d = sq.data, id = c.id, owner = c.staff.find(t => t.role === 'owner'), others = c.staff.filter(t => t !== owner);
+  if (!c.inSchool) return `<p class="muted">Its owner, ${esc(owner?.name || 'its teacher')}, hasn’t added this class to the school yet.</p>`;
+  const choices = d.teachers.some(t => t.id === owner?.id) ? d.teachers : [owner, ...d.teachers].filter(Boolean);
+  const free = d.teachers.filter(t => !c.staff.some(s => s.id === t.id)), elsewhere = d.classes.filter(x => x.inSchool && !x.archived && x.id !== id);
+  return `<div class="field"><label for="scOwner">Owner</label><select id="scOwner" class="input" onchange="schoolAssign('${id}',{ userId: this.value, role: 'owner' })">${nameOptions(choices, owner?.id)}</select><div class="hint">The old owner stays on as a co-teacher, so you can move them or take them off.</div></div>
+    ${others.map(t => `<div class="class-staff-row"><span class="req-who"><b>${esc(t.name)}</b>${t.title ? ` <span class="tiny muted">${esc(t.title)}</span>` : ''}</span>
+      <select class="input input-sm" aria-label="Role for ${esc(t.name)}" onchange="schoolAssign('${id}',{ userId: '${t.id}', role: this.value })">${classRoleOptions(t.role)}</select>
+      ${elsewhere.length ? `<select class="input input-sm" aria-label="Move ${esc(t.name)} to another class" onchange="schoolAssign('${id}',{ userId: '${t.id}', moveTo: this.value })"><option value="">Move to…</option>${elsewhere.map(x => `<option value="${x.id}">${esc(x.name)}</option>`).join('')}</select>` : ''}
+      <button class="btn btn-ghost btn-sm" onclick="schoolAssign('${id}',{ userId: '${t.id}', role: null })">Take off</button></div>`).join('')}
+    ${free.length ? `<div class="class-staff-row"><select id="scAdd" class="input input-sm" aria-label="Add a teacher"><option value="">Add a teacher</option>${nameOptions(free)}</select>
+      <select id="scAddRole" class="input input-sm" aria-label="Their role">${classRoleOptions('teacher')}</select>
+      <button class="btn btn-ghost btn-sm" onclick="schoolAddTeacher('${id}')">Add</button></div>` : ''}
+    <div id="scErr" class="form-error hidden"></div>`;
+}
+function openSchoolClass(id) {
+  const c = sq.data.classes.find(x => x.id === id);
+  openModal({ title: esc(c.name), sub: esc(c.term?.name || ''),
+    body: `${schoolClassStaffHtml(c)}<h3 class="school-class-h">Students (${c.students.length})</h3>${c.students.length ? `<ul class="school-class-list">${c.students.map(n => `<li>${esc(n)}</li>`).join('')}</ul>` : '<p class="muted" style="margin:0;">No students in this class yet.</p>'}`,
+    footer: `<button class="btn btn-ghost" onclick="closeModal()">Close</button>${c.mine ? `<button class="btn btn-primary" onclick="closeModal();VisorRouter.go('/class/${c.id}')">Open class</button>` : ''}` });
+}
+async function schoolAssign(id, body) {
+  try { await api(`/api/school/classes/${id}/teachers`, { method: 'POST', body }); await schoolReload(); openSchoolClass(id); toast('Teachers updated'); }
+  catch (e) { formError('scErr', e.message); }
+}
+function schoolAddTeacher(id) {
+  if (!$('scAdd').value) return formError('scErr', 'Pick a teacher first.');
+  schoolAssign(id, { userId: $('scAdd').value, role: $('scAddRole').value });
+}
+
+/* ---- asking to be a facilitator ---- */
+function facilitatorAskNote() {
+  const ask = sq.data.myFacilitatorRequest, names = sq.data.school.facilitators.join(', ');
+  if (ask?.status === 'pending') return `<div class="callout" style="margin-bottom:16px;">Your request to be a facilitator is with ${esc(names)}. <button class="linklike" onclick="withdrawFacilitatorAsk()">Withdraw it</button></div>`;
+  return ask?.status === 'declined' ? `<div class="callout" style="margin-bottom:16px;">Your request to be a facilitator was declined. You can ask again.</div>` : '';
+}
+function openFacilitatorAsk() {
+  openModal({ title: 'Ask to be a facilitator', sub: 'Facilitators run the school: its logo, people, roles, grades and invites.',
+    body: `<div class="field"><label for="faNote">Add a note <span class="label-note">optional</span></label><input id="faNote" class="input" maxlength="300" placeholder="Why you’d like to help run the school" /></div><div id="faErr" class="form-error hidden"></div>`,
+    footer: `<button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="sendFacilitatorAsk()">Send request</button>` });
+}
+async function sendFacilitatorAsk() {
+  try { schoolUserChanged((await api('/api/school/facilitator-request', { method: 'POST', body: { note: $('faNote').value } })).user); closeModal(); toast('Your request was sent'); await schoolReload(); }
+  catch (e) { formError('faErr', e.message); }
+}
+async function withdrawFacilitatorAsk() {
+  try { schoolUserChanged((await api('/api/school/facilitator-request', { method: 'DELETE' })).user); await schoolReload(); }
+  catch (e) { toast(e.message, 'err'); }
 }
 
 function schoolFiltered() {
@@ -87,12 +167,12 @@ function schoolDrawRows() {
       <thead><tr>${run ? `<th class="school-check"><input type="checkbox" aria-label="Select everyone shown" ${shown.every(p => sq.picked.has(p.id)) ? 'checked' : ''} onchange="schoolPickAll(this.checked)" /></th>` : ''}<th>Name</th><th>Role</th><th>Grades</th><th>Status</th>${run ? '<th><span class="sr-only">Actions</span></th>' : ''}</tr></thead>
       <tbody>${shown.map(p => `<tr>
         ${run ? `<td class="school-check"><input type="checkbox" aria-label="Select ${esc(p.name || p.email)}" ${sq.picked.has(p.id) ? 'checked' : ''} onchange="schoolPick('${p.id}',this.checked)" /></td>` : ''}
-        <td><div class="roster-name">${avatarHtml({ name: p.name || p.email, avatarColor: p.avatarColor, avatarUrl: p.avatarUrl }, 'avatar-sm')}<span><b>${esc(p.name || p.email)}</b>${p.name ? `<div class="tiny muted">${esc(p.email)}</div>` : ''}</span></div></td>
+        <td><div class="roster-name">${avatarHtml({ name: p.name || p.email, avatarColor: p.avatarColor, avatarUrl: p.avatarUrl }, 'avatar-sm')}<span><b>${esc(p.name || p.email)}</b>${p.title ? `<div class="tiny muted">${esc(p.title)}</div>` : ''}${p.name ? `<div class="tiny muted">${esc(p.email)}</div>` : ''}</span></div></td>
         <td><span class="pill ${ROLE_PILL[p.role] || 'pill-gray'}">${esc(schoolRoleLabel(p.role))}</span></td>
         <td class="roster-num">${p.grades.length ? esc(p.grades.join(', ')) : '–'}</td>
         <td><span class="pill ${SCHOOL_STATUS[p.status][1]}">${SCHOOL_STATUS[p.status][0]}</span></td>
         ${run ? `<td>${ddHtml({ id: `sp-${p.id}`, btnClass: 'btn-icon', btn: I.gear, label: `Options: ${p.name || p.email}`, right: true, items: [
-          { label: 'Edit role and grades', icon: I.edit, onclick: `openSchoolEdit(['${p.id}'])` },
+          { label: isStudentRow(p) ? 'Edit role and grades' : 'Edit role, grades and title', icon: I.edit, onclick: `openSchoolEdit(['${p.id}'])` },
           ...(p.status === 'joined' ? [] : [{ label: d.mailReady ? 'Send invite' : 'Copy invite link', icon: I.copy, onclick: d.mailReady ? `schoolSend(['${p.id}'])` : `schoolCopyLinks(['${p.id}'])` }, ...(d.mailReady ? [{ label: 'Copy invite link', icon: I.copy, onclick: `schoolCopyLinks(['${p.id}'])` }] : [])]),
           { label: 'Remove from school', icon: I.trash, onclick: `schoolRemove(['${p.id}'])`, danger: true }] })}</td>` : ''}
       </tr>`).join('')}</tbody></table>
@@ -146,9 +226,8 @@ function schoolSetupCard(s, people) {
 
 /* ---- requests to join ---- */
 function schoolRequestsHtml() {
-  const list = sq.data.requests;
-  if (!list.length) return '';
-  return `<section class="school-requests"><h2>Requests to join <span class="side-n">${list.length}</span></h2>${list.map(r => `<div class="req-row">
+  const list = sq.data.requests, asks = sq.data.facilitatorRequests;
+  return (list.length ? `<section class="school-requests"><h2>Requests to join <span class="side-n">${list.length}</span></h2>${list.map(r => `<div class="req-row">
     ${avatarHtml({ name: r.name, avatarColor: r.avatarColor, avatarUrl: r.avatarUrl }, 'avatar-sm')}
     <div class="req-who"><b>${esc(r.name)}</b> <span class="tiny muted">${esc(r.email)}</span>
       <div class="tiny muted">${r.account === 'student' ? 'Student' : 'Teacher'} account · ${r.confirmed ? 'email confirmed by Google' : 'Visor hasn’t confirmed this email'}${r.className ? ` · for ${esc(r.className)}` : ''}</div>
@@ -157,7 +236,13 @@ function schoolRequestsHtml() {
     <input class="input input-sm req-grades" id="rqGrades-${r.id}" aria-label="Grades for ${esc(r.name)}" placeholder="Grades" />
     <button class="btn btn-primary btn-sm" onclick="schoolAnswer('${r.id}',true)">Approve</button>
     <button class="btn btn-ghost btn-sm" onclick="schoolAnswer('${r.id}',false)">Decline</button>
-  </div>`).join('')}</section>`;
+  </div>`).join('')}</section>` : '') + (asks.length ? `<section class="school-requests"><h2>Requests to be a facilitator <span class="side-n">${asks.length}</span></h2>${asks.map(r => `<div class="req-row">
+    ${avatarHtml({ name: r.name, avatarColor: r.avatarColor, avatarUrl: r.avatarUrl }, 'avatar-sm')}
+    <div class="req-who"><b>${esc(r.name)}</b> <span class="tiny muted">${esc(r.email)}</span>
+      ${r.note ? `<div class="small">${esc(r.note)}</div>` : ''}</div>
+    <button class="btn btn-primary btn-sm" onclick="facilitatorAnswer('${r.id}',true)">Approve</button>
+    <button class="btn btn-ghost btn-sm" onclick="facilitatorAnswer('${r.id}',false)">Decline</button>
+  </div>`).join('')}</section>` : '');
 }
 async function schoolAnswer(id, approve) {
   const body = approve ? { approve, role: $(`rqRole-${id}`).value, grades: $(`rqGrades-${id}`).value.split(/[,\s]+/).flatMap(c => SchoolPaste.gradesOf(c) || []) } : { approve };
@@ -165,31 +250,9 @@ async function schoolAnswer(id, approve) {
   catch (e) { toast(e.message, 'err'); }
 }
 
-/* ---- terms ---- */
-const TERM_PILL = { current: ['Now', 'pill-green'], upcoming: ['Upcoming', 'pill-blue'], past: ['Past', 'pill-gray'] };
-const termDate = d => new Date(`${d}T12:00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
-function schoolTermsHtml() {
-  const d = sq.data;
-  return `<section class="school-terms"><div class="school-terms-h"><h2>Terms</h2>${d.canRun ? `<button class="btn btn-ghost btn-sm" onclick="openTermEdit()">${I.plusSm}Add term</button>` : ''}</div>
-    <div class="term-list">${d.terms.map(t => `<${d.canRun ? `button type="button" onclick="openTermEdit('${esc(t.id)}')"` : 'div'} class="term-chip"><b>${esc(t.name)}</b><span class="pill ${TERM_PILL[t.state][1]}">${TERM_PILL[t.state][0]}</span><span class="tiny muted">${termDate(t.startsOn)} to ${termDate(t.endsOn)} · ${vcPlural(t.classes, 'class', 'classes')}</span></${d.canRun ? 'button' : 'div'}>`).join('')}</div></section>`;
-}
-function openTermEdit(id) {
-  const t = id ? sq.data.terms.find(x => x.id === id) : null;
-  openModal({ title: t ? `Edit ${esc(t.name)}` : 'Add a term', sub: 'Teachers put each class in a term. Past terms move off Home, and those classes keep working.', body: `
-    <div class="field"><label for="teName">Name</label><input id="teName" class="input" maxlength="60" value="${esc(t?.name || '')}" placeholder="Fall 2026" /></div>
-    <div class="input-row"><div class="field"><label for="teStart">Starts</label><input id="teStart" class="input" type="date" value="${esc(t?.startsOn || '')}" /></div>
-      <div class="field"><label for="teEnd">Ends</label><input id="teEnd" class="input" type="date" value="${esc(t?.endsOn || '')}" /></div></div>
-    <div id="teErr" class="form-error hidden"></div>`,
-    footer: `${t ? `<button class="btn btn-ghost" style="margin-right:auto;" onclick="schoolDeleteTerm('${esc(t.id)}')">Delete</button>` : ''}<button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="schoolSaveTerm(${t ? `'${esc(t.id)}'` : ''})">Save</button>` });
-}
-async function schoolSaveTerm(id) {
-  const body = { name: $('teName').value, startsOn: $('teStart').value, endsOn: $('teEnd').value };
-  try { await api(id ? `/api/school/terms/${id}` : '/api/school/terms', { method: id ? 'PATCH' : 'POST', body }); closeModal(); await schoolReload(); }
-  catch (e) { formError('teErr', e.message); }
-}
-async function schoolDeleteTerm(id) {
-  try { await api(`/api/school/terms/${id}`, { method: 'DELETE' }); closeModal(); await schoolReload(); }
-  catch (e) { formError('teErr', e.message); }
+async function facilitatorAnswer(id, approve) {
+  try { await api(`/api/school/facilitator-requests/${id}`, { method: 'POST', body: { approve } }); toast(approve ? 'They’re a facilitator now' : 'Declined'); await schoolReload(); }
+  catch (e) { toast(e.message, 'err'); }
 }
 
 /* ---- settings ---- */
@@ -304,6 +367,7 @@ function openSchoolEdit(ids) {
   const people = sq.data.people.filter(p => ids.includes(p.id)), one = people.length === 1 ? people[0] : null;
   openModal({ title: one ? (one.name || one.email) : `Edit ${vcPlural(people.length, 'person', 'people')}`, sub: one ? one.email : 'Only what you set here changes.', body: `
     ${one && one.status !== 'joined' ? `<div class="field"><label for="seName">Name</label><input id="seName" class="input" value="${esc(one.name)}" /></div>` : ''}
+    ${one && !isStudentRow(one) ? `<div class="field"><label for="seTitle">Title <span class="label-note">optional</span></label><input id="seTitle" class="input" maxlength="60" value="${esc(one.title || '')}" placeholder="Head of English" /><div class="hint">Shown with their name in Your School and in their classes.</div></div>` : ''}
     <div class="field"><label for="seRole">Role</label><select id="seRole" class="input">${one ? '' : '<option value="">Keep each person’s role</option>'}${roleOptions(one?.role)}</select></div>
     <div class="field"><label id="seGradeLabel">Grades</label><div class="grade-chips" id="seGrades" role="group" aria-labelledby="seGradeLabel">${gradeChips(one?.grades || [], 'toggleGradeChip(this)')}</div>
       ${one ? '' : '<label class="check-row" style="margin-top:8px;"><input id="seGradesOn" type="checkbox" /> <span>Set these grades for everyone selected</span></label>'}</div>
@@ -315,6 +379,7 @@ async function schoolSaveEdit(ids) {
   if (role) body.role = role;
   if (!gradesOn || gradesOn.checked) body.grades = chosenGrades($('seGrades'));
   if ($('seName')) body.name = $('seName').value;
+  if ($('seTitle')) body.title = $('seTitle').value;
   try { await api('/api/school/people/update', { method: 'POST', body }); closeModal(); await schoolReload(); toast('Saved'); }
   catch (e) { formError('seErr', e.message); }
 }
