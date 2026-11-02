@@ -322,6 +322,8 @@ html:has(.wr-wiped) { overflow: hidden; }
 .wr-wipe-seen { margin: 20px 0 14px; padding: 13px 16px; border-radius: var(--r-lg); background: var(--red-soft); box-shadow: inset 0 0 0 1px #F0C4C2; color: #8A2B27; font-size: 14.5px; line-height: 1.45; }
 .wr-wipe-seen b { display: block; font-size: 16px; font-weight: 700; }
 .wr-wipe .wr-away { margin-bottom: 18px; color: var(--ink-2); font-size: 14px; }
+/* Outside a writing session there's no essay to show, and no tools for it */
+.wr-essay-hidden .wr-wc, .wr-essay-hidden #wrPaper, .wr-essay-hidden #dxToolbar, .wr-essay-hidden #dxMenubar, .wr-essay-hidden #dxOutline, .wr-essay-hidden #wrSide, .wr-essay-hidden #wrSources, .wr-essay-hidden #wrSideBtn, .wr-essay-hidden .wr-wc { display: none; }
 .wr-unsub { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; margin-top: 12px; }
 .wr-away { font-family: var(--mono); font-size: 13px; color: var(--amber); font-weight: 700; margin-bottom: 12px; }
 .dx-wc-table { width: 100%; border-collapse: collapse; font-size: 14.5px; }

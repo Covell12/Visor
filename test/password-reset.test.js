@@ -10,7 +10,7 @@ const DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'visor-reset-'));
 Object.assign(process.env, {
   VISOR_PLATFORM: '', DATABASE_URL: '',
   PGLITE_DIR: path.join(DATA, 'pglite'), VISOR_IMAGE_DIR: path.join(DATA, 'images'), VISOR_AUDIO_DIR: path.join(DATA, 'audio'),
-  VISOR_DEV_LOGIN: '1', SESSION_SECRET: 'test-secret', NODE_ENV: 'test', MAIL_TRANSPORT: 'memory', MAIL_PASSWORD: '',
+  VISOR_DEV_LOGIN: '1', VISOR_SCHOOL_OPTIONAL: '1', SESSION_SECRET: 'test-secret', NODE_ENV: 'test', MAIL_TRANSPORT: 'memory', MAIL_PASSWORD: '',
   GEMINI_API_KEY: '', GEMINI_VIA: 'apikey', GEMINI_BASE_URL: 'http://127.0.0.1:9', VERTEX_BASE_URL: 'http://127.0.0.1:9', DRIVE_API_BASE: 'http://127.0.0.1:9',
   GOOGLE_CLIENT_ID: '', GOOGLE_API_KEY: '', GOOGLE_APP_ID: '', CLASSROOM_IMPORT: '', PUBLIC_URL: 'https://visor.test'
 });

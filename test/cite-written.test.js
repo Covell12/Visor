@@ -13,7 +13,7 @@ const DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'visor-written-'));
 Object.assign(process.env, {
   VISOR_PLATFORM: '', DATABASE_URL: '',
   PGLITE_DIR: path.join(DATA, 'pglite'), VISOR_IMAGE_DIR: path.join(DATA, 'images'), VISOR_AUDIO_DIR: path.join(DATA, 'audio'),
-  VISOR_DEV_LOGIN: '1', SESSION_SECRET: 'test-secret', NODE_ENV: 'test',
+  VISOR_DEV_LOGIN: '1', VISOR_SCHOOL_OPTIONAL: '1', SESSION_SECRET: 'test-secret', NODE_ENV: 'test',
   GEMINI_API_KEY: '', GEMINI_VIA: 'apikey', GEMINI_BASE_URL: 'http://127.0.0.1:9', VERTEX_BASE_URL: 'http://127.0.0.1:9', DRIVE_API_BASE: 'http://127.0.0.1:9',
   GOOGLE_CLIENT_ID: '', GOOGLE_API_KEY: '', GOOGLE_APP_ID: '', CLASSROOM_IMPORT: '',
   CROSSREF_BASE: 'http://127.0.0.1:9', OPENLIBRARY_BASE: 'http://127.0.0.1:9'
@@ -115,6 +115,7 @@ async function essay(style) {
   const a = (await teacher.post(`/api/classes/${cls.id}/assignments`, { type: 'writing', title: 'Sleep essay', writing: { mode: 'open', citationStyle: style } })).data.assignment;
   await teacher.post(`/api/assignments/${a.id}/publish`, { published: true });
   const doc = (await stu.get(`/api/write/${a.id}`)).data.doc;
+  await stu.post(`/api/write/${doc.id}/sessions`, { surfaceId: 'cite-tab', surf: 'tab' });
   return { teacher, stu, a, doc };
 }
 

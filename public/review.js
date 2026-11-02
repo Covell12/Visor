@@ -239,7 +239,7 @@ function rvProcess(body) {
     <h3 class="section-title rv-h">Sessions</h3>
     <div class="card" style="overflow-x:auto;position:relative;"><table class="roster"><thead><tr><th>#</th><th>Started</th><th>Length</th><th>Active</th><th>Away</th><th>Side panel research</th><th>Typing</th><th>Ended</th></tr></thead><tbody>
       ${report.sessions.map(s => `<tr><td>${s.n}</td><td class="small">${esc(vcDateTime(s.startedAt))}</td><td class="mono">${vcDur(s.durationMs)}</td><td class="mono">${vcDur(s.activeMs)}</td>
-        <td class="small">${s.pauses.filter(p => p.reason !== 'teacher').length ? `${vcDur(s.awayMs)}<div class="tiny muted">${s.pauses.map(p => `${esc(REASON_TEXT[p.reason] || p.reason)} ${vcDur(p.ms)}`).join(', ')}</div>` : '—'}</td>
+        <td class="small">${s.pauses.filter(p => p.reason !== 'teacher').length ? `${vcDur(s.awayMs)}<div class="tiny muted">${s.pauses.map(p => `${esc(PLACE_TEXT[p.where] || REASON_TEXT[p.reason] || p.reason)} ${vcDur(p.ms)}`).join(', ')}</div>` : '—'}</td>
         <td class="mono">${s.researchMs ? vcDur(s.researchMs) : '—'}</td>
         <td class="mono">${s.wpm ? `${s.wpm} wpm` : '—'}</td><td class="small">${esc({ student: 'by the student', submitted: 'submitted', teacher: 'by you', timeout: 'no contact for 3 min', 'time-limit': 'time ran out', 'window-closed': 'window closed' }[s.endReason] || (s.endedAt ? s.endReason : 'still open'))}</td></tr>`).join('') || '<tr><td colspan="8" class="muted">No sessions yet.</td></tr>'}
     </tbody></table></div>

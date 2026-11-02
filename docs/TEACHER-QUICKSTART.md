@@ -24,7 +24,7 @@ Every class gets a colour and a banner, shown on its tile on Home, in the sideba
 
 On the class's **Assignments** page, **New → Writing assignment**, then pick a preset:
 
-- **In-class essay (locked):** 45 minutes, runs in full screen (a student who leaves full screen sees only a warning, with their essay hidden, until they go back, and you see it on the Live tab), needs the Visor Chrome extension, students can only paste text from their own essay, AI sites are blocked, and it submits itself when time runs out.
+- **In-class essay (locked):** 45 minutes, runs in full screen (a student who leaves full screen or leaves Visor sees only a warning, with their essay wiped from the screen, until they go back, and you see it on the Live tab), needs the Visor Chrome extension, students can only paste text from their own essay, AI sites are blocked, and it submits itself when time runs out.
 - **Homework essay (open):** no time limit, pasting allowed, research recorded, AI sites blocked.
 
 AI sites are blocked by default in both (untick **Block AI sites** to only record visits). Blocking works through the Visor extension, so in an open session a student without the extension isn't blocked; tick **Require the Visor extension** if every student must have it.
@@ -44,6 +44,10 @@ Change anything you like (time limit, the window when sessions can start, allowe
 Students see what's due under **Coming up** on Home and on their Calendar (with anything overdue in red). They open the assignment, read the **Instructions** at the top of the page, and click **Start writing session**; the site's bar then slides away and the editor fills the window until the session ends. Then:
 
 - Writing is only on while the Visor tab has focus. If a student leaves it, writing stops at once and the pause is recorded, with its length and reason. They see the same "Away 2m 14s" you see.
+- With the extension, the Live tab says where a student went: **another tab**, **another Chrome window**, **another app**, **another desktop** or **minimized**. It also flags a second screen, developer tools, a page whose reports don't match the extension's, quick glances away, and typing that arrived while they were away. "Another desktop" means Chrome lost focus and Visor is hidden but not minimized, so a window that fully covers Visor reads the same.
+- A locked session has no End session button. It ends when the student submits, when time runs out, or when you end it.
+- Students see their essay only during a writing session. Outside one, it's hidden on the assignment, in the editor and in Download my data, until you return it. If you return it and reopen it for more writing, it's hidden again between sessions.
+- Students can unsubmit until the due date passes or you review the essay, as long as they have time left. Once their time limit is used up they can't, and the page says why.
 - The extension records their research (searches, pages and time on them, text copied), adds citations with **Cite this page** (or Alt+Shift+C), and in locked sessions keeps them on the allowed sites.
 - In a locked session a student can click **Research in side panel**: they leave full screen and keep writing in Chrome's side panel while they browse. Blocked and AI sites stay blocked, every page is recorded, and time on other tabs counts as research time, not time away. Untick "Let students switch to the side panel" to keep a locked assignment in full screen.
 - **Works Cited** decides where sources go: **a page after the essay** (built from what students cite; the default), **a side panel** next to the essay (not part of it, not printed), or **off** (no citation tools: students write their own Works Cited in the essay).
@@ -71,6 +75,14 @@ To set up a school, choose **Create a new school** when you sign up, or use the 
 Once a school has a facilitator, it only takes people through invites. Picking its name isn't enough, and neither is signing up with an address on the list: the link is what proves it's them. Each link works for 30 days, for that one address. A student invited this way doesn't need to confirm they're 13 or older, because their school signed them up.
 
 Select several people in the list to change their role or grades together, invite them, or remove them. Removing someone takes them out of the school; their account, classes and work stay. A school always keeps at least one facilitator who has joined, and a joined student can't be made a teacher here.
+
+**Requests.** Anyone who isn't on your list can ask to join your school, from Home, from sign-up, or by trying a class code. Requests appear at the top of Your School. Approve one with a role and grades, or decline it. If they used a class code, approving puts them in that class too. Visor hasn't confirmed an email address unless it came from Google, and each request says which, so check before approving anyone as a teacher.
+
+**Terms.** A school starts with the current school year as its term. Add terms like Fall 2026 under Your School. Every class belongs to your school and a term. A class in a past term keeps working; it just moves off Home, into the term filter.
+
+**Who can be in a class.** Only people in the class's school. Students there join with the class code, or a teacher adds them. Someone on the list who hasn't joined yet is added as soon as they do. Anyone else is refused and can ask to join the school. Taking someone off the school's list takes them out of its classes too; their work stays with each class. Someone who owns a class has to archive it first.
+
+A class from before classes needed a school keeps working as it did until a teacher adds it to their school, from the class page. Its students with no school come with it.
 
 A school from before facilitators existed stays open to anyone until one of its teachers chooses **Become its facilitator**.
 

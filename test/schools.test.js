@@ -78,17 +78,17 @@ test('creating a school at sign-up makes you its facilitator, and only teachers 
   assert.match(s.data.error, /Only teachers can create a school/);
 });
 
-test('a school someone runs can’t be joined by picking it', async () => {
-  const { name, orgId } = await newSchool();
+test('picking a school someone runs asks to join it, and doesn’t put you in it', async () => {
+  const { orgId, name } = await newSchool();
   for (const body of [{ schoolId: orgId }, { schoolName: name }, { schoolName: name.toLowerCase() }]) {
     const r = await teacher(client(), 'Tom', body);
-    assert.strictEqual(r.status, 403, JSON.stringify(body));
-    assert.match(r.data.error, /Ask its facilitator for an invite/);
+    assert.strictEqual(r.status, 200, JSON.stringify(body));
+    assert.strictEqual(r.data.user.org, null);
+    assert.deepStrictEqual([r.data.user.schoolRequest.school.name, r.data.user.schoolRequest.status], [name, 'pending']);
   }
   const c = client();
   await teacher(c, 'Tia');
-  assert.strictEqual((await c.patch('/api/me', { school: { id: orgId } })).status, 403);
-  assert.strictEqual((await c.patch('/api/me', { school: { name } })).status, 403);
+  assert.strictEqual((await c.patch('/api/me', { school: { id: orgId } })).data.user.schoolRequest.status, 'pending');
   assert.strictEqual((await c.get('/api/me')).data.user.org, null);
   assert.strictEqual((await client().get(`/api/schools?q=${encodeURIComponent(name)}`)).data.schools[0].managed, true);
 });
@@ -101,7 +101,7 @@ test('being on the list isn’t enough: without the link, a listed address stays
   const r = await teacher(c, 'Imposter', { email });
   assert.strictEqual(r.status, 200, 'the account is fine; it just isn’t in the school');
   assert.strictEqual(r.data.user.org, null);
-  assert.strictEqual((await teacher(client(), 'Other', { email: address('other'), schoolId: orgId })).status, 403);
+  assert.strictEqual((await teacher(client(), 'Other', { email: address('other'), schoolId: orgId })).data.user.org, null);
   assert.strictEqual((await c.get('/api/school')).data.school, null, 'and it sees nobody');
 });
 
@@ -280,7 +280,7 @@ test('a school from before stays open until a teacher takes it over, and its peo
   assert.strictEqual((await t.post('/api/school/claim')).status, 409);
   const after = await peopleOf(t);
   assert.deepStrictEqual(after.map(p => [p.status, p.role]).sort(), [['joined', 'facilitator'], ['joined', 'student']]);
-  assert.strictEqual((await teacher(client(), 'Late', { schoolName: name })).status, 403);
+  assert.strictEqual((await teacher(client(), 'Late', { schoolName: name })).data.user.org, null, 'now it asks');
 });
 
 test('a teacher with no school can create one later', async () => {

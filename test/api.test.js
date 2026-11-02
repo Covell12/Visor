@@ -9,7 +9,7 @@ const crypto = require('crypto');
 
 const DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'visor-api-'));
 Object.assign(process.env, {
-  PGLITE_DIR: path.join(DATA, 'pglite'), VISOR_DEV_LOGIN: '1', SESSION_SECRET: 'test-secret', NODE_ENV: 'test',
+  PGLITE_DIR: path.join(DATA, 'pglite'), VISOR_DEV_LOGIN: '1', VISOR_SCHOOL_OPTIONAL: '1', SESSION_SECRET: 'test-secret', NODE_ENV: 'test',
   GEMINI_API_KEY: '', GEMINI_VIA: 'apikey', GEMINI_BASE_URL: 'http://127.0.0.1:9', VERTEX_BASE_URL: 'http://127.0.0.1:9', DRIVE_API_BASE: 'http://127.0.0.1:9',
   GOOGLE_CLIENT_ID: '', GOOGLE_API_KEY: '', GOOGLE_APP_ID: '', CLASSROOM_IMPORT: ''
 });
@@ -87,16 +87,17 @@ test('the classroom flow, end to end', async t => {
   r = await sam.get(`/api/write/${a.id}`);
   assert.strictEqual(r.status, 200);
   let doc = r.data.doc;
-  assert.strictEqual(doc.text, 'Title: ');
+  assert.strictEqual(doc.text, null, 'none of the essay outside a session');
   assert.strictEqual(doc.seq, 1);
-  r = await sam.get(`/api/write/${doc.id}/ops`);
-  assert.strictEqual(r.data.ops[0].src, 'template');
+  assert.strictEqual((await sam.get(`/api/write/${doc.id}/ops`)).status, 403);
   r = await sam.post(`/api/write/${doc.id}/ops`, { baseSeq: 1, ops: [], surfaceId: 'tab-1' });
   assert.strictEqual(r.status, 401, 'no writing without a session');
 
   r = await sam.post(`/api/write/${doc.id}/sessions`, { surfaceId: 'tab-1', surf: 'tab', extPresent: false, fullscreen: false });
   assert.strictEqual(r.status, 200);
+  assert.strictEqual(r.data.doc.text, 'Title: ', 'a session brings the essay');
   const H = { 'X-Visor-Session': r.data.token };
+  assert.strictEqual((await sam.get(`/api/write/${doc.id}/ops`)).data.ops[0].src, 'template');
   const ins = (at, s, extra = {}) => ({ k: 'i', at, s, t: Date.now(), src: 'type', ...extra });
   let text = 'Title: ';
   const typed = 'The Storm';
@@ -313,8 +314,8 @@ test('privacy: research retention, deleting a student’s data, and Download my 
   const data = await r.json();
   assert.strictEqual(data.account.email, 'ps@school.test');
   assert.strictEqual(data.documents.length, 1);
-  assert.strictEqual(data.documents[0].text, 'Mitochondria');
-  assert.strictEqual(data.documents[0].editLog.length, 1);
+  assert.deepStrictEqual([data.documents[0].text, data.documents[0].editLog], [undefined, undefined], 'not until it’s returned');
+  assert.ok(data.documents[0].essayHidden);
   assert.strictEqual(data.documents[0].research[0].url, 'https://new.example/');
   assert.ok(!JSON.stringify(data).includes('po@school.test'), 'nothing about other students');
 

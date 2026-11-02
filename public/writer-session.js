@@ -130,11 +130,17 @@ function wsSeenMessage(id) {
 function wsNoteEvent(type, detail = {}) { WR.events.push({ type, t: Date.now(), ...detail }); }
 
 /* ---- focus ---- */
+// A tap of Escape can't leave a locked session's full screen. Chrome makes you
+// hold it down, and tells you so; nothing a page does can stop that.
+function wsHoldEscape() {
+  if (document.fullscreenElement && WR.data?.assignment.writing.mode === 'locked' && wsActive()) navigator.keyboard?.lock?.(['Escape']).catch(() => {});
+}
 function surfaceFocus() {
   const visible = document.visibilityState === 'visible';
   const focused = visible && document.hasFocus();
-  const fullscreen = !!document.fullscreenElement;
-  return { focused, visible, fullscreen };
+  // (The extension can also put the whole window in full screen)
+  const fullscreen = !!document.fullscreenElement || matchMedia('(display-mode: fullscreen)').matches;
+  return { focused, visible, fullscreen, extended: !!window.screen?.isExtended };
 }
 
 // Why this surface can't write right now (null = it can)
@@ -172,6 +178,7 @@ async function wsBeat() {
   if (beatInFlight) { beatAgain = true; return; }
   beatInFlight = true;
   const f = surfaceFocus();
+  if (f.extended && !WR.sawSecondScreen) { WR.sawSecondScreen = true; wsNoteEvent('second-screen'); }
   const events = WR.events.splice(0);
   const offlinePause = WR.offlinePause; WR.offlinePause = null;
   try {
@@ -423,7 +430,7 @@ async function wsUnsubmit() {
 // Resume from the paused card: only if this window really has focus
 function wsResume() {
   const mode = WR.data.assignment.writing.mode;
-  if (mode === 'locked' && !WR.embed && !document.fullscreenElement) {
+  if (mode === 'locked' && !WR.embed && !surfaceFocus().fullscreen) {
     document.documentElement.requestFullscreen().catch(() => {}).finally(() => { writerRefresh(); wsBeat(); WR.quill?.focus(); });
     return;
   }
@@ -435,7 +442,7 @@ function wsResume() {
 /* ---- timers and listeners ---- */
 function wsInstall() {
   const on = (target, ev, fn, opts) => { target.addEventListener(ev, fn, opts); WR.listeners.push([target, ev, fn, opts]); };
-  const changed = () => { writerRefresh(); wsBeat(); };
+  const changed = () => { wsHoldEscape(); writerRefresh(); wsBeat(); };
   on(window, 'focus', changed);
   // Losing focus (often to the side panel) sends what's typed right away, so a
   // lease handoff doesn't strand the last keystrokes. Only a page with edits

@@ -10,7 +10,7 @@ const http = require('http');
 
 const DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'visor-disc-'));
 Object.assign(process.env, {
-  PGLITE_DIR: path.join(DATA, 'pglite'), VISOR_AUDIO_DIR: path.join(DATA, 'audio'), SESSION_SECRET: 'test-secret', NODE_ENV: 'test',
+  PGLITE_DIR: path.join(DATA, 'pglite'), VISOR_AUDIO_DIR: path.join(DATA, 'audio'), SESSION_SECRET: 'test-secret', NODE_ENV: 'test', VISOR_SCHOOL_OPTIONAL: '1',
   GEMINI_VIA: 'apikey', GEMINI_API_KEY: 'stand-in-key', GEMINI_MODEL: 'stand-in', VERTEX_BASE_URL: 'http://127.0.0.1:9', DRIVE_API_BASE: 'http://127.0.0.1:9',
   GOOGLE_CLIENT_ID: '', GOOGLE_API_KEY: '', GOOGLE_APP_ID: ''
 });

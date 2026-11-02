@@ -16,7 +16,7 @@ const DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'visor-lookup-'));
 Object.assign(process.env, {
   VISOR_PLATFORM: '', DATABASE_URL: '',
   PGLITE_DIR: path.join(DATA, 'pglite'), VISOR_IMAGE_DIR: path.join(DATA, 'images'), VISOR_AUDIO_DIR: path.join(DATA, 'audio'),
-  VISOR_DEV_LOGIN: '1', SESSION_SECRET: 'test-secret', NODE_ENV: 'test',
+  VISOR_DEV_LOGIN: '1', VISOR_SCHOOL_OPTIONAL: '1', SESSION_SECRET: 'test-secret', NODE_ENV: 'test',
   GEMINI_API_KEY: '', GEMINI_VIA: 'apikey', GEMINI_BASE_URL: 'http://127.0.0.1:9', VERTEX_BASE_URL: 'http://127.0.0.1:9', DRIVE_API_BASE: 'http://127.0.0.1:9',
   GOOGLE_CLIENT_ID: '', GOOGLE_API_KEY: '', GOOGLE_APP_ID: '', CLASSROOM_IMPORT: '',
   // The route lets the stub's private address through; Crossref and Open Library are the stub too
@@ -463,6 +463,7 @@ test('route: POST /api/write/:docId/sources/lookup', async () => {
   const a = (await teacher.post(`/api/classes/${cls.id}/assignments`, { type: 'writing', title: 'Sleep essay', writing: { mode: 'open' } })).data.assignment;
   await teacher.post(`/api/assignments/${a.id}/publish`, { published: true });
   const doc = (await stu.get(`/api/write/${a.id}`)).data.doc;
+  await stu.post(`/api/write/${doc.id}/sessions`, { surfaceId: 'cite-tab', surf: 'tab' });
   const url = `/api/write/${doc.id}/sources/lookup`;
 
   // A page on the stub (private addresses are let through for tests)
@@ -556,12 +557,14 @@ test('route: 20 lookups per student per 5 minutes', async () => {
   const a = (await teacher.post(`/api/classes/${cls.id}/assignments`, { type: 'writing', title: 'Essay', writing: { mode: 'open' } })).data.assignment;
   await teacher.post(`/api/assignments/${a.id}/publish`, { published: true });
   const doc = (await stu.get(`/api/write/${a.id}`)).data.doc;
+  await stu.post(`/api/write/${doc.id}/sessions`, { surfaceId: 'cite-tab', surf: 'tab' });
   for (let i = 0; i < 20; i++) assert.strictEqual((await stu.post(`/api/write/${doc.id}/sources/lookup`, { query: 'not a link' })).status, 400);
   const r = await stu.post(`/api/write/${doc.id}/sources/lookup`, { query: `${stubBase}/article` });
   assert.strictEqual(r.status, 429);
   assert.strictEqual(r.data.error, 'Too many lookups. Wait a minute, or fill in the details yourself.');
   // per student
   const doc2 = (await next.get(`/api/write/${a.id}`)).data.doc;
+  await next.post(`/api/write/${doc2.id}/sessions`, { surfaceId: 'cite-tab', surf: 'tab' });
   assert.strictEqual((await next.post(`/api/write/${doc2.id}/sources/lookup`, { query: `${stubBase}/article` })).status, 200);
 });
 

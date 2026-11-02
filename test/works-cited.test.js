@@ -13,7 +13,7 @@ const DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'visor-wc-'));
 Object.assign(process.env, {
   VISOR_PLATFORM: '', DATABASE_URL: '',
   PGLITE_DIR: path.join(DATA, 'pglite'), VISOR_IMAGE_DIR: path.join(DATA, 'images'), VISOR_AUDIO_DIR: path.join(DATA, 'audio'),
-  VISOR_DEV_LOGIN: '1', SESSION_SECRET: 'test-secret', NODE_ENV: 'test',
+  VISOR_DEV_LOGIN: '1', VISOR_SCHOOL_OPTIONAL: '1', SESSION_SECRET: 'test-secret', NODE_ENV: 'test',
   GEMINI_API_KEY: '', GEMINI_VIA: 'apikey', GEMINI_BASE_URL: 'http://127.0.0.1:9', VERTEX_BASE_URL: 'http://127.0.0.1:9', DRIVE_API_BASE: 'http://127.0.0.1:9',
   GOOGLE_CLIENT_ID: '', GOOGLE_API_KEY: '', GOOGLE_APP_ID: '', CLASSROOM_IMPORT: ''
 });
@@ -23,6 +23,7 @@ const assert = require('node:assert');
 const A = require('../lib/assignments');
 const shared = require('../public/assignment-text.js');
 const app = require('../server');
+const repo = require('../lib/repo');
 
 let server, base;
 test.before(async () => {
@@ -138,6 +139,7 @@ test('sources: refused while Works Cited is off; editing and deleting what the e
   assert.strictEqual(r.status, 200);
   assert.strictEqual(r.data.assignment.writing.worksCited, 'page');
   const doc = r.data.doc;
+  await stu.post(`/api/write/${doc.id}/sessions`, { surfaceId: 'cite-tab', surf: 'tab' });
   r = await stu.post(`/api/write/${doc.id}/sources`, { source: { title: 'Why Teens Need Sleep', url: 'https://example.org/sleep', authors: ['Maria Lopez'] } });
   assert.strictEqual(r.status, 200, JSON.stringify(r.data));
   const kept = r.data.source;
@@ -169,7 +171,7 @@ test('sources: refused while Works Cited is off; editing and deleting what the e
   // What the student and the teacher see carries the setting, and says so
   r = await stu.get(`/api/write/${a.id}`);
   assert.strictEqual(r.data.assignment.writing.worksCited, 'off');
-  assert.strictEqual(r.data.doc.sources.length, 3, 'sources from before stay');
+  assert.strictEqual((await repo.getRecord('doc', doc.id)).sources.length, 3, 'sources from before stay');
   assert.match(r.data.describe, /write your own Works Cited \(citation tools are off\)$/);
   r = await stu.get(`/api/assignments/${a.id}`);
   assert.strictEqual(r.data.assignment.writing.worksCited, 'off');

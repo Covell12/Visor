@@ -12,6 +12,9 @@ const LIVE_STATUS = {
   left: ['Left', 'pill-amber'], offline: ['Offline', 'pill-amber'], ended: ['Ended', 'pill-gray'], submitted: ['Submitted', 'pill-blue'], returned: ['Returned', 'pill-violet']
 };
 const REASON_TEXT = { 'left-tab': 'left the tab', 'left-window': 'left the window', 'exit-fullscreen': 'left full screen', 'ext-missing': 'extension off', offline: 'offline', teacher: 'paused by you', 'blocked-site': 'on a blocked site' };
+// Where the extension sees a student who has left, by itself and not through the page.
+// Another app leaves Visor on screen; on another desktop it's hidden.
+const PLACE_TEXT = { 'other-tab': 'on another tab', 'browser-ui': 'in Chrome’s menus or tools', 'other-window': 'in another Chrome window', 'other-app': 'in another app, Visor still showing', 'other-desktop': 'on another desktop, or Visor is hidden', minimized: 'Visor is minimized' };
 // Why a session ended (endReason)
 const END_TEXT = { teacher: 'ended by you', student: 'ended by the student', submitted: 'submitted', timeout: 'no check-in for 3 minutes', 'time-limit': 'time ran out', 'window-closed': 'writing window closed', removed: 'removed from the class' };
 let lb = null; // { data, rows, filter, sort, timer, el }
@@ -122,7 +125,8 @@ function liveRender() {
       const paused = r.pausedMs != null ? r.pausedMs + since : null;
       const statusText = r.status === 'left' ? `Left: ${vcClock(paused)}` : r.status === 'offline' ? `Offline ${vcClock(paused)}` : label;
       const live = ['writing', 'left', 'offline'].includes(r.status);
-      const reason = r.reason && (r.status === 'left' || r.status === 'ended') ? `<div class="tiny muted">${esc((r.status === 'ended' ? END_TEXT : REASON_TEXT)[r.reason] || r.reason)}</div>` : '';
+      const flags = [r.extSilent && 'Extension stopped reporting', r.mismatch && 'Page and extension disagree', r.typedAway && 'Typed while away', r.devtools && 'Developer tools may be open', r.secondScreen && 'Second screen attached', r.briefAways && vcPlural(r.briefAways, 'quick glance')].filter(Boolean);
+      const reason = `${r.reason && (r.status === 'left' || r.status === 'ended') ? `<div class="tiny muted">${esc((r.status === 'left' && PLACE_TEXT[r.place]) || (r.status === 'ended' ? END_TEXT : REASON_TEXT)[r.reason] || r.reason)}</div>` : ''}${flags.length ? `<div class="tiny live-flags">${esc(flags.join(' · '))}</div>` : ''}`;
       // Writing in the side panel (running sessions only)
       const where = r.where === 'panel' ? `<div class="tiny muted">${r.researching ? 'side panel · researching' : 'side panel'}</div>` : '';
       const tl = r.timeLeftMs != null ? Math.max(0, r.timeLeftMs - (r.status === 'writing' || r.status === 'left' || r.status === 'offline' ? since : 0)) : null;

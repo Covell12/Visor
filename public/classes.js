@@ -251,7 +251,7 @@ const courseLetter = c => [...String(c?.name || '')].find(ch => /[\p{L}\p{N}]/u.
 const courseSmall = c => `<span class="vtile cc-${courseColor(c)}" aria-hidden="true">${esc(courseLetter(c))}</span>`;
 function navPaint(list) {
   const teacher = me.role === 'teacher';
-  const active = list.filter(c => !c.archived), archived = list.length - active.length;
+  const active = list.filter(c => !c.archived && c.term?.state !== 'past'), archived = list.filter(c => c.archived).length;
   $('navClasses').innerHTML = active.map(c => `<a class="vnav-item" href="/class/${c.id}" data-link data-class="${c.id}" title="${esc(c.name)}">${courseSmall(c)}<span class="vnav-t">${esc(c.name)}</span>${c.toReview ? `<span class="vnav-n" title="${vcPlural(c.toReview, 'essay')} to review">${c.toReview}</span>` : ''}${c.activeSessions ? `<i class="live-dot" title="${vcPlural(c.activeSessions, 'student')} writing now"></i>` : ''}</a>`).join('')
     + (!active.length ? `<div class="vnav-empty">${archived ? 'All your classes are archived.' : teacher ? 'No classes.' : 'No classes.'}</div>` : '')
     + (archived ? `<a class="vnav-more" href="/?archived=1" data-link>Archived (${archived})</a>` : '');
@@ -272,7 +272,7 @@ function toggleNav(open = !document.body.classList.contains('nav-open')) {
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && document.body.classList.contains('nav-open')) { toggleNav(false); $('vnavBtn')?.focus(); } });
 
 /* ====================== home ====================== */
-let home = { data: null, view: 'dashboard', showArchived: false, upcoming: null };
+let home = { data: null, view: 'dashboard', showArchived: false, upcoming: null, term: '' };
 const homeViewKey = () => `visor.homeView.${me?.id || ''}`;
 
 VisorRouter.add('/', async (el, params, query) => {
@@ -325,7 +325,7 @@ function homeSummary() {
   return [today, due ? `${due} due this week` : ''].filter(Boolean).join(' · ');
 }
 function homeKpis() {
-  const list = home.data.classes.filter(c => !c.archived), sum = k => list.reduce((t, c) => t + (c[k] || 0), 0);
+  const list = home.data.classes.filter(c => !c.archived && !inPastTerm(c)), sum = k => list.reduce((t, c) => t + (c[k] || 0), 0);
   const week = Date.now() + 7 * 864e5;
   if (me.role === 'teacher') {
     const expected = sum('expected'), handed = sum('handedIn');
@@ -378,20 +378,30 @@ function renderHome() {
         ${teacher ? `<button class="btn btn-primary" onclick="openCreateClass()">${I.plusSm}Create class</button>` : `<button class="btn btn-ghost" onclick="openJoinClass()">${I.plusSm}Join a class</button>`}
       </div>
     </header>
+    ${homeSchoolHtml()}
     ${homeKpis()}
     ${teacher ? happeningBoxHtml(home.data.dash.happeningNow) : nextUpHtml()}
     <div class="home-grid">
-      <div class="home-main"><h2 class="home-h">${home.view === 'activity' ? 'Activity' : 'Classes'}</h2><div id="homeBody"></div></div>
+      <div class="home-main"><div class="home-h-row"><h2 class="home-h">${home.view === 'activity' ? 'Activity' : 'Classes'}</h2>${home.view === 'activity' ? '' : homeTermSelect()}</div><div id="homeBody"></div></div>
       <aside class="home-right" aria-label="To do">${teacher ? teacherHomeRight() : studentHomeRight()}</aside>
     </div>
   </div>`;
   if (home.view === 'activity' && window.renderActivity) renderActivity($('homeBody'), home.data.classes);
   else $('homeBody').innerHTML = dashboardHtml();
+  if ($('homeSchool')) mountSchoolPicker('homeSchool', null);
   if (!teacher) homeExtStatus();
 }
 
+// Classes by term: what's running or coming up, unless a past term is picked
+const inPastTerm = c => c.term?.state === 'past';
+function homeTermSelect() {
+  const terms = new Map(home.data.classes.filter(c => c.term).map(c => [c.term.id, c.term]));
+  if (![...terms.values()].some(t => t.state === 'past') && terms.size < 2) return '';
+  return `<select class="input home-term" aria-label="Term" onchange="home.term=this.value;$('homeBody').innerHTML=dashboardHtml()"><option value="">Current classes</option>${[...terms.values()].sort((a, b) => (a.startsOn < b.startsOn ? 1 : -1)).map(t => `<option value="${esc(t.id)}" ${home.term === t.id ? 'selected' : ''}>${esc(t.name)}${t.state === 'past' ? ' (past)' : ''}</option>`).join('')}<option value="all" ${home.term === 'all' ? 'selected' : ''}>All terms</option></select>`;
+}
 function dashboardHtml() {
-  const { classes: list } = home.data;
+  const { classes: all } = home.data;
+  const list = home.term === 'all' ? all : home.term ? all.filter(c => c.term?.id === home.term) : all.filter(c => !inPastTerm(c));
   const teacher = me.role === 'teacher';
   const active = list.filter(c => !c.archived), archived = list.filter(c => c.archived);
   const empty = !active.length ? (archived.length
@@ -477,8 +487,11 @@ function upRowHtml(ev, { showClass = false } = {}) {
 }
 /* ---- create and join ---- */
 function openCreateClass() {
-  openModal({ title: 'Create a class', sub: 'Students join with its class code, or you add them by email. You can add other teachers later, under People.', body: `<div class="field"><label for="ncName">Class name</label><input id="ncName" class="input" placeholder="English 10 – Period 3" maxlength="120" /></div>`,
+  if (!me.org) return openModal({ title: 'Classes belong to a school', body: '<p>Create your school, or ask to join it, and you can make classes straight away.</p>',
+    footer: `<button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="closeModal();VisorRouter.go('/school')">Go to Your School</button>` });
+  openModal({ title: 'Create a class', sub: `Part of ${esc(me.org.name)}. Students there join with its class code, or you add them.`, body: `<div class="field"><label for="ncTerm">Term</label><select id="ncTerm" class="input"></select></div><div class="field"><label for="ncName">Class name</label><input id="ncName" class="input" placeholder="English 10 – Period 3" maxlength="120" /></div>`,
     footer: `<button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="createClass()">Create class</button>` });
+  fillTermSelect('ncTerm');
   setTimeout(() => $('ncName')?.focus(), 50);
   $('ncName').addEventListener('keydown', e => { if (e.key === 'Enter') createClass(); });
 }
@@ -486,11 +499,20 @@ async function createClass() {
   const name = $('ncName').value.trim();
   if (!name) return $('ncName').classList.add('error');
   await modalBusy(async () => {
-    try { const r = await api('/api/classes', { method: 'POST', body: { name } }); forgetCourses(); closeModal(); VisorRouter.go(`/class/${r.class.id}?tab=people`); toast('Class created. Add your students.'); }
+    try { const r = await api('/api/classes', { method: 'POST', body: { name, termId: $('ncTerm').value || undefined } }); forgetCourses(); closeModal(); VisorRouter.go(`/class/${r.class.id}?tab=people`); toast('Class created. Add your students.'); }
     catch (e) { toast(e.message, 'err'); }
   });
 }
 
+// The school's terms in a <select>, on the given term or the one running now
+async function fillTermSelect(id, chosen) {
+  try {
+    const { terms, current } = await api('/api/school/terms'), el = $(id);
+    if (!el) return;
+    el.innerHTML = terms.map(t => `<option value="${esc(t.id)}">${esc(t.name)}${t.state === 'past' ? ' (past)' : ''}</option>`).join('');
+    el.value = chosen || current;
+  } catch { $(id)?.closest('.field')?.classList.add('hidden'); }
+}
 function openJoinClass() {
   openModal({ title: 'Join a class', sub: 'Type the 6-character class code your teacher gave you.', body: `<div class="field"><label for="jcCode">Class code</label><input id="jcCode" class="input mono" maxlength="6" autocomplete="off" style="text-transform:uppercase;font-size:20px;letter-spacing:.2em;" /></div><div id="jcErr" class="form-error hidden"></div>`,
     footer: `<button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="joinClass()">Join</button>` });
@@ -500,8 +522,45 @@ function openJoinClass() {
 async function joinClass() {
   await modalBusy(async () => {
     try { const r = await api('/api/classes/join', { method: 'POST', body: { code: $('jcCode').value } }); forgetCourses(); closeModal(); toast(`You joined ${r.class.name}`); VisorRouter.go(`/class/${r.class.id}`); }
-    catch (e) { formError('jcErr', e.message); }
+    catch (e) {
+      if (!e.data?.needsSchool) return formError('jcErr', e.message);
+      const { school, classId } = e.data.needsSchool;
+      formError('jcErr', '');
+      $('modalBody').innerHTML = `<p>${esc(e.message)}</p><p class="muted small">Its facilitator decides who joins. If they approve you, you’ll be in this class too.</p><div class="field"><label for="jcNote">Add a note <span class="label-note">optional</span></label><input id="jcNote" class="input" maxlength="300" placeholder="Who you are, and whose class this is" /></div><div id="jcErr" class="form-error hidden"></div>`;
+      $('modalFooter').innerHTML = `<button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="askToJoinSchool('${esc(school.id)}','${esc(classId)}')">Ask to join ${esc(school.name)}</button>`;
+    }
   });
+}
+async function askToJoinSchool(schoolId, classId) {
+  try {
+    const r = await api(`/api/schools/${schoolId}/request`, { method: 'POST', body: { classId, note: $('jcNote')?.value || '' } });
+    me = r.user; closeModal(); toast(`Your request went to ${me.schoolRequest?.school.name || 'the school'}`); VisorRouter.render();
+  } catch (e) { formError('jcErr', e.message); }
+}
+// For someone not in a school: find theirs and ask, or (teachers) create one
+const schoolAskHtml = id => `<div class="field"><label for="${id}Input">Your school</label><div id="${id}" class="school-picker"></div></div><div id="${id}Err" class="form-error hidden"></div><button class="btn btn-primary" onclick="askForSchool('${id}')">Continue</button>`;
+async function askForSchool(id) {
+  const choice = schoolChoice(id);
+  if (!choice.schoolId && !choice.schoolName) return formError(`${id}Err`, 'Find your school first.');
+  try {
+    const r = choice.schoolId ? await api(`/api/schools/${choice.schoolId}/request`, { method: 'POST', body: {} }) : await api('/api/school', { method: 'POST', body: { name: choice.schoolName } });
+    me = r.user; paintSchool();
+    if (me.org && me.role === 'teacher') return VisorRouter.go('/school');
+    VisorRouter.render();
+  } catch (e) { formError(`${id}Err`, e.message); }
+}
+async function withdrawSchoolRequest() {
+  try { me = (await api('/api/school-request', { method: 'DELETE' })).user; VisorRouter.render(); }
+  catch (e) { toast(e.message, 'err'); }
+}
+// What someone with no school sees at the top of Home
+function homeSchoolHtml() {
+  if (me.org) return '';
+  const r = me.schoolRequest;
+  if (r?.status === 'pending') return `<div class="callout school-wait"><b>Your request to join ${esc(r.school.name)} is with its facilitator.</b> You’ll see it here once they answer. <button class="linklike" onclick="withdrawSchoolRequest()">Withdraw it</button></div>`;
+  return `<section class="school-ask">
+    <div><h2>${r?.status === 'declined' ? `${esc(r.school.name)} didn’t add you` : 'Join your school'}</h2><p class="muted small">Classes belong to a school. ${r?.status === 'declined' ? 'Check with its facilitator, or ask again.' : me.role === 'teacher' ? 'Ask to join yours, or create it.' : 'Ask to join yours. Its facilitator decides, or use the invite they sent you.'}</p></div>
+    ${schoolAskHtml('homeSchool')}</section>`;
 }
 
 /* ====================== the course frame ======================
@@ -513,6 +572,7 @@ function courseFrame(c, { active = '', main = '', right = '', compact = false })
   VisorRouter.markClass(c.id);
   return `<div class="course cc-${courseColor(c)} ${right ? '' : 'no-right'}${compact ? ' compact' : ''}">
     ${compact ? courseBarHtml(c, active) : courseHeroHtml(c, active)}
+    ${classSchoolNotice(c)}
     <div class="course-body">
       <div class="course-main">${main}</div>
       ${right ? `<aside class="course-right">${right}</aside>` : ''}
@@ -520,6 +580,15 @@ function courseFrame(c, { active = '', main = '', right = '', compact = false })
   </div>`;
 }
 // The class's pages, as pill tabs
+// A class from before classes had to be in a school
+function classSchoolNotice(c) {
+  if (c.school || !c.isTeacher) return '';
+  return `<div class="callout class-school-note">This class isn’t in a school yet. ${me.org ? `<button class="btn btn-primary btn-sm" onclick="addClassToSchool('${c.id}')">Add it to ${esc(me.org.name)}</button>` : '<a href="/school" data-link>Set up your school</a> to add it.'}</div>`;
+}
+async function addClassToSchool(id) {
+  try { const r = await api(`/api/classes/${id}/school`, { method: 'POST', body: {} }); cp.cls = { ...cp.cls, ...r.class }; forgetCourses(); renderClassPage(); toast(`Added to ${r.class.school.name}`); }
+  catch (e) { toast(e.message, 'err'); }
+}
 function courseTabsHtml(c, active) {
   const teachers = teachersOf(c);
   const link = (key, href, icon, label, count) => `<a href="${href}" data-link class="${active === key ? 'active' : ''}" ${active === key ? 'aria-current="page"' : ''}>${icon}<span>${label}</span>${count != null ? `<span class="count">${count}</span>` : ''}</a>`;
@@ -534,8 +603,8 @@ function courseTabsHtml(c, active) {
 function courseHeroHtml(c, active) {
   const teachers = teachersOf(c);
   const who = c.isTeacher
-    ? `${vcPlural(c.studentCount ?? c.students?.length ?? 0, 'student')} · ${teachers.length > 1 ? 'Teachers' : 'Teacher'}: ${esc(teacherNames(c))}`
-    : `${teachers.length > 1 ? 'Teachers' : 'Teacher'}: ${esc(teacherNames(c))}`;
+    ? `${c.term ? `${esc(c.term.name)} · ` : ''}${vcPlural(c.studentCount ?? c.students?.length ?? 0, 'student')} · ${teachers.length > 1 ? 'Teachers' : 'Teacher'}: ${esc(teacherNames(c))}`
+    : `${c.term ? `${esc(c.term.name)} · ` : ''}${teachers.length > 1 ? 'Teachers' : 'Teacher'}: ${esc(teacherNames(c))}`;
   // A teacher's way to bring people in: their school's list, or the class code
   const invite = !c.isTeacher || c.archived ? ''
     : me?.org ? `<button type="button" class="glass-btn" onclick="openAddFromSchool('${c.id}')">${I.users}<span>Add people</span></button>`
@@ -745,7 +814,7 @@ function renderClassPage() {
   const tab = cp.tab;
   let main = '', right = '';
   if (tab === 'members' && c.isTeacher) main = membersHtml();
-  else if (tab === 'settings' && c.isTeacher) main = classSettingsHtml();
+  else if (tab === 'settings' && c.isTeacher) { main = classSettingsHtml(); if (c.school) setTimeout(() => fillTermSelect('csTerm', c.term?.id), 0); }
   else if (tab === 'updates') { main = `${courseHead(c, 'Announcements')}<div id="classUpdates"></div>`; right = classRightHtml(); }
   else { main = materialsHtml(); right = classRightHtml(); }
   $('routeView').innerHTML = courseFrame(c, { active: tab === 'updates' || tab === 'members' || tab === 'settings' ? tab : 'materials', main, right });
@@ -1325,6 +1394,7 @@ function classSettingsHtml() {
     <section class="card card-pad">
       <h2 class="section-title" style="font-size:16px;margin-bottom:14px;">Class details</h2>
       <div class="field"><label for="csName">Class name</label><input id="csName" class="input" value="${esc(c.name)}" maxlength="120" /></div>
+      ${c.school ? `<div class="field"><label for="csTerm">Term</label><select id="csTerm" class="input" onchange="classPatch({ termId: this.value }, 'Term changed')"><option>${esc(c.term?.name || '')}</option></select><div class="hint">${esc(c.school.name)}. A class in a past term keeps working; it just moves off Home.</div></div>` : ''}
       <div class="field"><label>Banner</label>
         <div class="color-preview cs-banner">${courseArt(c, '', 'div', 'id="csPreview"')}<div><div class="small">${esc(c.background?.kind === 'preset' ? BG_NAME[c.background.preset] : c.background?.kind === 'upload' ? 'Your picture' : 'Class color')} · ${esc(COLOR_NAME[courseColor(c)] || '')}</div>
           <button type="button" class="btn btn-ghost btn-sm" style="margin-top:6px;" onclick="openClassBanner('${c.id}')">${I.edit}Change background and color</button>

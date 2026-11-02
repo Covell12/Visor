@@ -250,7 +250,7 @@ function mountSchoolPicker(id, current) {
     make.classList.toggle('hidden', !teacher() || !!el.dataset.create || (!!el.dataset.schoolId && current?.id === el.dataset.schoolId));
     input.placeholder = el.dataset.create ? 'Your school’s name' : 'Search for your school';
     chosen.innerHTML = open ? '' : !name ? (el.dataset.create ? `${I.school}<span>Name your new school. You’ll set it up next.</span>` : '')
-      : el.dataset.schoolId ? `${I.school}<span>${esc(name)}${el.dataset.managed && current?.id !== el.dataset.schoolId ? ': invite only. Ask its facilitator for an invite.' : ''}</span>`
+      : el.dataset.schoolId ? `${I.school}<span>${esc(name)}${el.dataset.managed && current?.id !== el.dataset.schoolId ? ': your request goes to its facilitator.' : ''}</span>`
         : `${I.school}<span>New school: <b>${esc(name)}</b>. You’ll be its facilitator, and add its logo and people next.</span>`;
   };
   el.syncRole = showChosen;
@@ -261,7 +261,7 @@ function mountSchoolPicker(id, current) {
     try { schools = (await api(`/api/schools?q=${encodeURIComponent(q)}`)).schools; } catch {}
     if (input.value.trim() !== q) return;
     const exact = schools.some(x => x.name.toLowerCase() === q.toLowerCase());
-    dd.innerHTML = schools.map(x => `<button type="button" data-id="${esc(x.id)}" data-name="${esc(x.name)}" data-managed="${x.managed ? '1' : ''}">${I.school}<span>${esc(x.name)}${x.managed ? ' <i class="tiny muted">invite only</i>' : ''}</span></button>`).join('')
+    dd.innerHTML = schools.map(x => `<button type="button" data-id="${esc(x.id)}" data-name="${esc(x.name)}" data-managed="${x.managed ? '1' : ''}">${I.school}<span>${esc(x.name)}${x.managed ? ' <i class="tiny muted">ask to join</i>' : ''}</span></button>`).join('')
       + (exact || !teacher() ? '' : `<button type="button" data-id="" data-name="${esc(q)}" data-managed="">${I.plusSm}<span>Create <b>${esc(q)}</b> as a new school</span></button>`);
     dd.classList.toggle('hidden', !dd.innerHTML); showChosen();
   }, 200);
@@ -329,6 +329,9 @@ function paintSchool() {
   $('topSchool').textContent = me.org?.name || '';
   $('navSchool').classList.toggle('hidden', me.role !== 'teacher');
   $('navSchoolIc').innerHTML = me.org?.logoUrl ? `<img src="${esc(me.org.logoUrl)}" alt="" />` : I.school;
+  const waiting = me.schoolRequests || 0;
+  $('navSchoolN').textContent = waiting;
+  $('navSchoolN').classList.toggle('hidden', !waiting);
 }
 
 async function doSignup() {
@@ -493,12 +496,12 @@ function openProfile() {
       </div>
       <div id="profIcon"></div>
     </div>
-    <div class="field"><label>School <span class="label-note">optional</span></label><div id="profSchoolPicker" class="school-picker"></div></div>
+    ${me.org?.managed ? `<div class="field"><label>School</label><div class="small">${esc(me.org.name)}</div><div class="hint">Its facilitator manages who’s in it.</div></div>` : `<div class="field"><label>School <span class="label-note">optional</span></label><div id="profSchoolPicker" class="school-picker"></div></div>`}
     <div id="profExtras" class="prof-extras"></div>
     <div id="profErr" class="form-error hidden"></div>`,
     footer: `<button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="saveProfile()">Save</button>` });
   profDrawIcon();
-  mountSchoolPicker('profSchoolPicker', me.org);
+  if (!me.org?.managed) mountSchoolPicker('profSchoolPicker', me.org);
   if (window.profileExtras) profileExtras($('profExtras')); // Visor Classroom: extension + "Download my data" (ext.js)
 }
 function profTab(tab) { prof.tab = tab; profDrawIcon(); }
@@ -561,11 +564,12 @@ async function saveProfileIcon() {
 }
 async function saveProfile() {
   try {
-    const sc = schoolChoice('profSchoolPicker');
-    const school = sc.schoolId ? { id: sc.schoolId } : sc.schoolName ? { name: sc.schoolName } : null;
+    const sc = me.org?.managed ? null : schoolChoice('profSchoolPicker');
+    const school = !sc ? undefined : sc.schoolId ? { id: sc.schoolId } : sc.schoolName ? { name: sc.schoolName } : null;
     await saveProfileIcon();
     const r = await api('/api/me', { method: 'PATCH', body: { firstName: $('profFirst').value, lastName: $('profLast').value, avatarColor: prof.color, school } });
-    me = r.user; closeModal(); toast('Profile saved');
+    const asked = !me.schoolRequest && r.user.schoolRequest;
+    me = r.user; closeModal(); toast(asked ? `Your request went to ${asked.school.name}` : 'Profile saved');
     paintSchool();
     $('userBtn').innerHTML = `${avatarHtml(me, 'avatar-sm')}<span><div class="n">${esc(me.name)}</div><div class="r">${esc(me.role)}</div></span>`;
     if (project) selectProject(project.id);
@@ -576,13 +580,13 @@ async function saveProfile() {
 // The first-run tour: a few short steps, one idea each
 const TUTORIAL = {
   teacher: [
-    { icon: 'school', title: 'Create a class', text: 'Students join with its class code, or add them on its People page.' },
+    { icon: 'school', title: 'Create a class', text: 'Classes belong to your school and a term. Students at your school join with its code, or you add them.' },
     { icon: 'pen', title: 'Add an assignment', text: 'Choose a locked in-class essay or an open homework essay, then set the time and rules.' },
     { icon: 'eye', title: 'Watch students write', text: 'The Live tab shows words, pauses and pastes. Pause a student, send a message or add time.' },
     { icon: 'doc', title: 'Review and return', text: 'Replay any essay, check its research, then return it with feedback and a score.' }
   ],
   student: [
-    { icon: 'school', title: 'Join your class', text: 'On Home, choose Join a class and enter your teacher’s class code.' },
+    { icon: 'school', title: 'Join your class', text: 'On Home, enter your teacher’s class code. If you aren’t in that school yet, you can ask to join it.' },
     { icon: 'puzzle', title: 'Connect the extension', text: 'Some sessions need the Visor Chrome extension. Connect it from the box on Home.' },
     { icon: 'pen', title: 'Write in a session', text: 'Open an assignment and start a session. Your teacher can see how your writing happens, including time away.' },
     { icon: 'doc', title: 'Cite and submit', text: 'Add your sources, then submit. You can unsubmit until the due date or until your teacher reviews it.' }

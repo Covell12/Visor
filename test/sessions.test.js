@@ -11,7 +11,9 @@ const assignment = (w = {}) => ({ id: 'a1', publishedAt: '2026-10-01T00:00:00Z',
 function start(w, extra = {}) {
   return S.newSession({ doc, assignment: assignment(w), userId: 'u1', body: { surfaceId: 'tab1', surf: 'tab', extPresent: true }, now: T0, ...extra });
 }
-const beat = (s, t, b) => S.applyBeat(s, { surfaceId: 'tab1', surf: 'tab', focused: true, visible: true, fullscreen: true, extPresent: true, ...b }, sec(t));
+// The extension is reporting all along, unless a test says otherwise
+const extReports = (s, t) => { s.extension = { ...s.extension, lastBeat: new Date(sec(t)).toISOString() }; };
+const beat = (s, t, b) => { extReports(s, t); return S.applyBeat(s, { surfaceId: 'tab1', surf: 'tab', focused: true, visible: true, fullscreen: true, extPresent: true, ...b }, sec(t)); };
 
 test('leaving the tab for 5 seconds records one pause with its reason and length', () => {
   const s = start();
@@ -86,7 +88,7 @@ test('locked mode: leaving full screen pauses; the side panel doesn’t need it 
 });
 
 // Side-panel research: the panel holds the lease, the student is on another tab
-const panelBeat = (s, t, b) => S.applyBeat(s, { surfaceId: 'panel1', surf: 'panel', focused: false, visible: true, holdsLease: true, ...b }, sec(t));
+const panelBeat = (s, t, b) => { extReports(s, t); return S.applyBeat(s, { surfaceId: 'panel1', surf: 'panel', focused: false, visible: true, holdsLease: true, ...b }, sec(t)); };
 const iso = t => new Date(sec(t)).toISOString();
 // The tab hands the lease to the panel, leaves full screen and goes out of view
 function intoPanel(w) {

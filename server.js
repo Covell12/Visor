@@ -257,24 +257,19 @@ function publicOrg(o) {
 }
 
 function createOrg(core, name) {
-  const org = { id: uid(), name, createdAt: now() };
+  const org = { id: uid(), name, createdAt: now(), terms: [schools.yearTerm()] };
   core.orgs[org.id] = org;
   return org;
 }
 
 // The school someone chose. { schoolId } picks an existing school; { schoolName }
 // finds one with that name or creates it; neither means "no school" (null).
-// A school someone runs only takes people through its invites, and a new school
-// is its creator's to run. person: { id, role, orgId }
+// A new school is its creator's to run. person: { id, role, orgId }
 function resolveSchoolChoice(core, { schoolId, schoolName } = {}, person) {
-  const joinable = org => {
-    if (schools.isManaged(org) && org.id !== person.orgId) throw new HttpError(403, `${org.name} has its own list of people. Ask its facilitator for an invite.`);
-    return org;
-  };
   if (schoolId) {
     const org = own(core.orgs, schoolId);
     if (!org) throw new HttpError(400, 'That school is no longer on Visor. Pick it again or type its name.');
-    return joinable(org);
+    return org;
   }
   if (schoolName != null && typeof schoolName !== 'string') throw new HttpError(400, 'School name must be text');
   const name = String(schoolName || '').trim().replace(/\s+/g, ' ');
@@ -282,26 +277,70 @@ function resolveSchoolChoice(core, { schoolId, schoolName } = {}, person) {
   if (name.length > 120) throw new HttpError(400, 'That school name is too long');
   if (!slug(name)) throw new HttpError(400, 'Use letters or numbers in the school name');
   const found = Object.values(core.orgs).find(o => slug(o.name) === slug(name));
-  if (found) return joinable(found);
+  if (found) return found;
   if (person.role !== 'teacher') throw new HttpError(403, 'Only teachers can create a school. Pick yours from the list, or leave this blank.');
   const org = createOrg(core, name);
   org.facilitatorIds = [person.id];
   return org;
 }
 
+// Asking to join a school someone runs. One request at a time, kept on the
+// account: { orgId, status: 'pending' | 'declined', at, note, classId }. classId
+// is the class they were trying to join, which approving also puts them in.
+function requestSchool(u, org, { note = '', classId = null } = {}) {
+  u.schoolRequest = { orgId: org.id, status: 'pending', at: now(), note: cleanText(note, 300), classId };
+}
+// Put someone in the school they picked. One someone runs takes a request instead.
+function placeInSchool(u, org) {
+  if (schools.isManaged(org) && !schools.isFacilitator(org, u.id)) requestSchool(u, org);
+  else u.orgId = org.id;
+}
+// Whether someone may be in a class: a school someone runs only admits its own people
+function schoolAdmits(core, cls, u) {
+  const org = cls.orgId ? own(core.orgs, cls.orgId) : null;
+  return !schools.isManaged(org) || u.orgId === org.id;
+}
+// Students of a school's classes who have no school yet belong to it. Used when a
+// school gets a facilitator, or a class joins one, so nobody already in a class is stranded.
+function pullClassStudents(core, org) {
+  for (const cls of Object.values(core.classes)) {
+    if (cls.orgId !== org.id) continue;
+    for (const id of cls.studentIds) { const u = own(core.users, id); if (u && !u.orgId) { u.orgId = org.id; delete u.schoolRequest; } }
+  }
+}
+// Out of every class at a school. Returns the classes they left, so sessions can end.
+function leaveSchoolClasses(core, orgId, userId) {
+  const left = [];
+  for (const cls of Object.values(core.classes)) {
+    if (cls.orgId !== orgId) continue;
+    const wasStudent = cls.studentIds.includes(userId), wasStaff = classes.staffRole(cls, userId) && cls.teacherId !== userId;
+    if (wasStudent) {
+      classes.removeStudent(cls, userId);
+      for (const p of Object.values(core.projects)) if (p.classId === cls.id) p.studentIds = p.studentIds.filter(id => id !== userId);
+      left.push(cls.id);
+    }
+    if (wasStaff) classes.removeTeacher(cls, userId);
+  }
+  return left;
+}
 // Someone leaving their school. A school can't be left with nobody running it.
 function leaveSchool(core, u) {
   const org = u.orgId ? own(core.orgs, u.orgId) : null;
-  if (!schools.isFacilitator(org, u.id)) return;
-  if (org.facilitatorIds.length === 1) throw new HttpError(409, `You’re the only facilitator of ${org.name}. Make someone else its facilitator first.`);
-  org.facilitatorIds = org.facilitatorIds.filter(id => id !== u.id);
+  if (!org) return;
+  if (schools.isFacilitator(org, u.id)) {
+    if (org.facilitatorIds.length === 1) throw new HttpError(409, `You’re the only facilitator of ${org.name}. Make someone else its facilitator first.`);
+    org.facilitatorIds = org.facilitatorIds.filter(id => id !== u.id);
+  }
+  if (schools.isManaged(org)) leaveSchoolClasses(core, org.id, u.id);
 }
 function joinSchool(core, u, org, person) {
   const before = u.orgId;
   if (before !== org.id) leaveSchool(core, u);
   u.orgId = org.id;
+  delete u.schoolRequest;
   if (person.role === 'facilitator' && !schools.isFacilitator(org, u.id)) org.facilitatorIds = [...(org.facilitatorIds || []), u.id];
   if (before !== org.id) dropSchoolIfEmpty(core, before);
+  classes.joinPendingInvites(core, u, cls => schoolAdmits(core, cls, u));
 }
 
 // Remove a school nobody belongs to any more (keeps typos and abandoned names from piling up)
@@ -349,6 +388,14 @@ function publicUser(u, core) {
 // Someone's picture, for anything that shows them. Only there if they chose one.
 const avatarField = u => (u?.avatar?.id ? { avatarUrl: `/api/users/${u.id}/avatar?v=${u.avatar.id}` } : {});
 
+// Someone's own account, with what's waiting for them. (Not for showing anyone else.)
+function selfUser(u, core) {
+  const out = publicUser(u, core), r = u.schoolRequest, org = r ? own(core.orgs, r.orgId) : null;
+  if (org) out.schoolRequest = { school: publicOrg(org), status: r.status, at: r.at };
+  if (out.facilitator) out.schoolRequests = Object.values(core.users).filter(x => x.schoolRequest?.orgId === u.orgId && x.schoolRequest.status === 'pending').length;
+  return out;
+}
+
 // Students: Visor is for schools, so a student either confirms they're 13 or
 // older, or was signed up by their school (a teacher invited their email to a
 // class). Anyone else is told to ask their teacher.
@@ -359,8 +406,14 @@ function checkStudentAge(core, { role, email, over13 }) {
 // After an account is created or signs in: join any classes that invited its
 // email, and the class whose code was typed at sign-up.
 function joinClassesOnSignIn(core, user, classCode) {
-  classes.joinPendingInvites(core, user);
-  if (classCode && String(classCode).trim()) classes.joinByCode(core, user, classCode);
+  const admits = cls => schoolAdmits(core, cls, user);
+  classes.joinPendingInvites(core, user, admits);
+  if (!classCode || !String(classCode).trim()) return;
+  const cls = classes.findByCode(core, classCode);
+  // A code for a class at a school they aren't in asks that school, and approving
+  // the request puts them in the class
+  if (cls && !admits(cls)) return requestSchool(user, own(core.orgs, cls.orgId), { classId: cls.id });
+  classes.joinByCode(core, user, classCode);
 }
 
 app.post('/api/auth/signup', ah(async (req, res) => {
@@ -381,11 +434,12 @@ app.post('/api/auth/signup', ah(async (req, res) => {
     const id = uid();
     if (!invite) checkStudentAge(core, { role, email: em, over13 });
     const org = invite ? null : resolveSchoolChoice(core, { schoolId, schoolName }, { id, role });
-    const user = { id, email: em, firstName, lastName, role, orgId: org ? org.id : null, passwordSalt: salt, passwordHash: hash, createdAt: now() };
+    const user = { id, email: em, firstName, lastName, role, orgId: null, passwordSalt: salt, passwordHash: hash, createdAt: now() };
     core.users[id] = user;
+    if (org) placeInSchool(user, org);
     if (invite) joinSchool(core, user, own(core.orgs, invite.org.id), invite.person);
     joinClassesOnSignIn(core, user, role === 'student' ? classCode : null);
-    return { user: publicUser(user, core), id };
+    return { user: selfUser(user, core), id };
   });
   if (invite) await repo.deleteRecord('schoolinvite', invite.record.id);
   req.session.userId = out.id;
@@ -404,13 +458,13 @@ app.post('/api/auth/login', ah(async (req, res) => {
   throttle.clear(tries);
   await joinInvitesIfAny(core, user);
   signIn(req, user);
-  res.json({ user: publicUser(user, core) });
+  res.json({ user: selfUser(user, core) });
 }));
 
 // Only takes the core lock when this person actually has an invite waiting.
 async function joinInvitesIfAny(core, user) {
   if (user.role !== 'student' || !classes.hasPendingInvite(core, user.email)) return;
-  await repo.withCore(c => { const u = c.users[user.id]; if (u) classes.joinPendingInvites(c, u); });
+  await repo.withCore(c => { const u = c.users[user.id]; if (u) classes.joinPendingInvites(c, u, cls => schoolAdmits(c, cls, u)); });
 }
 
 app.post('/api/auth/logout', (req, res) => { req.session = null; res.json({ ok: true }); });
@@ -497,7 +551,7 @@ app.post('/api/auth/reset', ah(async (req, res) => {
     if (!u) throw gone();
     u.passwordHash = hash; u.passwordSalt = salt;
     u.sessionEpoch = (u.sessionEpoch || 0) + 1;
-    return { user: publicUser(u, core), id: u.id, ep: u.sessionEpoch };
+    return { user: selfUser(u, core), id: u.id, ep: u.sessionEpoch };
   });
   await repo.deleteRecords('exttoken', { studentId: out.id });
   await repo.deleteRecords('pwreset', { studentId: out.id });
@@ -528,7 +582,7 @@ app.post('/api/auth/google', ah(async (req, res) => {
   }
   await joinInvitesIfAny(core, user);
   signIn(req, user);
-  res.json({ user: publicUser(user, core) });
+  res.json({ user: selfUser(user, core) });
 }));
 
 // Finishes account creation for a Google sign-in that had no existing account.
@@ -542,16 +596,17 @@ app.post('/api/auth/google/signup', ah(async (req, res) => {
     let user = Object.values(core.users).find(u => u.email === g.email);
     if (user) { // account was created meanwhile (double submit, race with another tab)
       if (!user.googleSub) { user.googleSub = g.sub; delete user.passwordHash; delete user.passwordSalt; }
-      return { user: publicUser(user, core), id: user.id };
+      return { user: selfUser(user, core), id: user.id };
     }
     const id = uid();
     if (!invite) checkStudentAge(core, { role, email: g.email, over13 });
     const org = invite ? null : resolveSchoolChoice(core, { schoolId, schoolName }, { id, role });
-    user = { id, email: g.email, firstName: cleanText(g.firstName, NAME_MAX) || 'Student', lastName: cleanText(g.lastName, NAME_MAX), role, orgId: org ? org.id : null, googleSub: g.sub, createdAt: now() };
+    user = { id, email: g.email, firstName: cleanText(g.firstName, NAME_MAX) || 'Student', lastName: cleanText(g.lastName, NAME_MAX), role, orgId: null, googleSub: g.sub, createdAt: now() };
     core.users[user.id] = user;
+    if (org) placeInSchool(user, org);
     if (invite) joinSchool(core, user, own(core.orgs, invite.org.id), invite.person);
     joinClassesOnSignIn(core, user, role === 'student' ? classCode : null);
-    return { user: publicUser(user, core), id: user.id };
+    return { user: selfUser(user, core), id: user.id };
   });
   if (invite) await repo.deleteRecord('schoolinvite', invite.record.id);
   req.session.userId = out.id;
@@ -562,7 +617,7 @@ app.get('/api/me', ah(async (req, res) => {
   const core = await repo.readCore();
   const u = currentUser(req, core);
   if (!u) return res.json({ signedIn: false });
-  res.json({ signedIn: true, user: publicUser(u, core), geminiReady: geminiReady() });
+  res.json({ signedIn: true, user: selfUser(u, core), geminiReady: geminiReady() });
 }));
 
 // Profile settings: name, avatar color, school, tutorial flag.
@@ -590,12 +645,13 @@ app.patch('/api/me', requireAuth, ah(async (req, res) => {
       const before = u.orgId;
       const org = school ? resolveSchoolChoice(core, { schoolId: school.id, schoolName: school.name }, u) : null;
       if ((org ? org.id : null) !== before) {
-        leaveSchool(core, u);
-        u.orgId = org ? org.id : null;
+        const was = before ? own(core.orgs, before) : null;
+        if (schools.isManaged(was)) throw new HttpError(409, `Ask ${was.name}’s facilitator to take you off its list.`);
+        if (!org) u.orgId = null; else placeInSchool(u, org);
         dropSchoolIfEmpty(core, before);
       }
     }
-    return publicUser(u, core);
+    return selfUser(u, core);
   });
   res.json({ user });
 }));
@@ -614,7 +670,7 @@ async function setAvatar(req, avatar) {
     if (!u) throw new HttpError(401, 'not signed in');
     old = u.avatar || null;
     if (avatar) u.avatar = avatar; else delete u.avatar;
-    return publicUser(u, core);
+    return selfUser(u, core);
   });
   if (old) await imageStorage.deleteImage(old.stored);
   return user;
@@ -739,11 +795,16 @@ app.get('/api/school', requireAuth, ah(async (req, res) => {
   if (me.role !== 'teacher') throw new HttpError(403, 'Your School is for teachers.');
   const base = { roles: Object.entries(schools.ROLES).map(([id, r]) => ({ id, label: r.label, about: r.about })), grades: schools.GRADES, mailReady: mail.ready() };
   const org = me.orgId ? own(core.orgs, me.orgId) : null;
-  if (!org) return res.json({ ...base, school: null, people: [], canRun: false });
+  if (!org) return res.json({ ...base, school: null, people: [], canRun: false, terms: [], requests: [] });
   const canRun = schools.isFacilitator(org, me.id);
   const saved = await schoolRoster(org.id);
   const roster = canRun ? await fillRoster(core, org, saved) : saved;
-  res.json({ ...base, school: { ...publicOrg(org), facilitators: (org.facilitatorIds || []).map(id => fullName(core.users[id])).filter(Boolean) }, canRun, people: schoolRows(core, org, roster, canRun) });
+  const inSchool = Object.values(core.classes).filter(c => c.orgId === org.id && !c.archived);
+  res.json({
+    ...base, school: { ...publicOrg(org), facilitators: (org.facilitatorIds || []).map(id => fullName(core.users[id])).filter(Boolean) }, canRun, people: schoolRows(core, org, roster, canRun),
+    terms: schools.termsOf(org).map(t => ({ ...publicTerm(t), classes: inSchool.filter(c => c.termId === t.id).length })), classCount: inSchool.length,
+    requests: canRun ? schoolRequests(core, org) : []
+  });
 }));
 
 // Create a school (or take over one with that name that nobody runs): { name }
@@ -755,10 +816,13 @@ app.post('/api/school', requireAuth, ah(async (req, res) => {
     if (!cleanText(req.body?.name, 120)) throw new HttpError(400, 'Enter your school’s name');
     const before = me.orgId;
     const org = resolveSchoolChoice(core, { schoolName: req.body.name }, me);
-    if (!schools.isManaged(org)) org.facilitatorIds = [me.id];
+    if (schools.isManaged(org) && !schools.isFacilitator(org, me.id)) throw new HttpError(409, `${org.name} is already on Visor. You can ask to join it.`);
+    org.facilitatorIds = [me.id];
     me.orgId = org.id;
+    delete me.schoolRequest;
+    pullClassStudents(core, org);
     if (before !== org.id) dropSchoolIfEmpty(core, before);
-    return publicUser(me, core);
+    return selfUser(me, core);
   });
   res.json({ user });
 }));
@@ -769,7 +833,8 @@ app.post('/api/school/claim', requireAuth, ah(async (req, res) => {
     const { me, org } = schoolFor(req, core);
     if (schools.isManaged(org)) throw new HttpError(409, 'This school already has a facilitator.');
     org.facilitatorIds = [me.id];
-    return publicUser(me, core);
+    pullClassStudents(core, org);
+    return selfUser(me, core);
   });
   res.json({ user });
 }));
@@ -781,7 +846,7 @@ app.patch('/api/school', requireAuth, ah(async (req, res) => {
     const { me, org } = schoolFor(req, core, { run: true });
     if (Object.values(core.orgs).some(o => o.id !== org.id && slug(o.name) === slug(name))) throw new HttpError(409, 'Another school has that name.');
     org.name = name;
-    return publicUser(me, core);
+    return selfUser(me, core);
   });
   res.json({ user });
 }));
@@ -801,7 +866,7 @@ app.post('/api/school/logo', requireAuth, ah(async (req, res, next) => { schoolF
       const { me, org } = schoolFor(req, core, { run: true });
       old = org.logo || null;
       org.logo = { id, mime, stored };
-      return publicUser(me, core);
+      return selfUser(me, core);
     });
   } catch (err) { await imageStorage.deleteImage(stored); throw err; }
   if (old) await imageStorage.deleteImage(old.stored);
@@ -813,7 +878,7 @@ app.delete('/api/school/logo', requireAuth, ah(async (req, res) => {
     const { me, org } = schoolFor(req, core, { run: true });
     old = org.logo || null;
     delete org.logo;
-    return publicUser(me, core);
+    return selfUser(me, core);
   });
   if (old) await imageStorage.deleteImage(old.stored);
   res.json({ user });
@@ -868,15 +933,116 @@ app.post('/api/school/people/update', requireAuth, ah(async (req, res) => {
 app.post('/api/school/people/remove', requireAuth, ah(async (req, res) => {
   const { core, org } = await schoolToRun(req);
   const ids = new Set(Array.isArray(req.body?.ids) ? req.body.ids.map(String) : []);
+  const leaving = (await schoolRoster(org.id)).people.filter(p => ids.has(p.id)).map(p => p.email);
+  for (const u of membersOf(core, org).filter(x => leaving.includes(x.email))) {
+    const owned = Object.values(core.classes).filter(c => c.orgId === org.id && c.teacherId === u.id && !c.archived).length;
+    if (owned) throw new HttpError(409, `${fullName(u)} owns ${owned === 1 ? 'a class' : `${owned} classes`} here. They need to archive ${owned === 1 ? 'it' : 'them'} first.`);
+  }
   let gone = [];
   await changeRoster(org.id, roster => {
     gone = roster.people.filter(p => ids.has(p.id)).map(p => p.email);
     roster.people = roster.people.filter(p => !ids.has(p.id));
     checkRoster(core, org, roster.people);
   });
-  await repo.withCore(c => { for (const u of Object.values(c.users)) if (u.orgId === org.id && gone.includes(u.email)) u.orgId = null; });
+  // Off the list means out of its classes too. Their work stays with each class.
+  const left = await repo.withCore(c => {
+    const out = [];
+    for (const u of Object.values(c.users)) {
+      if (u.orgId !== org.id || !gone.includes(u.email)) continue;
+      u.orgId = null;
+      for (const classId of leaveSchoolClasses(c, org.id, u.id)) out.push({ userId: u.id, classId });
+    }
+    return out;
+  });
+  for (const x of left) await endClassSessions(x.userId, x.classId);
   await syncFacilitators(org.id);
   res.json({ removed: gone.length });
+}));
+
+// ---- Terms ----
+const publicTerm = t => ({ id: t.id, name: t.name, startsOn: t.startsOn, endsOn: t.endsOn, state: schools.termState(t) });
+app.get('/api/school/terms', requireAuth, ah(async (req, res) => {
+  const { org } = schoolFor(req, await repo.readCore());
+  res.json({ terms: schools.termsOf(org).map(publicTerm), current: schools.currentTerm(org).id });
+}));
+app.post('/api/school/terms', requireAuth, ah(async (req, res) => {
+  const term = await repo.withCore(core => {
+    const { org } = schoolFor(req, core, { run: true });
+    const t = { id: crypto.randomBytes(8).toString('hex'), ...schools.cleanTerm(req.body) };
+    schools.ensureTerms(org).push(t);
+    return publicTerm(t);
+  });
+  res.json({ term });
+}));
+app.patch('/api/school/terms/:id', requireAuth, ah(async (req, res) => {
+  const term = await repo.withCore(core => {
+    const { org } = schoolFor(req, core, { run: true });
+    const t = schools.ensureTerms(org).find(x => x.id === req.params.id);
+    if (!t) throw new HttpError(404, 'term not found');
+    Object.assign(t, schools.cleanTerm(req.body));
+    return publicTerm(t);
+  });
+  res.json({ term });
+}));
+app.delete('/api/school/terms/:id', requireAuth, ah(async (req, res) => {
+  await repo.withCore(core => {
+    const { org } = schoolFor(req, core, { run: true });
+    const list = schools.ensureTerms(org);
+    if (!list.some(x => x.id === req.params.id)) throw new HttpError(404, 'term not found');
+    if (list.length === 1) throw new HttpError(409, 'A school needs at least one term.');
+    const using = Object.values(core.classes).filter(c => c.orgId === org.id && c.termId === req.params.id).length;
+    if (using) throw new HttpError(409, `${using === 1 ? 'A class is' : `${using} classes are`} in this term. Move ${using === 1 ? 'it' : 'them'} to another term first.`);
+    org.terms = list.filter(x => x.id !== req.params.id);
+  });
+  res.json({ ok: true });
+}));
+
+// ---- Asking to join ----
+// Anyone signed in can ask a school someone runs. { note, classId }
+app.post('/api/schools/:id/request', requireAuth, ah(async (req, res) => {
+  const user = await repo.withCore(core => {
+    const me = meOrThrow(req, core), org = own(core.orgs, req.params.id);
+    if (!org) throw new HttpError(404, 'That school is no longer on Visor.');
+    if (me.orgId === org.id) throw new HttpError(409, 'You’re already in this school.');
+    if (me.orgId) throw new HttpError(409, 'You’re already in a school.');
+    if (!schools.isManaged(org)) { me.orgId = org.id; return selfUser(me, core); }
+    const cls = req.body?.classId ? own(core.classes, req.body.classId) : null;
+    requestSchool(me, org, { note: req.body?.note, classId: cls?.orgId === org.id ? cls.id : null });
+    return selfUser(me, core);
+  });
+  res.json({ user });
+}));
+app.delete('/api/school-request', requireAuth, ah(async (req, res) => {
+  const user = await repo.withCore(core => { const me = meOrThrow(req, core); delete me.schoolRequest; return selfUser(me, core); });
+  res.json({ user });
+}));
+// Who's asking. Visor hasn't confirmed an address unless it came from Google, so
+// the facilitator is told, and is the one who decides.
+function schoolRequests(core, org) {
+  return Object.values(core.users).filter(u => u.schoolRequest?.orgId === org.id && u.schoolRequest.status === 'pending')
+    .sort((a, b) => (a.schoolRequest.at < b.schoolRequest.at ? -1 : 1))
+    .map(u => ({ id: u.id, name: fullName(u), email: u.email, account: u.role, at: u.schoolRequest.at, note: u.schoolRequest.note || '', confirmed: !!u.googleSub, className: own(core.classes, u.schoolRequest.classId)?.name || null, avatarColor: u.avatarColor || null, ...avatarField(u) }));
+}
+// Answer one: { approve: true, role, grades } or { approve: false }
+app.post('/api/school/requests/:userId', requireAuth, ah(async (req, res) => {
+  const { core, me, org } = await schoolToRun(req);
+  const asking = own(core.users, req.params.userId);
+  if (asking?.schoolRequest?.orgId !== org.id || asking.schoolRequest.status !== 'pending') throw new HttpError(404, 'That request has already been answered.');
+  if (!req.body?.approve) {
+    await repo.withCore(c => { const u = own(c.users, asking.id); if (u?.schoolRequest?.orgId === org.id) u.schoolRequest.status = 'declined'; });
+    return res.json({ ok: true });
+  }
+  const person = schools.cleanPerson({ email: asking.email, name: fullName(asking), role: req.body.role || asking.role, grades: req.body.grades });
+  if (schools.ROLES[person.role].account !== asking.role) throw new HttpError(409, `${fullName(asking)} has a ${asking.role} account, so they can’t be listed as ${schools.ROLES[person.role].label.toLowerCase()}.`);
+  await changeRoster(org.id, roster => schools.addPeople(roster, [person], { by: me.id, at: now() }));
+  await repo.withCore(c => {
+    const u = own(c.users, asking.id), o = own(c.orgs, org.id);
+    if (!u || !o) return;
+    const cls = u.schoolRequest?.classId ? own(c.classes, u.schoolRequest.classId) : null;
+    joinSchool(c, u, o, person);
+    if (cls?.orgId === o.id && !cls.archived && u.role === 'student') classes.enroll(cls, u.id);
+  });
+  res.json({ ok: true });
 }));
 
 async function makeInvite(org, person, by) {
@@ -945,7 +1111,7 @@ app.post('/api/invite/:token/accept', requireAuth, ah(async (req, res) => {
     if (me.email !== invite.person.email) throw new HttpError(403, `This invite is for ${invite.person.email}, and you’re signed in as ${me.email}.`);
     if (schools.ROLES[invite.person.role].account !== me.role) throw new HttpError(409, `This invite is for a ${schools.ROLES[invite.person.role].account} account, and yours is a ${me.role} account. Ask your school’s facilitator to change it.`);
     joinSchool(core, me, own(core.orgs, invite.org.id), invite.person);
-    return publicUser(me, core);
+    return selfUser(me, core);
   });
   await repo.deleteRecord('schoolinvite', invite.record.id);
   res.json({ user });
@@ -1836,12 +2002,17 @@ const publicAdvisors = (core, cls) => (cls.advisorIds || []).map(id => own(core.
 
 // teacher: the owner. teachers: everyone listed as teaching it. isTeacher: anyone
 // on the staff, advisors included.
+// Where a class sits: its school and term, once it has them
+function classPlace(core, cls) {
+  const org = cls.orgId ? own(core.orgs, cls.orgId) : null, term = org ? schools.termsOf(org).find(t => t.id === cls.termId) : null;
+  return { ...(org ? { school: publicOrg(org) } : {}), ...(term ? { term: publicTerm(term) } : {}) };
+}
 function publicClass(core, cls, me) {
   const isTeacher = classes.isClassTeacher(cls, me.id);
   const base = {
     id: cls.id, name: cls.name, color: classes.colorFor(cls), background: classes.publicBackground(cls), archived: !!cls.archived, createdAt: cls.createdAt,
     isTeacher, isOwner: cls.teacherId === me.id, teacher: isTeacher ? publicUser(core.users[cls.teacherId]) : nameOnly(core.users[cls.teacherId]), teachers: publicTeachers(core, cls, isTeacher),
-    studentCount: cls.studentIds.length
+    studentCount: cls.studentIds.length, ...classPlace(core, cls)
   };
   if (!isTeacher) return base;
   return {
@@ -1885,13 +2056,48 @@ app.get('/api/classes', requireAuth, ah(async (req, res) => {
 }));
 
 app.post('/api/classes', requireAuth, requireTeacher, ah(async (req, res) => {
-  const out = await repo.withCore(core => { const me = meOrThrow(req, core); return publicClass(core, classes.createClass(core, me, req.body?.name), me); });
+  const out = await repo.withCore(core => {
+    const me = meOrThrow(req, core), org = me.orgId ? own(core.orgs, me.orgId) : null;
+    if (!org && classesNeedSchool()) throw new HttpError(409, 'Classes belong to a school. Create yours, or ask to join it, on the Your School page.');
+    const cls = classes.createClass(core, me, req.body?.name);
+    if (org) cls.termId = termForClass(org, req.body?.termId);
+    return publicClass(core, cls, me);
+  });
   res.json({ class: out });
 }));
+// (Only for test files about something else, and it can't be turned on elsewhere.)
+const classesNeedSchool = () => !(process.env.NODE_ENV === 'test' && process.env.VISOR_SCHOOL_OPTIONAL === '1');
+// A class's term: the one asked for, or the one running now
+function termForClass(org, termId) {
+  schools.ensureTerms(org);
+  if (termId == null || termId === '') return schools.currentTerm(org).id;
+  if (!schools.termsOf(org).some(t => t.id === termId)) throw new HttpError(400, 'Pick one of your school’s terms.');
+  return termId;
+}
 
-// Join with a class code (students)
+// Join with a class code (students). A class at a school they aren't in answers
+// with that school, so the page can offer to ask it.
 app.post('/api/classes/join', requireAuth, ah(async (req, res) => {
-  const out = await repo.withCore(core => { const me = meOrThrow(req, core); return publicClass(core, classes.joinByCode(core, me, req.body?.code), me); });
+  const out = await repo.withCore(core => {
+    const me = meOrThrow(req, core), found = classes.findByCode(core, req.body?.code);
+    if (found && !found.archived && me.role === 'student' && !schoolAdmits(core, found, me)) return { blocked: { school: publicOrg(own(core.orgs, found.orgId)), classId: found.id, className: found.name } };
+    return { cls: publicClass(core, classes.joinByCode(core, me, req.body?.code), me) };
+  });
+  if (out.blocked) return res.status(403).json({ error: `${out.blocked.className} is part of ${out.blocked.school.name}, and you aren’t in that school yet.`, needsSchool: out.blocked });
+  res.json({ class: out.cls });
+}));
+
+// A class from before classes had to be in a school joins its teacher's
+app.post('/api/classes/:id/school', requireAuth, ah(async (req, res) => {
+  const out = await repo.withCore(core => {
+    const got = teacherClass(req, core), org = got.me.orgId ? own(core.orgs, got.me.orgId) : null;
+    if (got.cls.orgId) throw new HttpError(409, 'This class is already in a school.');
+    if (!org) throw new HttpError(409, 'You aren’t in a school yet.');
+    got.cls.orgId = org.id;
+    got.cls.termId = termForClass(org, req.body?.termId);
+    if (schools.isManaged(org)) pullClassStudents(core, org);
+    return publicClass(core, got.cls, got.me);
+  });
   res.json({ class: out });
 }));
 
@@ -1911,7 +2117,16 @@ function teacherClass(req, core) {
 const STAFF_ONLY_MESSAGE = 'Assistant teachers can’t add or remove teachers or advisors.';
 
 app.patch('/api/classes/:id', requireAuth, ah(async (req, res) => {
-  const out = await repo.withCore(core => { const got = teacherClass(req, core); classes.patchClass(got.cls, req.body || {}); return publicClass(core, got.cls, got.me); });
+  const out = await repo.withCore(core => {
+    const got = teacherClass(req, core);
+    classes.patchClass(got.cls, req.body || {});
+    if (req.body?.termId !== undefined) {
+      const org = got.cls.orgId ? own(core.orgs, got.cls.orgId) : null;
+      if (!org) throw new HttpError(400, 'Add this class to a school first.');
+      got.cls.termId = termForClass(org, req.body.termId);
+    }
+    return publicClass(core, got.cls, got.me);
+  });
   res.json({ class: out });
 }));
 
@@ -1922,9 +2137,15 @@ app.post('/api/classes/:id/rotate-code', requireAuth, ah(async (req, res) => {
 
 // { userId } or { emails: [...] }
 app.post('/api/classes/:id/students', requireAuth, ah(async (req, res) => {
+  // In a school someone runs: its own people join now, listed people when they
+  // join the school, and anyone else not at all
+  const seen = teacherClass(req, await repo.readCore());
+  const org = seen.cls.orgId ? own((await repo.readCore()).orgs, seen.cls.orgId) : null;
+  const listed = schools.isManaged(org) ? new Set((await schoolRoster(org.id)).people.map(p => p.email)) : null;
+  const gate = (email, u) => (!listed || u?.orgId === org.id ? 'in' : listed.has(email) ? 'wait' : 'no');
   const out = await repo.withCore(core => {
     const got = teacherClass(req, core);
-    const result = classes.addStudents(core, got.cls, req.body || {});
+    const result = classes.addStudents(core, got.cls, req.body || {}, gate);
     return { result, cls: publicClass(core, got.cls, got.me) };
   });
   res.json({ class: out.cls, ...out.result });
@@ -1942,13 +2163,16 @@ app.delete('/api/classes/:id/students/:userId', requireAuth, ah(async (req, res)
     for (const p of Object.values(core.projects)) if (p.classId === cid) p.studentIds = p.studentIds.filter(id => id !== userId);
     return publicClass(core, got.cls, got.me);
   });
+  await endClassSessions(userId, cid);
+  res.json({ class: out });
+}));
+async function endClassSessions(userId, classId) {
   for (const s of await repo.listRecords('session', { studentId: userId })) {
-    if (s.classId !== cid || s.state === 'ended') continue;
+    if (s.classId !== classId || s.state === 'ended') continue;
     const ended = await repo.updateRecord('session', s.id, x => sessionsLib.endSession(x, 'removed', Date.now()));
     await afterSessionEnded(ended, await repo.getRecord('assignment', ended.assignmentId));
   }
-  res.json({ class: out });
-}));
+}
 
 app.delete('/api/classes/:id/invites', requireAuth, ah(async (req, res) => {
   const out = await repo.withCore(core => { const got = teacherClass(req, core); classes.removeInvite(got.cls, req.body?.email); return publicClass(core, got.cls, got.me); });
@@ -1964,7 +2188,7 @@ app.post('/api/classes/:id/teachers', requireAuth, ah(async (req, res) => {
   const out = await repo.withCore(core => {
     const got = teacherClass(req, core);
     if (!got.canManageStaff) throw new HttpError(403, STAFF_ONLY_MESSAGE);
-    classes.addTeacher(core, got.cls, req.body?.email, req.body?.role ?? 'teacher');
+    classes.addTeacher(core, got.cls, req.body?.email, req.body?.role ?? 'teacher', u => schoolAdmits(core, got.cls, u));
     return publicClass(core, got.cls, got.me);
   });
   res.json({ class: out });
@@ -2681,6 +2905,8 @@ function liveRow(u, doc, s, a, t, all = null) {
     row.tools = [...new Set((s.events || []).filter(e => e.type === 'assistant-ext' && e.detail).map(e => e.detail))].slice(0, 4);
     row.panelClosed = (s.events || []).filter(e => e.type === 'panel-closed').length;
     row.teacherPaused = !!s.teacherPaused;
+    // What the extension sees by itself: where they are, and anything that doesn't add up
+    Object.assign(row, { place: s.extension?.where || null, extSilent: !!s.extension?.silent, secondScreen: (s.events || []).some(e => e.type === 'second-screen'), devtools: !!s.extension?.devtools, mismatch: !!s.extension?.mismatch, briefAways: (s.events || []).filter(e => e.type === 'brief-away').length, typedAway: (s.events || []).some(e => e.type === 'typed-while-paused') });
     // Writing in the side panel (and researching on other tabs right now)?
     row.where = doc?.lease?.surf === 'panel' && doc.lease.sessionId === s.id ? 'panel' : 'tab';
     row.researching = !!s.research;
@@ -2904,6 +3130,15 @@ function docView(doc, { withFeedback } = {}) {
   return out;
 }
 
+// What a student may read of their own essay. Outside a writing session: none of
+// it, until a teacher returns it. It stays on the server, so there's nothing on
+// the page to find. Teachers can always read it.
+const essayIsOpen = (doc, active) => !!active || (doc.status === 'returned' && !doc.reopened);
+function studentDocView(doc, active, opts) {
+  const view = docView(doc, opts);
+  return essayIsOpen(doc, active) ? view : { ...view, text: null, formats: [], sources: [], essayHidden: true };
+}
+
 // Remaining time across sessions, for the start screen ("38 minutes left")
 function timeLeft(a, cls, doc, sessions, studentId) {
   const lim = a.writing?.timeLimitMin;
@@ -2911,6 +3146,10 @@ function timeLeft(a, cls, doc, sessions, studentId) {
   const total = lim * 60000 * classes.multiplierFor(cls, studentId) + (doc.extraTimeMs || 0);
   return Math.max(0, total - sessionsLib.usedMs(sessions.filter(s => s.state === 'ended')));
 }
+
+// The side panel is the extension's: only a request carrying its token gets to be
+// one. A panel needs no full screen, so a page can't be allowed to say it's one.
+const surfaceOf = async (req, core, asked) => (asked === 'panel' && await extUserFromHeader(req, core) ? 'panel' : 'tab');
 
 // Why this student can't take their submission back now (null if they can)
 function unsubmitBlocked(a, cls, doc, sessions, t = Date.now()) {
@@ -2931,15 +3170,15 @@ app.get('/api/write/:assignmentId', ah(async (req, res) => {
   const list = await sweepDocSessions(doc, a);
   const fresh = await repo.getRecord('doc', doc.id);
   const active = list.find(s => s.state !== 'ended') || null;
-  const surf = req.query.surf === 'panel' ? 'panel' : 'tab';
+  const surf = await surfaceOf(req, core, req.query.surf);
   const mult = classes.multiplierFor(got.cls, me.id);
   res.json({
     assignment: assignments.studentView(a), class: { id: got.cls.id, name: got.cls.name }, describe: assignments.describeWriting(a.writing, mult),
-    doc: docView(fresh, { withFeedback: true }),
+    doc: studentDocView(fresh, active, { withFeedback: true }),
     session: active ? sessionsLib.clientView(active, Date.now()) : null,
     token: active ? await sessionToken(active, surf) : null,
     // For the essay's pictures: /api/images/<id>?t=<imageToken>
-    imageToken: await imageToken(fresh.id, me.id),
+    imageToken: essayIsOpen(fresh, active) ? await imageToken(fresh.id, me.id) : null,
     // Writing is possible in an active session not paused by the teacher; the
     // editor also needs focus and the lease, which only the page can know.
     canWrite: !!active && !active.teacherPaused && fresh.status !== 'submitted',
@@ -2959,7 +3198,7 @@ app.post('/api/write/:docId/sessions', ah(async (req, res) => {
   const body = req.body || {};
   const surfaceId = cleanSurfaceId(body.surfaceId);
   if (!surfaceId) throw new HttpError(400, 'surfaceId is required');
-  const surf = body.surf === 'panel' ? 'panel' : 'tab';
+  const surf = await surfaceOf(req, core, body.surf);
   // A locked session starts in full screen, which the side panel can't do
   if (surf === 'panel' && got.a.writing?.mode === 'locked') throw new HttpError(409, 'Start locked sessions from the Visor tab in full screen.');
   if (!got.cls?.studentIds.includes(got.me.id)) throw new HttpError(403, 'You’re no longer in this class. Ask your teacher to add you back.');
@@ -3046,6 +3285,9 @@ app.post('/api/write/:docId/ops', ah(async (req, res) => {
     for (const c of writing.appendToChunks(doc.id, chunks, stamped)) t.put('opchunk', { ...c, classId: doc.classId, assignmentId: doc.assignmentId, studentId: doc.studentId });
     doc.updatedAt = new Date(nowMs).toISOString();
     doc.process = null; // the process report is rebuilt on the next review
+    // Writing that arrives long after they left is kept, and noted
+    const away = sessionsLib.openPause(s);
+    if (away && !away.typed && !['offline', 'teacher'].includes(away.reason) && nowMs - Date.parse(away.from) > 15000) { away.typed = true; sessionsLib.addEvent(s, { t: nowMs, type: 'typed-while-paused', reason: away.reason }); }
     s.opsTo = doc.seq;
     if (!s.opsFrom || s.opsFrom > stamped[0]?.n) s.opsFrom = stamped[0]?.n || s.opsFrom;
     s.lastBeat = new Date(nowMs).toISOString();
@@ -3181,7 +3423,7 @@ app.post('/api/write/:docId/beat', ah(async (req, res) => {
   const { tok, s: s0 } = await liveSession(req);
   const a = await repo.getRecord('assignment', s0.assignmentId);
   const body = req.body || {};
-  const surf = body.surf === 'panel' ? 'panel' : 'tab';
+  const surf = tok.surf === 'panel' ? 'panel' : 'tab';
   const lease = (await repo.getRecord('doc', s0.docId))?.lease;
   const holdsLease = sessionsLib.holdsLease(lease, s0.id, String(body.surfaceId || 'tab').slice(0, 60), tok.surf);
   const panelLease = !!lease && lease.sessionId === s0.id && lease.surf === 'panel';
@@ -3245,6 +3487,7 @@ app.post('/api/write/:docId/lease', ah(async (req, res) => {
 app.post('/api/write/:docId/end', ah(async (req, res) => {
   const { s: s0 } = await liveSession(req);
   if (s0.teacherPaused) throw new HttpError(409, 'Your teacher paused this session. You can end it once they resume it.');
+  if (s0.mode === 'locked') throw new HttpError(409, 'A locked session ends when you submit, or when your teacher ends it.');
   const a = await repo.getRecord('assignment', s0.assignmentId);
   const s = await repo.updateRecord('session', s0.id, x => sessionsLib.endSession(x, 'student', Date.now()));
   await afterSessionEnded(s, a);
@@ -3269,7 +3512,7 @@ app.post('/api/write/:docId/submit', ah(async (req, res) => {
   const w = got.a.writing || {}, words = doc.stats?.words || 0;
   const warning = w.minWords && words < w.minWords ? `Submitted with ${words} words; the assignment asks for at least ${w.minWords}.`
     : w.maxWords && words > w.maxWords ? `Submitted with ${words} words; the assignment asks for at most ${w.maxWords}.` : null;
-  res.json({ doc: docView(doc), warning });
+  res.json({ doc: studentDocView(doc, null), warning });
 }));
 
 // Take a submission back to keep writing. Checked again inside the update, so a
@@ -3285,7 +3528,7 @@ app.post('/api/write/:docId/unsubmit', ah(async (req, res) => {
     Object.assign(d, { status: 'in-progress', submittedAt: null, autoSubmitted: false, lease: null, unsubmits: (d.unsubmits || 0) + 1, updatedAt: now() });
   });
   if (list[0]) await repo.updateRecord('session', list[0].id, x => { sessionsLib.addEvent(x, { t, type: 'unsubmit', afterSession: true }); });
-  res.json({ doc: docView(doc, { withFeedback: true }) });
+  res.json({ doc: studentDocView(doc, null, { withFeedback: true }) });
 }));
 
 // ---- Sources (Works Cited) ----
@@ -3316,6 +3559,7 @@ async function sourceDocFor(req) {
   const got = await docFor(req, core);
   if (!got.isOwner) throw new HttpError(403, 'Only the student can change their sources.');
   if (got.doc.status === 'submitted') throw new HttpError(409, 'This document has been submitted.');
+  if (!await activeSessionOf(got.doc.id)) throw new HttpError(403, 'Your sources open during a writing session.');
   return got;
 }
 const activeSessionOf = async docId => (await repo.listRecords('session', { docId })).find(s => s.state !== 'ended') || null;
@@ -3503,6 +3747,10 @@ app.post('/api/review/:docId/feedback', ah(async (req, res) => {
 app.get('/api/write/:docId/ops', ah(async (req, res) => {
   const core = await repo.readCore();
   const got = await docFor(req, core);
+  if (!got.isTeacher) {
+    const active = (await repo.listRecords('session', { docId: got.doc.id })).find(s => s.state !== 'ended');
+    if (!essayIsOpen(got.doc, active)) throw new HttpError(403, 'Your essay only opens during a writing session, or once your teacher returns it.');
+  }
   const from = Math.max(1, Number(req.query.from) || 1);
   const to = Math.min(got.doc.seq, Number(req.query.to) || got.doc.seq, from + 4999);
   const ops = [];
@@ -3602,7 +3850,21 @@ app.post('/api/ext/session/ack', extAuth, ah(async (req, res) => {
   const doc = await extDoc(req, req.body?.docId);
   const ack = { userId: req.extUser.id, at: now(), version: String(req.body?.version || '').slice(0, 20), hasHostPermission: req.body?.hasHostPermission !== false };
   await repo.updateRecord('doc', doc.id, d => { d.extAck = ack; });
-  res.json({ ok: true, ack });
+  res.json({ ok: true, ack, settings: extSessionSettings(await repo.getRecord('assignment', doc.assignmentId)) });
+}));
+// The rules for a session come from here, not from the page that asks to start one
+function extSessionSettings(a) {
+  const w = a?.writing || {};
+  return { mode: w.mode, researchTracking: w.researchTracking, allowedSites: w.allowedSites, blockedSites: w.blockedSites, blockAiSites: w.blockAiSites, citationStyle: w.citationStyle, oneClickCite: w.oneClickCite !== false && w.worksCited !== 'off', panelBrowsing: w.panelBrowsing !== false };
+}
+// What the extension sees of the student, the moment it changes. It goes straight
+// to the server, so a page that's been tampered with can't hide it.
+app.post('/api/ext/session/presence', extAuth, ah(async (req, res) => {
+  const doc = await extDoc(req, req.body?.docId);
+  const s = (await repo.listRecords('session', { docId: doc.id })).find(x => x.state !== 'ended');
+  if (!s) return res.json({ active: false });
+  await repo.updateRecord('session', s.id, x => sessionsLib.applyPresence(x, req.body, Date.now()));
+  res.json({ active: true });
 }));
 
 // The extension's own beat, every minute during a session: whether its
@@ -3617,7 +3879,7 @@ app.post('/api/ext/session/beat', extAuth, ah(async (req, res) => {
   const lockActive = !!req.body?.lockActive, hasHostPermission = req.body?.hasHostPermission !== false;
   const updated = await repo.updateRecord('session', s.id, x => {
     const t = Date.now();
-    x.extension = { ...(x.extension || {}), lastBeat: new Date(t).toISOString(), lockActive, hasHostPermission, present: true, version: String(req.body?.version || x.extension?.version || '').slice(0, 20) };
+    x.extension = { ...(x.extension || {}), silent: false, lastBeat: new Date(t).toISOString(), lockActive, hasHostPermission, present: true, version: String(req.body?.version || x.extension?.version || '').slice(0, 20) };
   });
   // Which surface writes ('tab' or 'panel'), so the extension's research mode follows it
   res.json({ active: true, sessionId: updated.id, state: updated.state, deadlineAt: updated.deadlineAt, startedAt: updated.startedAt, leaseSurf: doc.lease?.sessionId === s.id ? doc.lease.surf : null });
@@ -4072,7 +4334,7 @@ app.get('/api/me/export', requireAuth, ah(async (req, res) => {
   const out = {
     exportedAt: now(), about: 'Everything Visor Classroom keeps about you: your account, your classes, your essays with their full writing history and the pictures you added, your writing sessions, the research the Visor extension recorded during them, and teacher feedback.',
     imagesNote: 'Pictures you added to an essay are listed under that essay (images). To download one, open its url while you’re signed in to Visor.',
-    account: publicUser(me, core),
+    account: selfUser(me, core),
     // teacher: the owner; teachers: everyone teaching it, owner first
     classes: myClasses.map(c => ({ id: c.id, name: c.name, teacher: fullName(core.users[c.teacherId]), teachers: classes.teacherIdsOf(c).map(id => fullName(own(core.users, id))).filter(Boolean) })),
     projects: Object.values(core.projects).filter(p => p.studentIds.includes(me.id)).map(p => ({ id: p.id, name: p.name })),
@@ -4083,9 +4345,10 @@ app.get('/api/me/export', requireAuth, ah(async (req, res) => {
     const [ops, sessions, research, images] = await Promise.all([allOps(d.id), repo.listRecords('session', { docId: d.id }), repo.listRecords('research', { docId: d.id }), repo.listRecords('image', { docId: d.id })]);
     out.documents.push({
       assignment: a ? { id: a.id, title: a.title } : { id: d.assignmentId }, class: core.classes[d.classId]?.name || null,
-      text: d.text, formats: d.formats, sources: d.sources, status: d.status, submittedAt: d.submittedAt, returnedAt: d.returnedAt,
+      // An essay stays hidden outside a session until it's returned, here too
+      ...(essayIsOpen(d, null) ? { text: d.text, formats: d.formats, sources: d.sources, editLog: ops } : { essayHidden: 'This essay is included once your teacher returns it.' }),
+      status: d.status, submittedAt: d.submittedAt, returnedAt: d.returnedAt,
       feedback: d.status === 'returned' || d.reopened ? d.feedback || null : null, stats: d.stats,
-      editLog: ops,
       images: images.sort((x, y) => (x.createdAt < y.createdAt ? -1 : 1)).map(i => ({ id: i.id, mime: i.mime, sizeBytes: i.sizeBytes, width: i.width, height: i.height, createdAt: i.createdAt, url: `/api/images/${i.id}` })),
       sessions: sessions.map(({ surfaces, away, awayReason, ...s }) => s),
       research: research.sort((x, y) => x.no - y.no).flatMap(c => c.events)

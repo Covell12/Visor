@@ -460,13 +460,14 @@ function assignmentRightHtml() {
   if (!isTeacher) {
     if (a.type !== 'writing') return details;
     const d = ap.data.doc, st = d?.status || 'not-started';
-    const label = st === 'not-started' ? 'Open editor' : st === 'submitted' ? 'View essay' : st === 'returned' ? 'View feedback' : 'Continue';
+    const label = st === 'not-started' ? 'Open editor' : st === 'returned' ? 'View feedback' : 'Continue';
     return `${box('Status', `<div class="side-box-p your-work">${statusPillDoc(st)}${isOverdue(a.dueAt, st) ? ' <span class="pill pill-red">Overdue</span>' : ''}
       ${d?.words ? `<div class="your-work-line">${d.words.toLocaleString()} words</div>` : ''}
       ${d?.submittedAt ? `<div class="your-work-line">Submitted ${esc(vcDateTime(d.submittedAt))}</div>` : ''}
       ${d?.returnedAt && st === 'returned' ? `<div class="your-work-line">Returned ${esc(vcDateTime(d.returnedAt))}</div>` : ''}
-      <a class="btn btn-primary" href="/write/${a.id}" data-link>${I.pen}${label}</a>
-      ${st === 'submitted' && d.unsubmitBlocked === null ? `<button class="btn btn-ghost" onclick="unsubmitFromOverview()">Unsubmit</button>` : ''}</div>`)}${details}`;
+      ${st === 'submitted' ? `<div class="your-work-line">Your essay stays hidden until your teacher returns it.</div>
+        ${d.unsubmitBlocked ? `<div class="your-work-line">${esc(localWhen(d.unsubmitBlocked))}</div>` : '<button class="btn btn-ghost" onclick="unsubmitFromOverview()">Unsubmit</button>'}`
+        : `<a class="btn btn-primary" href="/write/${a.id}" data-link>${I.pen}${label}</a>`}</div>`)}${details}`;
   }
   if (a.type === 'writing') {
     const subs = ap.data.submissions || [], n = st => subs.filter(s => s.status === st).length;

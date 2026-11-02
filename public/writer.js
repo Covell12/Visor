@@ -932,7 +932,7 @@ async function writerFlush({ unload = false } = {}) {
         const r = await wapi(`/api/write/${WR.doc.id}/ops`, { method: 'POST', body: { baseSeq: WR.seq, ops: batch, textHash, surfaceId: WR.surfaceId }, timeoutMs: 30000 });
         WR.queue.splice(0, batch.length);
         WR.seq = r.seq; WR.confirmedText = text; WR.rebased = false;
-        if (!WR.queue.length) WR.queueDetached = false;
+        if (!WR.queue.length) { WR.queueDetached = false; writerHideEssay(); }
         writerPersistQueue(true);
       }
       retryDelay = 2000;
@@ -1159,6 +1159,8 @@ function writerStoredCopy() { try { return JSON.parse(localStorage.getItem(queue
 function writerCheckStoredQueue() {
   let stored = writerStoredCopy();
   if (!stored?.ops?.length || WR.queue.length) return;
+  // The essay isn't on this page outside a session, so it waits for the next one
+  if (WR.doc.text == null) return writerBanner('You have writing saved on this device that hasn’t been sent yet. Start a session to send it.', 'info');
   // Sent as the page closed, and the server has it
   if (stored.sentText != null && stored.sentText === WR.doc.text) return writerClearStoredQueue();
   if (stored.baseSeq !== WR.doc.seq && stored.baseText != null) {
@@ -2252,7 +2254,8 @@ function writerRefresh(force) {
     if (!WR.embed && extOk && window.VisorExt && research) acts.push(`<button class="btn btn-ghost btn-sm" onclick="wsResearchMode()">Research in side panel</button>`);
     // (Locked sessions otherwise stay in full screen, where the panel can't show)
     else if (!WR.embed && extOk && window.VisorExt && w.mode !== 'locked') acts.push(`<button class="btn btn-ghost btn-sm" onclick="VisorExt.openPanel(WR.doc.id).then(r=>{ if(!r.ok) toast(r.error||'Click the Visor icon in Chrome’s toolbar to open the side panel.','err'); })">Open side panel</button>`);
-    acts.push(`<button class="btn btn-ghost btn-sm wr-end" onclick="wsEnd()">End session</button>`);
+    // A locked session ends when it's submitted, or when the teacher ends it
+    if (w.mode !== 'locked') acts.push(`<button class="btn btn-ghost btn-sm wr-end" onclick="wsEnd()">End session</button>`);
     acts.push(`<button class="btn btn-primary btn-sm wr-submit" onclick="wsSubmit()">${PI.send}Submit</button>`);
   } else if (status !== 'submitted' && WR.session && !WR.embed) {
     acts.push(`<button class="btn btn-primary btn-sm wr-submit" onclick="wsSubmit()">${PI.send}Submit</button>`);
@@ -2279,7 +2282,7 @@ function writerRenderIntro() {
   if (wsActive()) { el.innerHTML = ''; return; }
   // The side panel has no Instructions dropdown: they stay on its card
   const instr = WR.embed && a.instructions ? `<div class="wr-instr-open">${esc(a.instructions).replace(/\n/g, '<br>')}</div>` : '';
-  if (doc.status === 'submitted') { el.innerHTML = `<div class="card card-pad wr-card">${instr}<div class="wr-card-line">${I.check}<span>Submitted ${esc(vcDateTime(doc.submittedAt))}${doc.autoSubmitted ? ' (automatically, when time ran out)' : ''}. Your teacher will return it with feedback.</span></div>${WR.embed ? '' : writerUnsubmitLine()}</div>`; return; }
+  if (doc.status === 'submitted') { el.innerHTML = `<div class="card card-pad wr-card">${instr}<div class="wr-card-line">${I.check}<span>Submitted ${esc(vcDateTime(doc.submittedAt))}${doc.autoSubmitted ? ' (automatically, when time ran out)' : ''}. Your teacher will return it with feedback. Your essay stays hidden until then.</span></div>${WR.embed ? '' : writerUnsubmitLine()}</div>`; return; }
   const fb = doc.feedback ? `<div class="wr-feedback"><div class="kicker">Feedback from your teacher</div>${doc.feedback.score != null ? `<div class="wr-score">${esc(String(doc.feedback.score))}${doc.feedback.outOf ? ` <span class="muted">/ ${esc(String(doc.feedback.outOf))}</span>` : ''}</div>` : ''}${doc.feedback.comment ? `<div>${esc(doc.feedback.comment).replace(/\n/g, '<br>')}</div>` : ''}</div>` : '';
   if (doc.status === 'returned' && !doc.reopened) { el.innerHTML = `<div class="card card-pad wr-card">${fb || '<div>Your teacher returned this.</div>'}</div>`; return; }
   const needsExt = w.mode === 'locked' || w.requireExtension;
@@ -2326,22 +2329,41 @@ const LOCK_TEXT = {
   'blocked-site': ['You’re on a blocked site.', 'Time on blocked sites counts as time away. Go back to another tab to keep researching.']
 };
 
+// Outside a writing session a student sees none of their essay, until a teacher
+// returns it. The server stops sending it; what's still on this page goes too,
+// once nothing is waiting to be saved.
+const essayShown = () => wsActive() || (WR.doc?.status === 'returned' && !WR.doc.reopened);
+function writerHideEssay() {
+  const root = $('wrWipe')?.parentElement;
+  if (!root) return;
+  const hide = !essayShown();
+  root.classList.toggle('wr-essay-hidden', hide);
+  if (!hide || WR.queue.length) return;
+  if (WR.quill?.getLength() > 1) WR.quill.setContents([], 'silent');
+  WR.quill?.history?.clear?.();
+  WR.textCache = WR.confirmedText = null;
+  WR.doc = { ...WR.doc, text: null, formats: [], sources: [] };
+}
+
 // A locked session out of full screen: the whole page is replaced by a warning,
 // whatever else is going on, until the student goes back. The essay is hidden as
 // well as covered, so it can't be selected, searched or printed from here.
 function writerApplyWipe(reason) {
   const el = $('wrWipe');
-  const wipe = !!el && wsActive() && WR.data.assignment.writing.mode === 'locked' && !WR.embed && !document.fullscreenElement && reason !== 'mirror' && reason !== 'ended';
-  if (!el || wipe === !el.classList.contains('hidden')) return wipe;
+  const f = surfaceFocus(), away = ['left-tab', 'left-window'].includes(reason) || !f.fullscreen;
+  const wipe = !!el && wsActive() && WR.data.assignment.writing.mode === 'locked' && !WR.embed && away && reason !== 'mirror' && reason !== 'ended';
+  const kind = wipe ? (f.fullscreen ? 'left' : 'screen') : '';
+  if (!el || kind === (el.dataset.kind || '')) return wipe;
+  el.dataset.kind = kind;
   el.classList.toggle('hidden', !wipe);
   el.parentElement.classList.toggle('wr-wiped', wipe);
   el.innerHTML = wipe ? `<div class="wr-wipe-card">
       <span class="wr-wipe-ic">${I.alert}</span>
-      <h2 id="wrWipeTitle">You left full screen</h2>
+      <h2 id="wrWipeTitle">${kind === 'screen' ? 'You left full screen' : 'You left Visor'}</h2>
       <p>Your essay is hidden and your writing is paused until you go back.</p>
-      <div class="wr-wipe-seen"><b>Your teacher can see this.</b> They see that you left full screen and how long you’re away.</div>
+      <div class="wr-wipe-seen"><b>Your teacher can see this.</b> They see that you left, where you went, and how long you’re away.</div>
       <div class="wr-away">Away <span id="wrAwayTime">${vcDur(0)}</span></div>
-      <button class="btn btn-primary btn-lg" id="wrWipeBack" onclick="wsResume()">Return to full screen</button>
+      <button class="btn btn-primary btn-lg" id="wrWipeBack" onclick="wsResume()">${kind === 'screen' ? 'Return to full screen' : 'Back to Visor'}</button>
     </div>` : '';
   if (wipe) $('wrWipeBack').focus({ preventScroll: true });
   return wipe;
@@ -2358,6 +2380,7 @@ function writerUnsubmitLine() {
 // second and on every change, and only touches the page when the reason changes.
 function writerApplyLock() {
   if (!WR.quill) return;
+  writerHideEssay();
   const reason = lockReason();
   const canWrite = reason === null;
   if (WR.quill.isEnabled() !== canWrite) WR.quill.enable(canWrite);
@@ -2443,7 +2466,7 @@ function writerRenderInstructions() {
   const a = WR.data.assignment, w = a.writing || {};
   // The time limit with the student's extra time, as "How this assignment works" says it
   const mult = Number(WR.data.multiplier) > 1 ? Number(WR.data.multiplier) : 1;
-  const sum = [a.dueAt ? vcDue(a.dueAt) : '', w.mode === 'locked' ? 'Locked session' : 'Open session', w.timeLimitMin ? `${Math.round(w.timeLimitMin * mult)} minutes${mult > 1 ? ' with your extra time' : ''}` : 'no time limit'].filter(Boolean).join(' · ');
+  const sum = [a.dueAt ? vcDue(a.dueAt) : '', w.mode === 'locked' ? 'Locked session' : 'Open session', w.timeLimitMin ? `${Math.round(w.timeLimitMin * mult)} minute${Math.round(w.timeLimitMin * mult) === 1 ? '' : 's'}${mult > 1 ? ' with your extra time' : ''}` : 'no time limit'].filter(Boolean).join(' · ');
   el.innerHTML = `<button type="button" class="wr-instr-head" aria-expanded="false" aria-controls="wrInstrBody" onclick="writerToggleInstructions()">
       <span class="wr-instr-chev" aria-hidden="true">${PI.down}</span><span class="wr-instr-t">Instructions</span><span class="wr-instr-sum">${esc(sum)}</span></button>
     <div class="wr-instr-body" id="wrInstrBody" role="region" aria-label="Instructions"><div class="wr-instr-inner"><div class="wr-instr-pad">

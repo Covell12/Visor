@@ -11,7 +11,7 @@ const DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'visor-img-'));
 const IMAGES = path.join(DATA, 'images');
 Object.assign(process.env, {
   VISOR_PLATFORM: '', DATABASE_URL: '',
-  PGLITE_DIR: path.join(DATA, 'pglite'), VISOR_IMAGE_DIR: IMAGES, VISOR_AUDIO_DIR: path.join(DATA, 'audio'), SESSION_SECRET: 'test-secret', NODE_ENV: 'test',
+  PGLITE_DIR: path.join(DATA, 'pglite'), VISOR_IMAGE_DIR: IMAGES, VISOR_AUDIO_DIR: path.join(DATA, 'audio'), SESSION_SECRET: 'test-secret', NODE_ENV: 'test', VISOR_SCHOOL_OPTIONAL: '1',
   GEMINI_API_KEY: '', GEMINI_VIA: 'apikey', GEMINI_BASE_URL: 'http://127.0.0.1:9', VERTEX_BASE_URL: 'http://127.0.0.1:9', DRIVE_API_BASE: 'http://127.0.0.1:9',
   GOOGLE_CLIENT_ID: '', GOOGLE_API_KEY: '', GOOGLE_APP_ID: '', CLASSROOM_IMPORT: ''
 });
@@ -100,10 +100,11 @@ test('pictures: uploading, who can see them, ops, Download my data and deleting'
 
   let r = await stu.get(`/api/write/${a.id}`);
   const doc = r.data.doc;
-  const stuToken = r.data.imageToken;
-  assert.strictEqual(typeof stuToken, 'string', 'the editor gets an image token');
+  assert.strictEqual(r.data.imageToken, null, 'no pictures outside a session');
   r = await other.get(`/api/write/${a.id}`);
-  const otherDoc = r.data.doc, otherToken = r.data.imageToken;
+  const otherDoc = r.data.doc;
+  await other.post(`/api/write/${otherDoc.id}/sessions`, { surfaceId: 'o1', surf: 'tab' });
+  const otherToken = (await other.get(`/api/write/${a.id}`)).data.imageToken;
   const up = `/api/write/${doc.id}/images`;
 
   // No session, no upload
@@ -111,6 +112,8 @@ test('pictures: uploading, who can see them, ops, Download my data and deleting'
   assert.strictEqual(r.status, 401);
   const s = (await stu.post(`/api/write/${doc.id}/sessions`, { surfaceId: 't1', surf: 'tab' })).data;
   const H = { 'X-Visor-Session': s.token, 'X-Visor-Surface': 't1' };
+  const stuToken = (await stu.get(`/api/write/${a.id}`)).data.imageToken;
+  assert.strictEqual(typeof stuToken, 'string', 'the editor gets an image token');
   // Only the surface holding the lease
   r = await stu.upload(up, PNG, { ...H, 'X-Visor-Surface': 'another-tab' });
   assert.strictEqual(r.status, 409);
