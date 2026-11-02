@@ -267,7 +267,7 @@ During a Visor writing session that records research, registers a small script o
 ### `webNavigation`
 
 ```
-During a Visor writing session, records which pages the student visits and searches they make, with time on each page, for their teacher's research log, and notes when the student opens an AI site (including one the session blocks). Not used outside a session.
+During a Visor writing session, records which pages the student visits and searches they make, with time on each page, for their teacher's research log, and notes when the student opens an AI site (including one the session blocks). It also reports whether the student is still on Visor, or on another tab, window, app or desktop, without naming what's there. Not used outside a session.
 ```
 
 ### `contextMenus`
@@ -305,7 +305,7 @@ Visor's interface is a Chrome side panel: the Docs history panel beside a Google
 ```
 Reads the address of the active tab so Visor can tell whether it is a Google Docs or Google Slides document, turn on its side panel there and message the right tab. Also finds an open Visor site tab when connecting, and opens the Chrome Web Store listing when the user clicks Rate Visor.
 
-During a Visor writing session it also keeps the session panel on every tab, records each page's address and title for the research log, sends tabs on sites a locked session doesn't allow to Visor's "not allowed" page, and returns the student to their essay. Outside a session, Visor keeps no record of the pages the user visits.
+During a Visor writing session it also keeps the session panel on every tab, records each page's address and title for the research log, sends tabs on sites a locked session doesn't allow to Visor's "not allowed" page, and returns the student to their essay if they move to another tab or Chrome window in a locked session with no allowed sites. Outside a session, Visor keeps no record of the pages the user visits.
 ```
 
 ### Host permissions — one box for all of them

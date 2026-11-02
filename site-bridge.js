@@ -44,6 +44,21 @@
     }
   });
 
+  // What this page really is, for the extension to report. This script runs apart
+  // from the page's own, so the page's console can't change what it reads here.
+  const presence = () => {
+    const fullscreen = !!document.fullscreenElement || matchMedia('(display-mode: fullscreen)').matches;
+    const payload = {
+      visible: !document.hidden, focused: document.hasFocus(), fullscreen, extended: !!window.screen.isExtended,
+      // Developer tools take space from the page, which full screen shouldn't have to give
+      devtools: fullscreen && (screen.width - innerWidth > 200 || screen.height - innerHeight > 200)
+    };
+    try { chrome.runtime.sendMessage({ channel: 'visor-bridge', type: 'PRESENCE', payload }, () => void chrome.runtime.lastError); } catch (_) {}
+  };
+  for (const ev of ['visibilitychange', 'fullscreenchange']) document.addEventListener(ev, presence);
+  for (const ev of ['focus', 'blur', 'resize']) window.addEventListener(ev, presence);
+  setInterval(presence, 20000);
+
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (!msg || msg.channel !== 'visor-to-page') return false;
     const { channel, ...rest } = msg;

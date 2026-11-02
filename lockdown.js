@@ -156,9 +156,15 @@
     return null;
   }
 
-  // Browser pages a locked session sends back to the Visor tab
-  const BOUNCE = /^(chrome|edge|brave|opera|vivaldi):\/\/(extensions|settings|flags|policy|management|history|downloads|net-internals|inspect)/i;
-  function shouldBounce(url) { return BOUNCE.test(String(url || '')); }
+  // Pages that aren't the web, which a locked session sends back to the Visor tab:
+  // every browser page but a new tab, local files, page source, developer tools,
+  // and other extensions' pages (never Visor's own)
+  const BOUNCE = /^((chrome|edge|brave|opera|vivaldi):\/\/(?!new-?tab)|chrome-untrusted:|devtools:|view-source:|file:)/i;
+  function shouldBounce(url, ownId) {
+    const u = String(url || '');
+    if (/^(chrome-extension|moz-extension):/i.test(u)) return !ownId || !u.includes(`://${ownId}/`);
+    return BOUNCE.test(u);
+  }
 
   const api = { RULE_BASE, SEARCH_AI, buildBlockRules, blockedReason, shouldBounce, splitEntry, searchAiMatch };
   root.VisorLockdown = api;

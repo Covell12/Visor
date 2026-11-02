@@ -136,14 +136,17 @@ async function setBadge(on, recording = true) {
 // SESSION_START comes twice: without a token (confirm to the server that the
 // extension is here, Section 7.1) and with one once the session has begun.
 async function sessionStart(payload, sender) {
-  const { docId, assignmentId, sessionToken, settings = {} } = payload || {};
+  const { docId, assignmentId, sessionToken } = payload || {};
+  let settings = (payload && payload.settings) || {};
   const auth = await getAuth();
   if (!auth || !auth.token) return { ok: false, connected: false, error: 'The Visor extension isn’t connected.' };
   if (!docId) return { ok: false, error: 'no document' };
   const origin = sender && sender.origin ? sender.origin : auth.origin;
   const perm = await hasHostPermission();
   try {
-    await visorApi('/api/ext/session/ack', { method: 'POST', body: { docId, version: chrome.runtime.getManifest().version, hasHostPermission: perm }, origin });
+    const ack = await visorApi('/api/ext/session/ack', { method: 'POST', body: { docId, version: chrome.runtime.getManifest().version, hasHostPermission: perm }, origin });
+    // The server's rules for this assignment, not whatever the page asked for
+    if (ack && ack.settings) settings = { ...settings, ...ack.settings };
   } catch (e) {
     if (e.status === 401) await disconnectedByServer();
     return { ok: false, error: e.message };
@@ -393,6 +396,45 @@ function checkPanelSoon(ms) {
   clearTimeout(panelTimer);
   panelTimer = setTimeout(() => { panelTimer = null; panelGone().catch(() => {}); }, ms);
 }
+// Where the student is, from the Visor page's own report and Chrome's windows.
+// Chrome has no word for a desktop: if it has lost focus and Visor is hidden but
+// not minimized, they're on another desktop, or Visor is fully covered.
+async function placeOf(s, p) {
+  if (s.researchMode) return 'research';
+  if (p.visible && p.focused) return 'visor';
+  const last = await chrome.windows.getLastFocused().catch(() => null);
+  if (last && last.focused) {
+    if (last.id !== s.visorWindowId) return 'other-window';
+    return p.visible ? 'browser-ui' : 'other-tab';
+  }
+  const win = s.visorWindowId != null ? await chrome.windows.get(s.visorWindowId).catch(() => null) : null;
+  if (win && win.state === 'minimized') return 'minimized';
+  return p.visible ? 'other-app' : 'other-desktop';
+}
+// Reported the moment it changes, straight to the server, so a page that's been
+// tampered with can't hide it. A locked session also comes straight back:
+// to the Visor tab from anywhere in Chrome, and to full screen. Chrome won't let
+// an extension pull someone back from another app, so that stays a detection.
+async function presence(p, sender) {
+  const s = await getState();
+  if (!s || !s.active || !sender.tab || sender.tab.id !== s.visorTabId) return { ok: true };
+  const where = await placeOf(s, p);
+  const report = { docId: s.docId, where, extended: !!p.extended, devtools: !!p.devtools };
+  const key = JSON.stringify(report);
+  if (key !== s.placeReported) {
+    try {
+      await visorApi('/api/ext/session/presence', { method: 'POST', body: report });
+      await patchState((x) => { x.placeReported = key; });
+    } catch (_) {} // the next report tries again
+  }
+  // Nothing to read elsewhere in a locked session unless the teacher allowed sites
+  if (s.settings.mode === 'locked' && !s.researchMode && !(s.settings.allowedSites || []).length && (where === 'other-tab' || where === 'other-window')) {
+    chrome.tabs.update(s.visorTabId, { active: true }).catch(() => {});
+    chrome.windows.update(s.visorWindowId, { focused: true }).catch(() => {});
+  }
+  return { ok: true, where };
+}
+
 // Coming back to a Chrome window: look again at a panel that went off screen
 chrome.windows.onFocusChanged.addListener((windowId) => {
   if (windowId === chrome.windows.WINDOW_ID_NONE || panelVisible() || panelTimer) return;
@@ -481,9 +523,13 @@ async function handleBridge(msg, sender) {
     case 'SESSION_START': return sessionStart(p, sender);
     case 'SESSION_END': {
       const s = await getState();
-      if (s && (!p.docId || p.docId === s.docId)) return sessionEnd('page');
-      return { ok: true };
+      if (!s || (p.docId && p.docId !== s.docId)) return { ok: true };
+      // A page can't lift the rules by saying so: the server has to agree.
+      // (extBeat ends it here if the server says it's over.)
+      const r = await extBeat();
+      return r && r.active ? { ok: false, stillActive: true } : { ok: true };
     }
+    case 'PRESENCE': return presence(p, sender);
     case 'OPEN_PANEL': {
       // Needs the click that sent this message, so open() is called first thing.
       // Research mode may begin in the next few seconds (switchResearchMode).
@@ -911,6 +957,11 @@ async function lockdownOn(state, { sweep = true } = {}) {
   // is still locked: the browser-page bounce below applies
   const locked = state.settings.mode === 'locked' && (ok || !rules.length);
   await patchState((x) => { x.lockActive = locked; x.aiBlockActive = ok; });
+  // Browser pages already open (Extensions, Settings) go too
+  if (locked && !research && sweep) {
+    const open = await chrome.tabs.query({}).catch(() => []);
+    for (const t of open) if (t.url && VisorLockdown.shouldBounce(t.url, chrome.runtime.id)) { queueBlocked(t.url); bounce(t.id, t.url); }
+  }
   // Pages already open don't go through the new rules: send away the ones
   // that aren't allowed now. Not in research mode: those rules are looser.
   if (ok && !research && sweep) {
@@ -946,7 +997,7 @@ chrome.tabs.onUpdated.addListener(async (tabId, info) => {
   if (!info.url) return;
   const s = await getState();
   if (!s || !s.active || !s.lockActive) return;
-  if (VisorLockdown.shouldBounce(info.url)) {
+  if (VisorLockdown.shouldBounce(info.url, chrome.runtime.id)) {
     await withState((x) => { queueEvent(x, { type: 'blocked', url: capUrl(info.url), host: hostOf(info.url) }); });
     bounce(tabId, info.url);
   }

@@ -151,6 +151,11 @@ ck('locked, no list, "block AI sites" off: nothing is redirected', buildBlockRul
 ck('chrome://extensions is bounced', shouldBounce('chrome://extensions/?id=abc'), true);
 ck('chrome://settings is bounced', shouldBounce('chrome://settings/clearBrowserData'), true);
 ck('a web page isn’t', shouldBounce('https://www.cdc.gov/'), false);
+ck('other browsers’ settings pages too', ['edge://settings', 'brave://extensions', 'opera://flags', 'vivaldi://settings'].map((u) => shouldBounce(u)), [true, true, true, true]);
+ck('so are the file system, page source and developer tools', ['file:///Users/s/notes.txt', 'view-source:https://www.cdc.gov/', 'devtools://devtools/bundled/inspector.html'].map((u) => shouldBounce(u)), [true, true, true]);
+ck('so is another extension’s page', shouldBounce('chrome-extension://notes/page.html', 'visor'), true);
+ck('…but not Visor’s own', shouldBounce('chrome-extension://visor/blocked.html', 'visor'), false);
+ck('a new tab is left alone', [shouldBounce('chrome://newtab/'), shouldBounce('chrome://new-tab-page/')], [false, false]);
 
 console.log(out.every(Boolean) ? `\nall passed (${out.length} checks)` : `\n${out.filter((x) => !x).length} FAILED`);
 process.exit(out.every(Boolean) ? 0 : 1);

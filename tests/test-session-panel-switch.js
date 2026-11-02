@@ -74,11 +74,12 @@ function load(seed) {
   const { chrome, calls, tabs } = makeChrome(seed);
   const fetches = [];
   const beat = { active: true };   // what the server's beat answers (a test may add leaseSurf)
+  const ack = {};                  // what the server's ack adds (a test may add settings)
   const ctx = {
     chrome, console, setTimeout, clearTimeout, setInterval, clearInterval, URL, TextEncoder, atob, crypto: require('crypto').webcrypto,
     fetch: async (url, init) => {
       fetches.push([url, init && init.method, init && init.body ? JSON.parse(init.body) : null]);
-      const body = /session\/beat/.test(url) ? { ...beat } : { ok: true };
+      const body = /session\/beat/.test(url) ? { ...beat } : /session\/ack/.test(url) ? { ok: true, ...ack } : { ok: true };
       return { ok: true, status: 200, json: async () => body };
     }
   };
@@ -87,6 +88,9 @@ function load(seed) {
   ctx.importScripts = (...files) => files.forEach((f) => vm.runInContext(fs.readFileSync(path.join(DIR, f), 'utf8'), ctx, { filename: f }));
   vm.runInContext(fs.readFileSync(path.join(DIR, 'background.js'), 'utf8'), ctx, { filename: 'background.js' });
   const send = (msg, sender) => new Promise((resolve) => {
+    // The page only ends a session once the server has: it's over there by then
+    if (msg.channel === 'visor-bridge' && msg.type === 'SESSION_END') beat.active = !!beat.keepsRunning;
+    if (msg.channel === 'visor-bridge' && msg.type === 'SESSION_START') beat.active = true;
     let answered = false;
     for (const f of chrome.runtime.onMessage.fns) {
       const keep = f(msg, sender || {}, (r) => { answered = true; resolve(r); });
@@ -94,7 +98,7 @@ function load(seed) {
     }
     resolve(undefined);
   });
-  return { chrome, calls, tabs, fetches, send, ctx, beat };
+  return { chrome, calls, tabs, fetches, send, ctx, beat, ack };
 }
 
 const visor = { origin: 'http://localhost:3000', url: 'http://localhost:3000/write/a1', tab: { id: 5, windowId: 1 } };
@@ -475,6 +479,54 @@ const CITE_OFF = 'One-click citing is turned off for this assignment.';
     ck('popup: no account, no line', popupWith(null), [true, '']);
     ck('popup: connected', popupWith({ token: 't', user: { name: 'Sam' } }), [false, 'Connected to Visor as Sam']);
     ck('popup: run out', popupWith({ token: 't', user: { name: 'Sam' }, expiresAt: Date.now() - 1 }), [true, '']);
+  }
+
+  // ── Where the student is: the extension's own report ───────────────────
+  {
+    const W = load({ perm: true });
+    await W.send({ channel: 'visor-bridge', type: 'CONNECT', payload: { token: 'tok', user: { id: 'u1', name: 'Sam' } } }, visor);
+    W.ack.settings = { ...locked, allowedSites: [] };
+    const went = await W.send({ channel: 'visor-bridge', type: 'SESSION_START', payload: { docId: 'd9', assignmentId: 'a2', sessionToken: 'wsess9', settings: { mode: 'open', allowedSites: ['*'], researchTracking: false } } }, visor);
+    ck('the server’s rules win over what the page sent', [went.lockActive, (await sessionOf(W)).settings.mode, (await sessionOf(W)).settings.blockedSites], [true, 'locked', ['chatgpt.com']]);
+    const reports = () => W.fetches.filter(([url]) => /session\/presence/.test(url)).map(([, , body]) => body);
+    const here = { visible: true, focused: true, fullscreen: true, extended: false, devtools: false };
+    const at = async (p, last, win) => {
+      W.chrome.windows.getLastFocused = async () => last;
+      W.chrome.windows.get = async (id) => ({ id, state: win || 'normal' });
+      return (await W.send({ channel: 'visor-bridge', type: 'PRESENCE', payload: p }, visor)).where;
+    };
+    const fromOtherTab = await W.send({ channel: 'visor-bridge', type: 'PRESENCE', payload: here }, { tab: { id: 2, windowId: 1 } });
+    ck('another tab can’t speak for Visor’s', [fromOtherTab.where, reports().length], [undefined, 0]);
+    ck('on Visor', await at(here, { id: 1, focused: true }), 'visor');
+    ck('reported once', [reports().length, reports()[0].where], [1, 'visor']);
+    await at(here, { id: 1, focused: true });
+    ck('…not again while nothing changes', reports().length, 1);
+    const away = { ...here, focused: false, visible: false };
+    const moved = W.calls.length;
+    ck('another tab in the window', await at(away, { id: 1, focused: true }), 'other-tab');
+    ck('…and it’s brought back', [W.calls.slice(moved).some((c) => c[0] === 'tabs.update' && c[1] === 5 && c[2].active), W.calls.slice(moved).some((c) => c[0] === 'windows.update' && c[2].focused)], [true, true]);
+    ck('browser controls (address bar)', await at({ ...here, focused: false }, { id: 1, focused: true }), 'browser-ui');
+    ck('another Chrome window', await at(away, { id: 2, focused: true }), 'other-window');
+    ck('another app beside Visor', await at({ ...here, focused: false }, { id: 1, focused: false }), 'other-app');
+    ck('hidden with Chrome out of focus: another desktop', await at(away, { id: 1, focused: false }), 'other-desktop');
+    ck('minimized', await at(away, { id: 1, focused: false }, 'minimized'), 'minimized');
+    const flat = W.calls.length;
+    ck('out of full screen on Visor', await at({ ...here, fullscreen: false }, { id: 1, focused: true }), 'visor');
+    ck('…where the page’s own warning takes over', W.calls.slice(flat).some((c) => c[0] === 'windows.update'), false);
+    const free = load({ perm: true });
+    await free.send({ channel: 'visor-bridge', type: 'CONNECT', payload: { token: 'tok', user: { id: 'u1', name: 'Sam' } } }, visor);
+    free.ack.settings = { ...locked, allowedSites: ['cdc.gov'] };
+    await free.send({ channel: 'visor-bridge', type: 'SESSION_START', payload: { docId: 'd8', assignmentId: 'a2', sessionToken: 'wsess8', settings: {} } }, visor);
+    free.chrome.windows.getLastFocused = async () => ({ id: 1, focused: true });
+    const allowed = free.calls.length;
+    await free.send({ channel: 'visor-bridge', type: 'PRESENCE', payload: { ...here, focused: false, visible: false } }, visor);
+    ck('with allowed sites they can go and read them', free.calls.slice(allowed).some((c) => c[0] === 'tabs.update'), false);
+    await at({ ...here, extended: true, devtools: true }, { id: 1, focused: true });
+    ck('a second screen and developer tools are reported', [reports().at(-1).extended, reports().at(-1).devtools], [true, true]);
+
+    W.beat.keepsRunning = true;
+    const r2 = await W.send({ channel: 'visor-bridge', type: 'SESSION_END', payload: { docId: 'd9' } }, visor);
+    ck('a page can’t end a session the server hasn’t', [r2.ok, r2.stillActive, (await sessionOf(W)).active], [false, true, true]);
   }
 
   ck('open session: closing the panel changes nothing', [((await sessionOf(P)).researchQueue || []).some((e) => e.type === 'panel-closed'), closedSends(), callsOf(P.calls, 'tabs.sendMessage').length], [false, 0, 0]);
