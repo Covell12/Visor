@@ -118,8 +118,7 @@
         "blocked.html",
         "blocked.js",
         "blocked.css",
-        "logo.png",
-        "config.js"
+        "logo.png"
       ],
       "matches": [
         "<all_urls>"

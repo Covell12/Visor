@@ -3,12 +3,12 @@
  * ----------------------------------------------------------------------------
  * Pure functions (no chrome.* calls), used by session-bg.js and tested in node.
  *
- * buildBlockRules(settings, { visorOrigin, blockedPage, research }) returns the
- * declarativeNetRequest dynamic rules for a session:
+ * buildBlockRules(settings, { visorOrigin, blockedPage, research, blockedKey })
+ * returns the declarativeNetRequest dynamic rules for a session:
  *
  *   locked, with allowed sites   allow (priority 2): Visor, the allowed sites,
  *                                accounts.google.com; redirect (priority 1):
- *                                every other page, to blocked.html?u=<url>;
+ *                                every other page, to blocked.html?k=<key>&u=<url>;
  *                                with "block AI sites", the AI list is
  *                                redirected above the allow rules (priority 3)
  *   no allowed list, "block AI"  allow Visor and accounts.google.com; redirect
@@ -26,10 +26,15 @@
  *     that frames ChatGPT) is blocked outright (sub_frame, action "block").
  *
  * Top-level pages (main_frame) are redirected to the blocked page, which reads
- * the original address from everything after "?u=" (it isn't re-encoded, so
+ * the original address from everything after "u=" (it isn't re-encoded, so
  * the original's own "?" and "&" survive). Chrome only redirects pages the
  * extension may see: without that access (canRedirect: false) the same pages
  * are blocked outright instead, so the lock never silently stops.
+ *
+ * blockedKey is the session's own random key, put first in the blocked page's
+ * address (blockedUrl). The blocked page has to be web-accessible for these
+ * redirects to reach it, so any site can frame or open it with an address of
+ * its choosing; only a page that carries the key is recorded with the session.
  *
  * The search engines' AI modes can also be reached without a page load (the
  * results page switching mode in place) or by an encoded address the regexes
@@ -97,7 +102,15 @@
     return rules;
   }
 
-  function buildBlockRules(settings, { visorOrigin, blockedPage, research, canRedirect = true }) {
+  // The blocked page for one address: blocked.html?k=<key>&u=<address>. The key
+  // goes first, so the address can keep its own "?" and "&". In a rule, the
+  // address is "\0" (the whole matched URL).
+  const KEY_RE = /^[A-Za-z0-9_-]{16,128}$/;
+  function blockedUrl(blockedPage, key, url) {
+    return `${blockedPage}?${KEY_RE.test(String(key || '')) ? `k=${key}&` : ''}u=${url}`;
+  }
+
+  function buildBlockRules(settings, { visorOrigin, blockedPage, research, canRedirect = true, blockedKey }) {
     const s = settings || {};
     const locked = s.mode === 'locked';
     const allowed = (s.allowedSites || []).map(splitEntry).filter(Boolean);
@@ -106,7 +119,7 @@
     let id = RULE_BASE;
     const nextId = () => id++;
     // (Without access to the pages, Chrome won't redirect them: block instead)
-    const redirect = canRedirect === false ? { type: 'block' } : { type: 'redirect', redirect: { regexSubstitution: `${blockedPage}?u=\\0` } };
+    const redirect = canRedirect === false ? { type: 'block' } : { type: 'redirect', redirect: { regexSubstitution: blockedUrl(blockedPage, blockedKey, '\\0') } };
     // Research mode (side panel): the allowed list is set aside
     const listed = locked && allowed.length > 0 && !research;
 
@@ -166,7 +179,7 @@
     return BOUNCE.test(u);
   }
 
-  const api = { RULE_BASE, SEARCH_AI, buildBlockRules, blockedReason, shouldBounce, splitEntry, searchAiMatch };
+  const api = { RULE_BASE, SEARCH_AI, buildBlockRules, blockedReason, blockedUrl, shouldBounce, splitEntry, searchAiMatch };
   root.VisorLockdown = api;
   if (typeof module === 'object' && module.exports) module.exports = api;
 })(typeof self !== 'undefined' ? self : this);

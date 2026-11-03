@@ -17,7 +17,10 @@
   if (window.__visorResearchCapture) return;   // injected and registered: run once
   window.__visorResearchCapture = true;
 
-  document.addEventListener('copy', () => {
+  document.addEventListener('copy', (e) => {
+    // A page's own script can fire a "copy" event over any text it selects,
+    // without anything reaching the clipboard: only the browser's counts
+    if (!e.isTrusted) return;
     let text = '';
     try { text = String(document.getSelection() ? document.getSelection().toString() : ''); } catch (_) { return; }
     if (text.trim().length < 20) return;

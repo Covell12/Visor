@@ -45,12 +45,19 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     sessionReady.then(() => handleBridge(msg, sender)).then(sendResponse, (e) => sendResponse({ ok: false, error: String((e && e.message) || e) }));
     return true;
   }
+  // The session panel's state carries the session's tokens: only for the
+  // extension's own pages, never a content script (which lives in a site's
+  // page, and can't read the session token from storage itself)
   if (CLASSROOM && msg && msg.type === 'VISOR_PANEL_STATE') {
+    if (!String(sender.url || '').startsWith(chrome.runtime.getURL(''))) { sendResponse({ active: false }); return false; }
     panelState().then(sendResponse, () => sendResponse({ active: false }));
     return true;
   }
+  // Only from the permission window; and Chrome, not the message, says
+  // whether access was granted
   if (CLASSROOM && msg && msg.type === 'VISOR_PERMISSION_RESULT') {
-    permissionAnswered(!!msg.granted).then(() => sendResponse({ ok: true }));
+    if (!String(sender.url || '').startsWith(chrome.runtime.getURL('permission.html'))) { sendResponse({ ok: false }); return false; }
+    hasHostPermission().then((have) => permissionAnswered(!!msg.granted && have)).then(() => sendResponse({ ok: true }), () => sendResponse({ ok: false }));
     return true;
   }
   if (msg && msg.type === 'OPEN_SIDE_PANEL') {

@@ -67,6 +67,26 @@ async function getAuth() {
   return auth;
 }
 
+// ── The blocked page ───────────────────────────────────────────────────────
+// blocked.html must be web-accessible so the lockdown's redirects can reach
+// it, which also lets any site frame it, or open it, with any address after
+// "u=". So each session has a random key that only its own redirects carry
+// (kept in session storage, which content scripts can't read), and only a
+// blocked page with that key, at the top of its tab, is recorded.
+const BLOCKED_PAGE = 'blocked.html';
+function newBlockedKey() {
+  return [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+const blockedUrlFor = (s, url) => VisorLockdown.blockedUrl(chrome.runtime.getURL(BLOCKED_PAGE), s && s.blockedKey, url);
+// Visor's own blocked page, as the top of a tab (not inside a site's frame)
+function isBlockedPageSender(sender) {
+  return !!(sender && sender.tab && sender.frameId === 0 && String(sender.url || '').startsWith(chrome.runtime.getURL(BLOCKED_PAGE)));
+}
+// …and opened by this session (its address carries the session's key)
+function fromSessionBlockedPage(msg, sender, s) {
+  return !!(s && s.active && s.blockedKey && msg && msg.key === s.blockedKey && isBlockedPageSender(sender));
+}
+
 // Kept in memory only so syncPanel (background.js) can answer without
 // waiting; refreshed from storage whenever the worker wakes.
 let sessionPanelOn = false;
@@ -82,6 +102,8 @@ async function visorApi(path, { method = 'GET', body, origin } = {}) {
   const auth = await getAuth();
   if (!auth || !auth.token) { const e = new Error('not connected'); e.status = 401; throw e; }
   const base = origin || auth.origin;
+  // The token only ever goes to the Visor site it was issued on
+  if (!VisorConfig.sameVisorSite(auth.origin, base)) { const e = new Error('The Visor extension is connected to a different Visor site.'); e.status = 403; throw e; }
   const res = await fetch(base + path, {
     method,
     headers: { 'Content-Type': 'application/json', 'X-Visor-Token': auth.token },
@@ -133,6 +155,13 @@ async function setBadge(on, recording = true) {
 
 // ── Starting and ending ────────────────────────────────────────────────────
 
+// The settings that decide a session's rules: what's blocked, what's allowed,
+// what's recorded. The server's answer to the ack carries them (its
+// extSessionSettings); the page that asks to start the session doesn't get a
+// say. (It still supplies what's only shown: the title, the times, and where
+// the writing is now, which panel presence and the beat check.)
+const POLICY_KEYS = ['mode', 'researchTracking', 'allowedSites', 'blockedSites', 'blockAiSites', 'citationStyle', 'oneClickCite', 'panelBrowsing'];
+
 // SESSION_START comes twice: without a token (confirm to the server that the
 // extension is here, Section 7.1) and with one once the session has begun.
 async function sessionStart(payload, sender) {
@@ -142,11 +171,23 @@ async function sessionStart(payload, sender) {
   if (!auth || !auth.token) return { ok: false, connected: false, error: 'The Visor extension isn’t connected.' };
   if (!docId) return { ok: false, error: 'no document' };
   const origin = sender && sender.origin ? sender.origin : auth.origin;
+  // A session started from a Visor address other than the one the extension
+  // was connected on (a local test server, in a build from source) would be
+  // sent the token, and every research event after it
+  if (!VisorConfig.sameVisorSite(auth.origin, origin)) return { ok: false, connected: false, error: 'The Visor extension is connected to a different Visor site. Connect it again here.' };
   const perm = await hasHostPermission();
   try {
     const ack = await visorApi('/api/ext/session/ack', { method: 'POST', body: { docId, version: chrome.runtime.getManifest().version, hasHostPermission: perm }, origin });
-    // The server's rules for this assignment, not whatever the page asked for
-    if (ack && ack.settings) settings = { ...settings, ...ack.settings };
+    // The server's rules for this assignment, not whatever the page asked for.
+    // A rule the server leaves out (JSON drops an undefined value) stays unset
+    // rather than taking the page's: a tampered page could otherwise send
+    // blockedSites: [] for an assignment that never stored its own list. (A
+    // server too old to send settings at all: the page's, as before.)
+    if (ack && ack.settings && typeof ack.settings === 'object') {
+      const shown = { ...settings };
+      for (const k of POLICY_KEYS) delete shown[k];
+      settings = { ...shown, ...ack.settings };
+    }
   } catch (e) {
     if (e.status === 401) await disconnectedByServer();
     return { ok: false, error: e.message };
@@ -173,6 +214,8 @@ async function sessionStart(payload, sender) {
     researchMode: prev && prev.docId === docId ? !!prev.researchMode : !!settings.research,
     // A copy of the session panel has been on screen since research mode began
     panelSeen: prev && prev.docId === docId ? !!prev.panelSeen : false,
+    // This session's blocked-page key (kept when the same session is sent again)
+    blockedKey: prev && prev.docId === docId && prev.blockedKey ? prev.blockedKey : newBlockedKey(),
     lockActive: false
   };
   await setState(state);
@@ -511,11 +554,27 @@ async function handleBridge(msg, sender) {
     }
     case 'CONNECT': {
       if (!p.token) return { ok: false, error: 'no token' };
+      // A running session keeps the connection it started with. Another token
+      // (one the server refuses) would end the session at its next beat,
+      // lifting its rules on the page's word. (With no live connection left,
+      // the session ends at that beat anyway, so connecting again is fine.)
+      const live = await getState();
+      if (live && live.active && await getAuth()) return { ok: false, sessionActive: true, error: 'A writing session is running. Connect the extension again after it ends.' };
       await chrome.storage.local.set({ [AUTH_KEY]: { token: String(p.token), user: p.user || null, origin: sender.origin, expiresAt: tokenExpiry(String(p.token)), connectedAt: new Date().toISOString() } });
       await chrome.storage.session.remove('visorLinked');
       return { ok: true };
     }
     case 'DISCONNECT': {
+      // As with SESSION_END, a page can't lift a running session's rules by
+      // saying so. The server is asked first: extBeat ends the session if it's
+      // over there, or if the server no longer accepts the token (Visor's own
+      // Disconnect revokes it there first). Otherwise the connection stays.
+      const live = await getState();
+      if (live && live.active) {
+        await extBeat();
+        const still = await getState();
+        if (still && still.active) return { ok: false, stillActive: true, error: 'A writing session is running. Disconnect the extension after it ends.' };
+      }
       await chrome.storage.local.remove(AUTH_KEY);
       if (await getState()) await sessionEnd('disconnected');
       return { ok: true };
@@ -690,16 +749,16 @@ async function navigated(details) {
 async function aiModeNavigation(tabId, url) {
   const name = VisorLockdown.searchAiMatch(url);
   if (!name) return;
-  const go = await withState((s) => {
-    if (!s.settings.blockAiSites) return false;
+  const to = await withState((s) => {
+    if (!s.settings.blockAiSites) return null;
     const host = hostOf(url);
     if (!(s.lastAi && s.lastAi.host === host && s.lastAi.url === capUrl(url) && Date.now() - s.lastAi.t < 3000)) {
       queueEvent(s, { type: 'ai-site', url: capUrl(url), host, site: name, blocked: true });
     }
     s.lastAi = { host, url: capUrl(url), t: Date.now() };
-    return true;
+    return blockedUrlFor(s, url);
   });
-  if (go) chrome.tabs.update(tabId, { url: `${chrome.runtime.getURL('blocked.html')}?u=${url}` }).catch(() => {});
+  if (to) chrome.tabs.update(tabId, { url: to }).catch(() => {});
 }
 
 // One search, however many navigation events report it (deduplicated over 10 s)
@@ -948,7 +1007,7 @@ async function lockdownOn(state, { sweep = true } = {}) {
   await clearRules();
   const research = inResearch(state);
   const canRedirect = await hasHostPermission();
-  const rules = VisorLockdown.buildBlockRules(state.settings, { visorOrigin: state.origin, blockedPage: chrome.runtime.getURL('blocked.html'), research, canRedirect });
+  const rules = VisorLockdown.buildBlockRules(state.settings, { visorOrigin: state.origin, blockedPage: chrome.runtime.getURL(BLOCKED_PAGE), research, canRedirect, blockedKey: state.blockedKey });
   let ok = false;
   if (rules.length) {
     try { await chrome.declarativeNetRequest.updateDynamicRules({ addRules: rules }); ok = true; } catch (e) { console.warn('Visor lockdown rules failed:', e && e.message); }
@@ -969,7 +1028,7 @@ async function lockdownOn(state, { sweep = true } = {}) {
     for (const t of tabs) {
       if (!t.url || !VisorLockdown.blockedReason(t.url, state.settings, state.origin, { research })) continue;
       queueBlocked(t.url);
-      chrome.tabs.update(t.id, { url: `${chrome.runtime.getURL('blocked.html')}?u=${t.url}` }).catch(() => {});
+      chrome.tabs.update(t.id, { url: blockedUrlFor(state, t.url) }).catch(() => {});
     }
   }
 }
@@ -986,7 +1045,7 @@ async function lockdownOff() {
 async function bounce(tabId, url) {
   const s = await getState();
   if (!s || !s.active) return;
-  try { await chrome.tabs.update(tabId, { url: `${chrome.runtime.getURL('blocked.html')}?u=${url}` }); } catch (_) {}
+  try { await chrome.tabs.update(tabId, { url: blockedUrlFor(s, url) }); } catch (_) {}
   if (s.visorTabId != null) {
     try { await chrome.tabs.update(s.visorTabId, { active: true }); } catch (_) {}
     if (s.visorWindowId != null) chrome.windows.update(s.visorWindowId, { focused: true }).catch(() => {});
@@ -1009,9 +1068,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     // From blocked.html: the attempt is part of the session record. An AI site
     // was already recorded (an ai-site event, blocked) before the redirect, so
     // only other sites get a 'blocked' event. The answer says which it was, for
-    // the page's wording.
+    // the page's wording. Only the blocked page this session opened counts:
+    // a site that frames or opens blocked.html itself (it's web-accessible)
+    // doesn't have the session's key, so nothing is recorded for it.
     getState().then(async (s) => {
-      const reason = s && s.active ? VisorLockdown.blockedReason(msg.url, s.settings, s.origin, { research: inResearch(s) }) : null;
+      if (!fromSessionBlockedPage(msg, sender, s)) { sendResponse({ reason: null }); return; }
+      const reason = VisorLockdown.blockedReason(msg.url, s.settings, s.origin, { research: inResearch(s) });
       if (reason !== 'ai') await withState((x) => { queueEvent(x, { type: 'blocked', url: capUrl(msg.url), host: hostOf(msg.url) }); }).catch(() => {});
       // An AI site reached through a redirect (a search result's link) was
       // never seen before the redirect: record it now, once
@@ -1026,6 +1088,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
   if (msg.type === 'VISOR_BACK_TO_WRITING') {
+    // It moves or closes the tab it came from: only Visor's blocked page at the
+    // top of its own tab may ask, never a copy framed inside some site
+    if (!isBlockedPageSender(sender)) return false;
     getState().then(async (s) => {
       if (!s) return;
       // The blocked page took over the Visor tab itself (or that tab is gone):

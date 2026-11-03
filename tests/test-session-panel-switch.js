@@ -47,7 +47,7 @@ function makeChrome(seed = {}) {
     runtime: { onMessage: ev(), onInstalled: ev(), onConnect: ev(), getManifest: () => ({ version: '4.0.0' }), lastError: null, id: 'test', getURL: (p) => `chrome-extension://test/${p}` },
     sidePanel: { setOptions: rec('setOptions'), setPanelBehavior: rec('setPanelBehavior'), open: rec('open') },
     action: { setBadgeText: rec('setBadgeText'), setBadgeBackgroundColor: rec('setBadgeBackgroundColor'), setTitle: rec('setTitle'), setPopup: rec('setPopup') },
-    tabs: { onUpdated: ev(), onActivated: ev(), onRemoved: ev(), query: async () => tabs, get: async (id) => tabs.find((t) => t.id === id), update: rec('tabs.update'), create: rec('tabs.create'), sendMessage: async (...args) => { await rec('tabs.sendMessage')(...args); return { ok: true }; } },
+    tabs: { onUpdated: ev(), onActivated: ev(), onRemoved: ev(), query: async () => tabs, get: async (id) => tabs.find((t) => t.id === id), update: rec('tabs.update'), create: rec('tabs.create'), remove: rec('tabs.remove'), goBack: rec('tabs.goBack'), sendMessage: async (...args) => { await rec('tabs.sendMessage')(...args); return { ok: true }; } },
     // No Chrome window in focus: nothing is being looked at
     windows: { onFocusChanged: ev(), create: rec('windows.create'), update: rec('windows.update'), getLastFocused: async () => ({ id: 1, focused: false, tabs }), get: async (id) => ({ id, state: 'normal', focused: false }), WINDOW_ID_NONE: -1 },
     storage: { local: store('local'), session: store('session'), onChanged },
@@ -102,6 +102,8 @@ function load(seed) {
 }
 
 const visor = { origin: 'http://localhost:3000', url: 'http://localhost:3000/write/a1', tab: { id: 5, windowId: 1 } };
+// The session panel itself, asking the worker for the session (with its tokens)
+const panelPage = { url: 'chrome-extension://test/sessionpanel.html' };
 // A copy of the session panel: its port to the worker, saying whether it's on screen
 function openPanel(h, visible = true, sender = { url: 'chrome-extension://test/sessionpanel.html' }) {
   const ev = () => { const fns = []; return { addListener: (f) => fns.push(f), fns }; };
@@ -163,8 +165,16 @@ const CITE_OFF = 'One-click citing is turned off for this assignment.';
   await h.send({ type: 'OPEN_SIDE_PANEL' }, { tab: { id: 1, windowId: 1 } });
   ck('the Docs launcher during a session opens the session panel', callsOf(h.calls, 'setOptions').map((c) => c[0].path), ['sessionpanel.html']);
 
-  const ps = await h.send({ type: 'VISOR_PANEL_STATE' }, {});
+  const ps = await h.send({ type: 'VISOR_PANEL_STATE' }, panelPage);
   ck('the panel learns the session', [ps.active, ps.assignmentId, ps.origin, ps.title, ps.extToken], [true, 'a1', 'http://localhost:3000', 'Essay', 'tok']);
+  // A content script (it lives in a site's page) gets neither the session nor its tokens
+  const fromPage = await h.send({ type: 'VISOR_PANEL_STATE' }, { url: 'https://en.wikipedia.org/wiki/Sleep', tab: { id: 2, windowId: 1 }, frameId: 0 });
+  ck('  a content script asking learns nothing', [fromPage.active, fromPage.sessionToken, fromPage.extToken], [false, undefined, undefined]);
+  // The permission window's answer counts only from that window, and only as
+  // far as Chrome agrees (no site access here, so "granted" isn't believed)
+  const notPermissionPage = await h.send({ type: 'VISOR_PERMISSION_RESULT', granted: true }, { url: 'https://en.wikipedia.org/wiki/Sleep', tab: { id: 2, windowId: 1 }, frameId: 0 });
+  await h.send({ type: 'VISOR_PERMISSION_RESULT', granted: true }, { url: 'chrome-extension://test/permission.html', tab: { id: 8, windowId: 2 }, frameId: 0 });
+  ck('  a permission answer from elsewhere, or that Chrome doesn’t back, turns nothing on', [notPermissionPage.ok, (await sessionOf(h)).recording, callsOf(h.calls, 'registerContentScripts').length], [false, false, 0]);
   ck('  one-click citing and side-panel mode default to on', [ps.oneClickCite, ps.panelBrowsing, ps.researchMode], [true, true, false]);
   r = await h.send({ channel: 'visor-bridge', type: 'RESEARCH_MODE', payload: { docId: 'd1', on: true } }, visor);
   ck('  research mode in an open session: succeeds, changes nothing', [r.ok, callsOf(h.calls, 'dnr.update').length, (await sessionOf(h)).researchMode], [true, 0, false]);
@@ -189,7 +199,7 @@ const CITE_OFF = 'One-click citing is turned off for this assignment.';
   h.chrome.tabs.onActivated.fns.forEach((f) => f({ tabId: 2 }));
   await settle();
   ck('v3.6: switching to another tab closes it there', callsOf(h.calls, 'setOptions').map((c) => [c[0].tabId, c[0].enabled]), []);
-  const ps2 = await h.send({ type: 'VISOR_PANEL_STATE' }, {});
+  const ps2 = await h.send({ type: 'VISOR_PANEL_STATE' }, panelPage);
   ck('the panel knows there’s no session', ps2.active, false);
 
   // ── Chrome restarted mid-session: session storage is gone, the rest isn't ──
@@ -214,7 +224,11 @@ const CITE_OFF = 'One-click citing is turned off for this assignment.';
   ck('  one-click citing off: no right-click item', [callsOf(L.calls, 'contextMenus.create').length, callsOf(L.calls, 'contextMenus.removeAll').length > 0], [0, true]);
   ck('  the allowed list is enforced (catch-all redirect)', catchAll(await L.chrome.declarativeNetRequest.getDynamicRules()), true);
   ck('  an open tab off the list is sent away', callsOf(L.calls, 'tabs.update').map((c) => c[0]), [1]);
-  let ps3 = await L.send({ type: 'VISOR_PANEL_STATE' }, {});
+  // Every way to the blocked page carries the session's own random key
+  const lkey = (await sessionOf(L)).blockedKey;
+  ck('  …to the blocked page, with the session’s key', [/^[0-9a-f]{32}$/.test(lkey), callsOf(L.calls, 'tabs.update')[0][1].url], [true, `chrome-extension://test/blocked.html?k=${lkey}&u=https://docs.google.com/document/d/abc/edit`]);
+  ck('  and so does every redirect rule', (await L.chrome.declarativeNetRequest.getDynamicRules()).filter((x) => x.action.type === 'redirect').map((x) => x.action.redirect.regexSubstitution).every((t) => t === `chrome-extension://test/blocked.html?k=${lkey}&u=\\0`), true);
+  let ps3 = await L.send({ type: 'VISOR_PANEL_STATE' }, panelPage);
   ck('  the panel learns the switches', [ps3.oneClickCite, ps3.panelBrowsing, ps3.researchMode], [false, true, false]);
 
   r = await L.send({ type: 'VISOR_CITE_ACTIVE', from: 'panel' }, {});
@@ -234,12 +248,13 @@ const CITE_OFF = 'One-click citing is turned off for this assignment.';
   ck('  the catch-all is gone, the AI rules stay', [catchAll(rules), blocksAi(rules)], [false, true]);
   ck('  the state says so', (await sessionOf(L)).researchMode, true);
   ck('  open tabs aren’t swept (the rules got looser)', callsOf(L.calls, 'tabs.update').length, 0);
-  ps3 = await L.send({ type: 'VISOR_PANEL_STATE' }, {});
+  ps3 = await L.send({ type: 'VISOR_PANEL_STATE' }, panelPage);
   ck('  the panel knows', ps3.researchMode, true);
   r = await L.send({ channel: 'visor-bridge', type: 'RESEARCH_MODE', payload: { docId: 'other', on: false } }, visor);
   ck('another document’s request is ignored', [r, (await sessionOf(L)).researchMode], [{ ok: false, error: 'no session' }, true]);
   r = await startLocked('d2', locked);
   ck('a re-sent SESSION_START (reload) keeps research mode', [(await sessionOf(L)).researchMode, catchAll(await L.chrome.declarativeNetRequest.getDynamicRules())], [true, false]);
+  ck('  and the blocked-page key (pages already open stay valid)', (await sessionOf(L)).blockedKey, lkey);
 
   L.calls.length = 0;
   r = await L.send({ channel: 'visor-bridge', type: 'RESEARCH_MODE', payload: { docId: 'd2', on: false } }, visor);
@@ -281,6 +296,7 @@ const CITE_OFF = 'One-click citing is turned off for this assignment.';
   await L.send({ channel: 'visor-bridge', type: 'SESSION_END', payload: { docId: 'd2' } }, visor);
   L.calls.length = 0;
   r = await startLocked('d3', { ...locked, oneClickCite: true, panelBrowsing: false });
+  ck('a new session gets a new blocked-page key', [/^[0-9a-f]{32}$/.test((await sessionOf(L)).blockedKey), (await sessionOf(L)).blockedKey !== lkey], [true, true]);
   ck('one-click citing on: the right-click item is added', callsOf(L.calls, 'contextMenus.create').map((c) => c[0].id), ['visor-cite']);
   r = await L.send({ channel: 'visor-bridge', type: 'RESEARCH_MODE', payload: { docId: 'd3', on: true } }, visor);
   ck('side-panel mode off: research mode is refused', r, { ok: false, error: 'Side-panel mode is turned off for this assignment.' });
@@ -288,7 +304,7 @@ const CITE_OFF = 'One-click citing is turned off for this assignment.';
   L.beat.leaseSurf = 'panel';
   await beatNow(L);
   ck('  a beat naming the panel doesn’t switch it either', (await sessionOf(L)).researchMode, false);
-  ps3 = await L.send({ type: 'VISOR_PANEL_STATE' }, {});
+  ps3 = await L.send({ type: 'VISOR_PANEL_STATE' }, panelPage);
   ck('  the panel learns the switches', [ps3.oneClickCite, ps3.panelBrowsing, ps3.researchMode], [true, false, false]);
 
   // Chrome restarted while the side panel held the lease: the reloaded page
@@ -332,20 +348,48 @@ const CITE_OFF = 'One-click citing is turned off for this assignment.';
   // (Chrome reports the navigation before the rules redirect it: that records the AI site)
   R.chrome.webNavigation.onBeforeNavigate.fns.forEach((f) => f({ tabId: 7, frameId: 0, url: 'https://chatgpt.com/' }));
   await settle();
+  // The blocked page as the session's own redirects open it: the top of its
+  // tab, its address carrying the session's key
+  const blockedPageSays = async (h, url, { key, frameId = 0, pageUrl, tabId = 7 } = {}) => {
+    const k = key === undefined ? (await sessionOf(h)).blockedKey : key;
+    return h.send({ type: 'VISOR_BLOCKED', url, key: k }, { tab: { id: tabId, windowId: 1 }, frameId, url: pageUrl || `chrome-extension://test/blocked.html?k=${k}&u=${url}` });
+  };
   const before = (await queued(R)).length;
-  r = await R.send({ type: 'VISOR_BLOCKED', url: 'https://chatgpt.com/' }, { tab: { id: 7 } });
+  r = await blockedPageSays(R, 'https://chatgpt.com/');
   ck('blocked page, AI site: says so, records nothing more', [r.reason, (await queued(R)).length - before], ['ai', 0]);
   // Reached through a redirect (a search result's link), it never went past
   // the navigation event: the blocked page records it, once
   const beforeRedirect = (await queued(R)).length;
   await new Promise((done) => setTimeout(done, 10));
   R.chrome.storage.session.data.visorSession.lastAi = null;
-  await R.send({ type: 'VISOR_BLOCKED', url: 'https://chatgpt.com/c/123' }, { tab: { id: 7 } });
-  await R.send({ type: 'VISOR_BLOCKED', url: 'https://chatgpt.com/c/123' }, { tab: { id: 7 } });
+  await blockedPageSays(R, 'https://chatgpt.com/c/123');
+  await blockedPageSays(R, 'https://chatgpt.com/c/123');
   ck('an AI site reached by a redirect is recorded once', (await queued(R)).slice(beforeRedirect), ['ai-site:chatgpt.com']);
   const beforeOther = (await queued(R)).length;
-  r = await R.send({ type: 'VISOR_BLOCKED', url: 'https://example.com/page' }, { tab: { id: 7 } });
+  r = await blockedPageSays(R, 'https://example.com/page');
   ck('blocked page, a site off the locked list: recorded as blocked', [r.reason, (await queued(R)).slice(beforeOther)], ['not-allowed', ['blocked:example.com']]);
+  // blocked.html is web-accessible (the rules can only redirect there if it
+  // is), so any site can frame it or open it with an address of its choosing.
+  // Without the session's key, or inside a frame, it records nothing and
+  // learns nothing about the session.
+  R.chrome.storage.session.data.visorSession.lastAi = null;
+  const beforeForged = (await queued(R)).length;
+  const forged = [
+    await blockedPageSays(R, 'https://chatgpt.com/', { frameId: 3 }),               // framed in a site's page (even with the key)
+    await blockedPageSays(R, 'https://chatgpt.com/', { key: '' }),                   // opened by a site: no key
+    await blockedPageSays(R, 'https://chatgpt.com/', { key: 'f'.repeat(32) }),      // a guessed key
+    await blockedPageSays(R, 'https://claude.ai/', { pageUrl: 'https://evil.example/' })   // not the blocked page at all
+  ];
+  ck('a blocked page a site framed or opened records nothing', [forged.map((x) => x.reason), (await queued(R)).length - beforeForged], [[null, null, null, null], 0]);
+  // "Back to my writing" moves or closes the tab it's in: never for a copy
+  // framed inside a site
+  R.calls.length = 0;
+  R.send({ type: 'VISOR_BACK_TO_WRITING' }, { tab: { id: 2, windowId: 1 }, frameId: 3, url: 'chrome-extension://test/blocked.html?u=https://chatgpt.com/' });
+  await settle();
+  ck('a framed blocked page can’t move or close the site’s tab', [callsOf(R.calls, 'tabs.update').length, callsOf(R.calls, 'tabs.remove').length, callsOf(R.calls, 'tabs.goBack').length], [0, 0, 0]);
+  R.send({ type: 'VISOR_BACK_TO_WRITING' }, { tab: { id: 7, windowId: 1 }, frameId: 0, url: 'chrome-extension://test/blocked.html?u=https://chatgpt.com/' });
+  await settle();
+  ck('  the real one goes back to the Visor tab and closes itself', [callsOf(R.calls, 'tabs.update').map((c) => [c[0], c[1].active]), callsOf(R.calls, 'tabs.remove').map((c) => c[0])], [[[5, true]], [7]]);
 
   // ── Closing the side panel mid-research (panel presence) ────────────────
   // A locked session writing in the side panel keeps its looser rules only
@@ -442,6 +486,14 @@ const CITE_OFF = 'One-click citing is turned off for this assignment.';
     ck('  and a lookalike address gets no answer', [lookalike.ok, lookalike.connected], [false, undefined]);
     await S.send({ channel: 'visor-bridge', type: 'CONNECT', payload: { token: 'tok2', user: { id: 'u1', name: 'Sam' } } }, site('https://visor-ed.com'));
     ck('connecting on visor-ed.com works, and is kept on the web.app address too', [(await ping('https://visor-ed.com')).connected, (await ping('https://visor-ed.web.app')).connected], [true, true]);
+    // The token only goes to the site it was issued on: another Visor address
+    // (a local server, in a build from source) can't start a session and be sent it
+    const asked = S.fetches.length;
+    const startFrom = (origin) => S.send({ channel: 'visor-bridge', type: 'SESSION_START', payload: { docId: 'd1', assignmentId: 'a1', sessionToken: null, settings: {} } }, site(origin));
+    const fromLocal = await startFrom('http://localhost:3000');
+    ck('a session from another Visor address is refused, and nothing goes there', [fromLocal.ok, fromLocal.connected, S.fetches.slice(asked).length], [false, false, 0]);
+    const fromPublic = await startFrom('https://visor-ed.web.app');
+    ck('  another of Visor’s public addresses is the same site', [fromPublic.ok, S.fetches.at(-1)[0]], [true, 'https://visor-ed.web.app/api/ext/session/ack']);
   }
 
   // An extension token runs out: the site then sees "not connected" and offers
@@ -527,6 +579,53 @@ const CITE_OFF = 'One-click citing is turned off for this assignment.';
     W.beat.keepsRunning = true;
     const r2 = await W.send({ channel: 'visor-bridge', type: 'SESSION_END', payload: { docId: 'd9' } }, visor);
     ck('a page can’t end a session the server hasn’t', [r2.ok, r2.stillActive, (await sessionOf(W)).active], [false, true, true]);
+  }
+
+  // ── Nor by disconnecting the extension, or swapping in another token ─────
+  // Either used to end a locked session (and lift its rules) on the page's
+  // word: DISCONNECT at once, a token the server refuses at the next beat.
+  {
+    const D = load({ perm: true });
+    await D.send({ channel: 'visor-bridge', type: 'CONNECT', payload: { token: 'tok', user: { id: 'u1', name: 'Sam' } } }, visor);
+    await D.send({ channel: 'visor-bridge', type: 'SESSION_START', payload: { docId: 'd12', assignmentId: 'a2', sessionToken: 'wsess12', settings: locked } }, visor);
+    const lockedNow = async () => [!!(await sessionOf(D)), catchAll(await D.chrome.declarativeNetRequest.getDynamicRules()), (D.chrome.storage.local.data.visorAuth || {}).token];
+    ck('a locked session runs', await lockedNow(), [true, true, 'tok']);
+    let d = await D.send({ channel: 'visor-bridge', type: 'DISCONNECT', payload: {} }, visor);
+    ck('DISCONNECT while the server says it runs: refused; the rules and the token stay', [d.ok, d.stillActive, ...(await lockedNow())], [false, true, true, true, 'tok']);
+    d = await D.send({ channel: 'visor-bridge', type: 'CONNECT', payload: { token: 'bogus', user: { id: 'u2', name: 'Eve' } } }, visor);
+    ck('CONNECT with another token mid-session: refused; the session’s token stays', [d.ok, d.sessionActive, ...(await lockedNow())], [false, true, true, true, 'tok']);
+    await beatNow(D);
+    ck('  so the next beat still finds the session', await lockedNow(), [true, true, 'tok']);
+    // The server no longer takes the token (Visor's own Disconnect revokes it
+    // there first): the session ends, and the server knows why
+    const realFetch = D.ctx.fetch;
+    D.ctx.fetch = async (url, init) => (/session\/beat/.test(url) ? { ok: false, status: 401, json: async () => ({ error: 'not connected', reconnect: true }) } : realFetch(url, init));
+    d = await D.send({ channel: 'visor-bridge', type: 'DISCONNECT', payload: {} }, visor);
+    ck('token revoked on the server: DISCONNECT goes through, the session ends', [d.ok, !!(await sessionOf(D)), (await D.chrome.declarativeNetRequest.getDynamicRules()).length, D.chrome.storage.local.data.visorAuth], [true, false, 0, undefined]);
+    D.ctx.fetch = realFetch;
+    // The session over on the server: DISCONNECT ends it here too
+    await D.send({ channel: 'visor-bridge', type: 'CONNECT', payload: { token: 'tok', user: { id: 'u1', name: 'Sam' } } }, visor);
+    await D.send({ channel: 'visor-bridge', type: 'SESSION_START', payload: { docId: 'd13', assignmentId: 'a2', sessionToken: 'wsess13', settings: locked } }, visor);
+    D.beat.active = false;
+    d = await D.send({ channel: 'visor-bridge', type: 'DISCONNECT', payload: {} }, visor);
+    ck('session over on the server: DISCONNECT ends it and forgets the token', [d.ok, !!(await sessionOf(D)), (await D.chrome.declarativeNetRequest.getDynamicRules()).length, D.chrome.storage.local.data.visorAuth], [true, false, 0, undefined]);
+    d = await D.send({ channel: 'visor-bridge', type: 'CONNECT', payload: { token: 'tok3', user: { id: 'u1', name: 'Sam' } } }, visor);
+    ck('  and with no session, connecting works as before', [d.ok, D.chrome.storage.local.data.visorAuth.token], [true, 'tok3']);
+  }
+
+  // ── A rule the server leaves out isn't the page's to fill in ─────────────
+  // (An assignment saved before that setting existed: JSON drops what's
+  // undefined, so the server's answer simply doesn't have it.)
+  {
+    const G = load({ perm: true });
+    await G.send({ channel: 'visor-bridge', type: 'CONNECT', payload: { token: 'tok', user: { id: 'u1', name: 'Sam' } } }, visor);
+    G.ack.settings = { mode: 'locked', researchTracking: true, allowedSites: ['en.wikipedia.org'], blockAiSites: true, oneClickCite: true, panelBrowsing: true };   // no blockedSites
+    const lax = { mode: 'open', researchTracking: false, allowedSites: ['com', 'org'], blockedSites: [], blockAiSites: false, title: 'Essay' };
+    const g = await G.send({ channel: 'visor-bridge', type: 'SESSION_START', payload: { docId: 'd14', assignmentId: 'a2', sessionToken: 'wsess14', settings: lax } }, visor);
+    const gs = (await sessionOf(G)).settings;
+    const grules = await G.chrome.declarativeNetRequest.getDynamicRules();
+    ck('a rule the server left out isn’t taken from the page', [g.lockActive, gs.mode, gs.allowedSites, gs.blockedSites.includes('chatgpt.com'), blocksAi(grules), catchAll(grules)], [true, 'locked', ['en.wikipedia.org'], true, true, true]);
+    ck('  what the page only shows still comes from it', gs.title, 'Essay');
   }
 
   ck('open session: closing the panel changes nothing', [((await sessionOf(P)).researchQueue || []).some((e) => e.type === 'panel-closed'), closedSends(), callsOf(P.calls, 'tabs.sendMessage').length], [false, 0, 0]);
