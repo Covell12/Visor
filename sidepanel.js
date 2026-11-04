@@ -1322,6 +1322,12 @@ $('btn-replay').addEventListener('click', () => ask('VISOR_OPEN_REPLAY'));
 $('send-btn').addEventListener('click', () => sendToVisor({ projectId: $('send-project').value }));
 $('send-code-btn').addEventListener('click', () => sendToVisor({ code: $('send-code-input').value }));
 $('send-code-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') sendToVisor({ code: $('send-code-input').value }); });
+// Visor Classroom: other Docs and Slides files, for the same project
+$('send-drive').addEventListener('click', () => {
+  if (globalThis.VISOR_EDITION === 'docs') return;
+  const project = $('send-connected').hidden ? '' : $('send-project').value;
+  chrome.tabs.create({ url: chrome.runtime.getURL('drive-import.html') + (project ? `?project=${encodeURIComponent(project)}` : '') });
+});
 
 // ── Formatting ───────────────────────────────────────────────────────────────
 

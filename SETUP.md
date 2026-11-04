@@ -535,7 +535,20 @@ Nothing in this section happens unless a student has an **active writing session
 
 When the session ends (the student ends or submits it, the teacher ends it, the server says it's over, or the token stops working), the extension unregisters the capture script, clears the badge, removes its rules and the menu item, sends what's queued, and puts the side panel back exactly as v3.6 had it (Docs-only, per tab; the toolbar button opens the popup). `tests/test-session-panel-switch.js` checks that.
 
-Files: `config.js`, `site-bridge.js`, `session-bg.js` (loaded by `background.js`), `research.js`, `research-capture.js`, `cite.js`, `lockdown.js`, `sessionpanel.*`, `blocked.*`, `permission.*`.
+Files: `config.js`, `site-bridge.js`, `session-bg.js` (loaded by `background.js`), `research.js`, `research-capture.js`, `cite.js`, `lockdown.js`, `sessionpanel.*`, `blocked.*`, `permission.*`, and for group projects `drive.js` and `drive-import.*`.
+
+### Adding Google Drive files to a group project
+
+**Add other files from Google Drive…** (at the bottom of the side panel's Send to Visor box) and **Add Drive files to a Visor project** (in the toolbar popup, once the extension is connected) open `drive-import.html`. The student picks the project, from their list or by its code, and the files:
+
+- **Links they paste.** In Google Drive, select the files and press Ctrl+C (⌘C): Drive copies them as links, with each file's name in the clipboard's HTML. Share → Copy link does one file. Links can be dropped on the box too. `parse()` in `drive.js` finds every Google Docs and Slides file in the paste, once each, and says why anything else isn't one: a Sheets file, a form, a folder, a file uploaded to Drive (a PDF or a Word file has no Docs history), a "Publish to the web" link, a page of Drive, a link cut short.
+- **Files open in Chrome**, listed from the open tabs and offered unticked.
+
+Then each file is read the way the Visor button reads the Doc you have open, one at a time (`importFile()` in `drive.js`). A file that isn't open is opened in a background tab next to the page, read by the content script, and closed again before its report is sent. A file that is open is read where it is, afresh (its bar only refreshes while on screen), and left open. The report is the whole document: `VISOR_EXPORT` with `whole` covers every tab of a Doc that has tabs, whichever one is on screen, without moving the user's own selection (`tests/test-export-whole.js`). It goes to the project through the worker's `VISOR_SEND`, exactly as Send to Visor sends, so sending a file again replaces its earlier report in that project. Each file says what happened: added, view-only (history is for editors), no edits yet, Google asked to sign in, not a Doc or Slides file, too slow. If Visor refuses the project itself (a wrong code, not a member, disconnected), the rest of the batch stops. Up to 20 files at a time.
+
+**Why it isn't Google's file picker.** Browsing a whole Drive needs an OAuth client and a restricted Drive scope, and the Google Picker is script loaded from Google's servers, which an extension page can't run. So the extension keeps its rule (no Google API, no OAuth, no keys) and reads each file from its own page, with the Google session the browser already has, which is also why it's exact rather than sampled. The web app has the Picker route, **From Google Drive** in a project's **Add a resource** dialog: it appears only when the server has all three of `GOOGLE_CLIENT_ID`, `GOOGLE_API_KEY` and `GOOGLE_APP_ID` (otherwise the choice isn't shown at all), and it diffs Drive's saved snapshots on the server, which is coarser and can't tell pasting from typing.
+
+Nothing new is stored: the page keeps its list in memory, and the only addresses it opens are built from a file id that passed a check (`openUrl()`), never taken from the paste. While a writing session runs the page waits for it to end, since a research-recorded session would log the files it opens as research. `tests/test-drive.js` covers the paste rules, the addresses and every way a read can end.
 
 ### Connecting
 
@@ -556,7 +569,7 @@ The source lists `http://localhost:3000` (for local testing), `https://visor-ed.
 |---|---|
 | `storage` | Keeps the student's connection token and, during a session, the session state and the queue of research events. |
 | `sidePanel` | Shows the Docs history panel, and during a session the panel with the student's essay and the cite button. |
-| `tabs` | Keeps the side panel on the right tab, finds the page a student wants to cite, and returns them to the Visor tab from a blocked page. |
+| `tabs` | Keeps the side panel on the right tab, finds the page a student wants to cite, and returns them to the Visor tab from a blocked page. For Add files from Google Drive, lists the Docs and Slides open in Chrome and opens each file picked in a background tab to read it, closing it afterwards. |
 | `scripting` | Registers the copy listener on sites only while a research-recorded session runs, and reads a page's citation details when the student clicks Cite. |
 | `webNavigation` | During a session, notices page visits and searches so the research log has them, with time on each page. |
 | `contextMenus` | Adds "Cite this page with Visor" to the right-click menu, only during a session. |
@@ -607,7 +620,7 @@ app's privacy policy (`https://visor-ed.web.app/privacy`). See
 
 ## Privacy
 
-**Google Docs history** makes no request to any host other than the document you have open, unless you choose to send a report to a Visor project (Send to Visor), or you're connected and the Doc is linked to your group project (then its figures, never its text, go to that project automatically).
+**Google Docs history** makes no request to any host other than the document you have open, unless you choose to send a report to a Visor project (Send to Visor, or files you add from Google Drive, each read from its own page), or you're connected and the Doc is linked to your group project (then its figures, never its text, go to that project automatically).
 
 - No Google APIs, no OAuth, no scopes, no consent screen
 - No telemetry, no analytics

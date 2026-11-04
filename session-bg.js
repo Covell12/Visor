@@ -1187,14 +1187,19 @@ async function autoSend(msg) {
   } catch (e) { return { ok: false, error: e.message }; }
 }
 
-// For the side panel's "Send to Visor" box
+// For the side panel's "Send to Visor" box, and "Add files from Google Drive"
+// (drive-import.html), which also needs the site's address, to link to the
+// project, and whether a writing session is running (it waits for the end of
+// one: a research-recorded session would log the files it opens as research)
 async function sendState(fileId) {
   const auth = await getAuth();
   const last = fileId ? (await sentLog())[fileId] || null : null;
-  if (!auth || !auth.token) return { connected: false, lastSent: last };
+  const s = await getState();
+  const sessionActive = !!(s && s.active);
+  if (!auth || !auth.token) return { connected: false, lastSent: last, sessionActive };
   let projects = [];
-  try { projects = (await visorApi('/api/ext/projects')).projects || []; } catch (e) { if (e.status === 401) return { connected: false, lastSent: last }; }
-  return { connected: true, user: auth.user, projects: projects.map((p) => ({ ...p, linked: !!fileId && p.fileId === fileId })), lastSent: last };
+  try { projects = (await visorApi('/api/ext/projects')).projects || []; } catch (e) { if (e.status === 401) return { connected: false, lastSent: last, sessionActive }; }
+  return { connected: true, user: auth.user, origin: auth.origin, projects: projects.map((p) => ({ ...p, linked: !!fileId && p.fileId === fileId })), lastSent: last, sessionActive };
 }
 
 async function sendNow(msg) {

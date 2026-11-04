@@ -37,7 +37,15 @@ ck('  with no optional access to other sites and no cite shortcut', [m.optional_
 ck('  versioned past the listing\'s 3.6, under its name', [m.version, m.name], ['3.7.0', 'Visor — Who Wrote What: Google Docs History']);
 ck('  no script on the Visor website', m.content_scripts.some((cs) => cs.js.includes('site-bridge.js')), false);
 ck('  AWARE and the history are there', m.content_scripts.flatMap((cs) => cs.js), ['page-probe.js', 'aware.js', 'edition.js', 'changelog.js', 'shares.js', 'content.js']);
-ck('  none of Visor Classroom\'s files', ['session-bg.js', 'lockdown.js', 'research.js', 'cite.js', 'sessionpanel.html', 'blocked.html', 'permission.html', 'config.js', 'site-bridge.js'].filter((f) => fs.existsSync(path.join(OUT, f))), []);
+ck('  none of Visor Classroom\'s files', ['session-bg.js', 'lockdown.js', 'research.js', 'cite.js', 'sessionpanel.html', 'blocked.html', 'permission.html', 'config.js', 'site-bridge.js', 'drive.js', 'drive-import.html', 'drive-import.js', 'drive-import.css'].filter((f) => fs.existsSync(path.join(OUT, f))), []);
+{
+  // The side panel's way in sits inside the Send to Visor box, which the Docs edition hides
+  const sp = read('sidepanel.html');
+  const box = sp.slice(sp.indexOf('id="send-box"'), sp.indexOf('Document growth</h3>'));
+  ck('  and the ways into "Add files from Google Drive" are hidden in it',
+    [/class="v-card glass v-send classroom-only" id="send-box"/.test(sp), box.includes('id="send-drive"'), sp.split('id="send-drive"').length - 1, /id="drive" class="[^"]*classroom-only[^"]*"/.test(read('popup.html'))],
+    [true, true, 1, true]);
+}
 ck('  it says it is the Docs edition', /VISOR_EDITION = 'docs'/.test(read('edition.js')), true);
 ck('  the side panel doesn\'t load Visor Classroom\'s config', /config\.js/.test(read('sidepanel.html')), false);
 ck('  and hides the Send to Visor box', read('sidepanel.html').match(/class="[^"]*classroom-only[^"]*"/g).length, 2);
@@ -51,6 +59,7 @@ ck('  and hides the Send to Visor box', read('sidepanel.html').match(/class="[^"
   const rm = JSON.parse(rel('manifest.json'));
   ck('the release is the Classroom edition', /VISOR_EDITION = 'classroom'/.test(rel('edition.js')), true);
   ck('  with the writing-session code in it', ['session-bg.js', 'lockdown.js', 'research.js', 'cite.js', 'site-bridge.js', 'sessionpanel.html', 'blocked.html', 'permission.html'].filter((f) => !fs.existsSync(path.join(REL, f))), []);
+  ck('  and "Add files from Google Drive"', ['drive.js', 'drive-import.html', 'drive-import.js', 'drive-import.css'].filter((f) => !fs.existsSync(path.join(REL, f))), []);
   ck('  and AWARE', rm.content_scripts.flatMap((cs) => cs.js).includes('aware.js'), true);
   ck('  the bridge runs on the Visor site only', rm.content_scripts.find((cs) => cs.js.includes('site-bridge.js')).matches, ['https://visor-ed.com/*', 'https://visor-ed.web.app/*', 'https://visor-ed.firebaseapp.com/*']);
   ck('  and localhost isn\'t trusted as Visor', /localhost/.test(rel('config.js')), false);

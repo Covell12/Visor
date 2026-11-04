@@ -148,7 +148,7 @@ Connect the extension to your Visor account once. Then, only while a writing ses
 • If the assignment records research, the research you do for the essay is recorded for your teacher: your searches, the pages you visit and how long, and text you copy, so a paste can show where it came from.
 • In a locked, in-class session, sites your teacher didn't allow (and AI sites) show a "not allowed" page instead.
 
-Outside a session, none of that runs. Group projects: if your teacher linked your group's Google Doc, opening it sends its figures and its editors' names and email addresses, never its text, to your group's project.
+Outside a session, none of that runs. Group projects: if your teacher linked your group's Google Doc, opening it sends its figures and its editors' names and email addresses, never its text, to your group's project. To add more of your group's Docs and Slides, choose Add Drive files to a Visor project and paste their links from Google Drive: Visor reads each one in a background tab and sends the same figures.
 
 
 NO API, NO SIGN-IN FOR DOCS HISTORY
@@ -158,7 +158,7 @@ The Docs history uses no Google API, no OAuth flow and no API key. It reads the 
 
 PRIVACY
 
-Docs history: the analysis happens in the tab and is discarded when you close it; nothing leaves the browser unless you choose Send to Visor (or your group's linked Doc sends its figures, never its text, to your project). Writing sessions: research is sent only to the Visor Classroom account you connected, only during a session, and only for assignments that record research. No keystrokes on other sites, no passwords, no page contents beyond what a student copies or cites, no telemetry, no analytics. Visor never labels writing as AI-generated. Full policy: https://visor-ed.web.app/privacy
+Docs history: the analysis happens in the tab and is discarded when you close it; nothing leaves the browser unless you choose Send to Visor or add files from Google Drive to a project (or your group's linked Doc sends its figures, never its text, to your project). Writing sessions: research is sent only to the Visor Classroom account you connected, only during a session, and only for assignments that record research. No keystrokes on other sites, no passwords, no page contents beyond what a student copies or cites, no telemetry, no analytics. Visor never labels writing as AI-generated. Full policy: https://visor-ed.web.app/privacy
 
 
 EDITORS ONLY
@@ -303,7 +303,7 @@ Visor's interface is a Chrome side panel: the Docs history panel beside a Google
 ### `tabs`
 
 ```
-Reads the address of the active tab so Visor can tell whether it is a Google Docs or Google Slides document, turn on its side panel there and message the right tab. Also finds an open Visor site tab when connecting, and opens the Chrome Web Store listing when the user clicks Rate Visor.
+Reads the address of the active tab so Visor can tell whether it is a Google Docs or Google Slides document, turn on its side panel there and message the right tab. Also finds an open Visor site tab when connecting, and opens the Chrome Web Store listing when the user clicks Rate Visor. When a user chooses Add Drive files to a Visor project, it lists the Google Docs and Slides files open in their tabs so they can pick them, and opens each file they pick in a background tab to read its history the same way the side panel does, closing the tab afterwards; nothing about those tabs is kept.
 
 During a Visor writing session it also keeps the session panel on every tab, records each page's address and title for the research log, sends tabs on sites a locked session doesn't allow to Visor's "not allowed" page, and returns the student to their essay if they move to another tab or Chrome window in a locked session with no allowed sites. Outside a session, Visor keeps no record of the pages the user visits.
 ```
@@ -345,7 +345,8 @@ Since 4.0.0, tick what writing sessions send to the Visor web app:
 - ☑ **Personally identifiable information** — the names and email addresses of a Doc's editors, as shown in its history, in a report sent to a Visor project.
 
 Nothing is collected outside a writing session, except reports to a Visor
-project: one a user chooses to send, or, for a Doc linked to their group
+project: one a user chooses to send (from a Doc's side panel, or for files
+they add from Google Drive), or, for a Doc linked to their group
 project, sent automatically when a connected student opens it. Reports carry
 names, addresses and counted figures, never document text. AWARE, the
 percentage settings and everything else on Docs stay on the user's computer.
@@ -388,6 +389,9 @@ VISOR CLASSROOM WRITING SESSIONS (test account below)
 4. The Visor icon shows REC. Open a site that isn't on the allowed list, such as https://example.com: it shows Visor's "not allowed" page. Open https://chatgpt.com: it's blocked too.
 5. Right-click a page and choose Cite this page with Visor, or press Alt+Shift+C.
 6. End the session: the block is lifted, and nothing is recorded any more.
+
+GROUP PROJECT FILES (same student account)
+Click the Visor icon and choose Add Drive files to a Visor project. Pick [PROJECT NAME], paste the link of a Google Doc you can edit, and click Add. Visor opens the Doc in a background tab, reads its history, closes it, and the Doc appears in the project's Resources on the Visor website.
 
 To see what the teacher sees: [TEACHER EMAIL] / [TEACHER PASSWORD].
 ```

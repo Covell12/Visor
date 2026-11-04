@@ -22,6 +22,14 @@ chrome.storage.local.get('visorAuth', ({ visorAuth: auth }) => {
   const name = auth.user && (auth.user.name || auth.user.email);
   document.getElementById('accountName').textContent = name ? `Connected to Visor as ${name}` : 'Connected to Visor';
   document.getElementById('account').hidden = false;
+  // Visor Classroom: Docs and Slides files from Google Drive, for a group project
+  if (globalThis.VISOR_EDITION !== 'docs') document.getElementById('drive').hidden = false;
+});
+
+document.getElementById('drive').addEventListener('click', async () => {
+  if (globalThis.VISOR_EDITION === 'docs') return;
+  try { await chrome.tabs.create({ url: chrome.runtime.getURL('drive-import.html') }); } catch (_) { /* nothing to open it in */ }
+  window.close();
 });
 
 (async () => {

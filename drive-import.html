@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Visor: add files from Google Drive</title>
+  <script src="edition.js"></script>
+  <script src="theme.js"></script>
+  <link rel="stylesheet" href="glass.css" />
+  <link rel="stylesheet" href="drive-import.css" />
+</head>
+<body>
+  <main class="di">
+
+    <header class="di-head">
+      <img src="logo.png" alt="" width="46" height="30" class="di-mark">
+      <div>
+        <h1>Add files from Google Drive</h1>
+        <p class="di-lead">Choose Google Docs and Slides files. Visor reads each one’s history, as the Visor button does on a Doc you have open, and adds it to your group project.</p>
+      </div>
+    </header>
+
+    <p id="di-banner" class="di-banner" role="alert" hidden></p>
+
+    <!-- Where the files go -->
+    <section class="di-card glass" aria-labelledby="di-project-h">
+      <h2 id="di-project-h" class="di-h">Project</h2>
+      <div id="di-project-list" class="di-row" hidden>
+        <label for="di-project" class="di-label">Add to</label>
+        <select id="di-project" class="di-input"></select>
+      </div>
+      <div id="di-project-code" class="di-row" hidden>
+        <label for="di-code" class="di-label">Project code</label>
+        <input id="di-code" class="di-input di-code" maxlength="6" autocomplete="off" spellcheck="false" placeholder="e.g. 7KQ2MX">
+      </div>
+      <p id="di-project-note" class="di-note"></p>
+    </section>
+
+    <!-- Which files -->
+    <section class="di-card glass" aria-labelledby="di-files-h">
+      <h2 id="di-files-h" class="di-h">Files</h2>
+      <label for="di-paste" class="di-label di-block">Paste links to Google Docs or Slides files</label>
+      <div class="di-paste-row">
+        <textarea id="di-paste" class="di-input di-paste" rows="2" spellcheck="false" placeholder="Paste here, or drop links"></textarea>
+        <button id="di-paste-add" class="di-btn" type="button">Add</button>
+      </div>
+      <p class="di-help">In Google Drive, select the files (hold Ctrl, or ⌘ on a Mac, to pick several) and press Ctrl+C or ⌘C, then paste them here. For one file, right-click it and choose Share → Copy link.
+        <button id="di-open-drive" class="di-link" type="button">Open Google Drive ↗</button></p>
+      <ul id="di-rejected" class="di-rejected" aria-live="polite"></ul>
+
+      <ul id="di-picked" class="di-files" aria-label="Files to add"></ul>
+
+      <h3 class="di-sub" id="di-open-h">Open in Chrome</h3>
+      <ul id="di-open" class="di-files" aria-labelledby="di-open-h"></ul>
+      <p id="di-open-empty" class="di-empty" hidden>No Google Docs or Slides files are open in Chrome.</p>
+    </section>
+
+    <!-- Go -->
+    <section class="di-card glass di-go-card">
+      <div class="di-go">
+        <button id="di-go" class="di-btn primary" type="button" disabled>Add files</button>
+        <p id="di-summary" class="di-summary" role="status" aria-live="polite"></p>
+      </div>
+      <p class="di-fine">Visor opens each file in a background tab, reads its history and closes it again. Only names, email addresses and counted figures go to the project, never the document’s text. You need edit access to a file to add it, the same rule Google Docs applies to version history.</p>
+    </section>
+
+  </main>
+  <script src="config.js"></script>
+  <script src="drive.js"></script>
+  <script src="drive-import.js"></script>
+</body>
+</html>

@@ -1,0 +1,141 @@
+/* ============================================================================
+ * Visor — Add files from Google Drive (drive-import.html)
+ * ----------------------------------------------------------------------------
+ * glass.css's tokens and surfaces, so the page follows the theme the side
+ * panel set (light, dark or system). No backdrop-filter, as everywhere.
+ * ==========================================================================*/
+
+* { box-sizing: border-box; }
+
+html, body { margin: 0; background: var(--page); }
+body {
+  font-family: 'Google Sans', Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--ink);
+  transition: background-color .2s var(--ease), color .2s var(--ease);
+}
+
+.di { max-width: 660px; margin: 0 auto; padding: 32px 16px 56px; display: flex; flex-direction: column; gap: 14px; }
+
+/* ── Head ──────────────────────────────────────────────────────────────── */
+.di-head { display: flex; gap: 14px; align-items: flex-start; margin-bottom: 4px; }
+.di-mark { flex: none; margin-top: 3px; }
+.di-head h1 { margin: 0; font-size: 21px; line-height: 1.25; letter-spacing: -0.015em; font-weight: 700; }
+.di-lead { margin: 6px 0 0; color: var(--ink-2); }
+
+.di-banner {
+  margin: 0; padding: 12px 14px; border-radius: var(--r-lg);
+  background: var(--accent-soft); border: 1px solid var(--accent-line); color: var(--accent-ink);
+  font-size: 13.5px; font-weight: 600;
+}
+.di-banner[hidden] { display: none; }
+
+/* ── Cards ─────────────────────────────────────────────────────────────── */
+.di-card { padding: 16px 18px; border-radius: var(--r-lg); }
+.di-h, .di-sub { margin: 0 0 10px; font-size: 11.5px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); }
+.di-sub { margin: 18px 0 8px; }
+.di-sub[hidden] { display: none; }
+
+.di-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.di-row[hidden] { display: none; }   /* the rule above would otherwise beat [hidden] */
+.di-label { font-size: 13px; font-weight: 650; color: var(--ink-2); }
+.di-block { display: block; margin-bottom: 7px; }
+
+.di-input {
+  flex: 1; min-width: 160px;
+  font: inherit; font-size: 14px;
+  padding: 8px 11px; border-radius: 10px;
+  border: 1px solid var(--hairline); background: var(--surface); color: var(--ink);
+}
+.di-input::placeholder { color: var(--ink-3); }
+.di-code { flex: 0 1 170px; text-transform: uppercase; letter-spacing: .12em; font-family: ui-monospace, Menlo, monospace; }
+
+.di-paste-row { display: flex; gap: 8px; align-items: flex-start; }
+.di-paste { resize: vertical; min-height: 46px; font-size: 13px; }
+.di-paste.is-over { border-color: var(--accent); background: var(--accent-soft); }
+
+.di-help, .di-note, .di-empty, .di-fine { margin: 8px 0 0; font-size: 12.5px; color: var(--ink-3); }
+.di-note:empty { display: none; }
+.di-empty[hidden] { display: none; }
+.di-fine { margin-top: 12px; font-size: 12px; }
+
+/* ── Controls ──────────────────────────────────────────────────────────── */
+.di-btn {
+  font: inherit; font-size: 13.5px; font-weight: 700;
+  padding: 8px 16px; border-radius: 999px;
+  border: 1px solid var(--hairline); background: var(--surface-2); color: var(--ink);
+  cursor: pointer; white-space: nowrap;
+  transition: background-color .15s var(--ease), border-color .15s var(--ease), filter .15s var(--ease);
+}
+.di-btn:hover:not(:disabled) { background: var(--accent-soft); border-color: var(--accent-line); }
+.di-btn.primary { border-color: transparent; background: var(--accent); color: #fff; padding: 10px 20px; white-space: normal; text-align: left; }
+.di-btn.primary:hover:not(:disabled) { background: var(--accent); filter: brightness(1.07); }
+/* The dark accent is a light blue: white type on it doesn't read */
+:root[data-theme="dark"] .di-btn.primary { color: #0C1119; }
+.di-btn:disabled { opacity: .55; cursor: default; }
+
+.di-link {
+  font: inherit; padding: 0; border: 0; background: none; cursor: pointer;
+  color: var(--accent-ink); font-weight: 650; text-decoration: underline; text-underline-offset: 2px;
+}
+a.di-link { display: inline; }
+
+.di-btn:focus-visible, .di-input:focus-visible, .di-link:focus-visible,
+.di-file input:focus-visible, .di-remove:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* ── Links that aren't files ───────────────────────────────────────────── */
+.di-rejected { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
+.di-rejected:empty { display: none; }
+.di-rejected li {
+  padding: 8px 11px; border-radius: 9px; font-size: 12.5px; color: var(--ink-2);
+  background: var(--surface-2); border: 1px solid var(--hairline-dim);
+}
+.di-rejected code { display: block; margin-bottom: 2px; font: 11.5px/1.4 ui-monospace, Menlo, monospace; color: var(--ink-3); word-break: break-all; }
+
+/* ── Files ─────────────────────────────────────────────────────────────── */
+.di-files { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.di-files:empty { display: none; }
+
+.di-file {
+  display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto; align-items: center; gap: 11px;
+  padding: 9px 8px 9px 12px; border-radius: 10px;
+  border: 1px solid var(--hairline); background: var(--surface);
+}
+.di-file input[type="checkbox"] { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); cursor: pointer; }
+.di-file input[type="checkbox"]:disabled { cursor: default; }
+
+.di-kind { display: inline-flex; width: 18px; height: 22px; color: var(--accent-vivid); }
+.di-kind.slides { color: var(--warm); }
+.di-kind.any { color: var(--ink-3); }
+.di-kind svg { width: 100%; height: 100%; }
+
+.di-file-main { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.di-file-title { font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.di-file-sub { font-size: 12.5px; color: var(--ink-3); overflow-wrap: anywhere; }
+
+.di-file.is-wait .di-file-sub { color: var(--ink-3); }
+.di-file.is-busy { border-color: var(--accent-line); background: var(--accent-soft); }
+.di-file.is-busy .di-file-sub { color: var(--accent-ink); font-weight: 600; }
+.di-file.is-ok .di-file-sub { color: var(--good); font-weight: 650; }
+.di-file.is-err .di-file-sub { color: var(--hot); }
+
+.di-remove {
+  width: 28px; height: 28px; border: 0; border-radius: 7px; background: none; cursor: pointer;
+  color: var(--ink-3); font-size: 18px; line-height: 1;
+}
+.di-remove:hover { background: var(--surface-3); color: var(--ink); }
+
+/* ── Go ────────────────────────────────────────────────────────────────── */
+.di-go { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.di-summary { margin: 0; flex: 1; min-width: 200px; font-size: 13px; color: var(--ink-2); }
+.di-summary:empty { display: none; }
+.di-summary.is-ok { color: var(--good); font-weight: 650; }
+.di-summary.is-err { color: var(--hot); }
+.di-summary .di-link { margin-left: 6px; }
+
+@media (max-width: 480px) {
+  .di { padding-top: 20px; }
+  .di-paste-row { flex-direction: column; }
+  .di-head h1 { font-size: 19px; }
+}

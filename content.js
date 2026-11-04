@@ -374,18 +374,43 @@ function docMeta() {
  * Visor Classroom: the report a group project receives (Section 8.7). The
  * same figures the side panel shows, without any of the document's text:
  * pasted and deleted passages stay here.
+ *
+ * `whole`: every tab of a Doc that has tabs, whichever one is on screen. "Add
+ * files from Google Drive" sends files this way, since the background tab it
+ * reads a file in shows whichever tab Docs opens first.
  */
-function exportReport() {
+function exportReport(whole = false) {
   const strip = (list) => (list || []).map(({ text, ...rest }) => rest);
+  const picked = whole ? wholeDocument() : { figures: analysis, scope: selectionLabel() };
   // AWARE's map of who wrote each stretch and Visor's own diagnostics stay on
   // this computer: the site reads the counted figures and nothing else.
-  const { ownership, diagnostics, ...figures } = analysis;
+  const { ownership, diagnostics, ...figures } = picked.figures;
   return {
     schema: 'visor-export/1',
     meta: docMeta(),
-    scope: selectionLabel(),
+    scope: picked.scope,
     exportedAt: new Date().toISOString(),
     analysis: { ...figures, pastes: strip(figures.pastes).slice(0, 300), deletions: strip(figures.deletions).slice(0, 300) }
+  };
+}
+
+/**
+ * The whole document's figures, leaving the selection alone: the bar, the
+ * panel and the tab the user chose all stay as they were. The fold goes into
+ * the cache like any other, so choosing "all tabs" afterwards costs nothing.
+ */
+function wholeDocument() {
+  if (!tabState.selected) return { figures: analysis, scope: selectionLabel() };
+  let hit = foldCache.get('');
+  if (!hit) {
+    const tl = VisorChangelog.buildTimeline(allEntries, allUsers);
+    hit = { timeline: tl, analysis: VisorChangelog.analyze(tl) };
+    foldCache.set('', hit);
+    while (foldCache.size > FOLD_CACHE_MAX) foldCache.delete(foldCache.keys().next().value);
+  }
+  return {
+    figures: { ...hit.analysis, lastRevision: analysis.lastRevision, analyzedAt: analysis.analyzedAt },
+    scope: 'all tabs'
   };
 }
 
@@ -461,8 +486,9 @@ function replayPayload() {
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   switch (msg && msg.type) {
     case 'VISOR_EXPORT':
-      // The side panel's "Send to Visor" box
-      sendResponse(analysis ? { ok: true, report: exportReport() } : { ok: false });
+      // The side panel's "Send to Visor" box; with `whole`, "Add files from
+      // Google Drive" (every tab of the document)
+      sendResponse(analysis ? { ok: true, report: exportReport(!!(msg && msg.whole)) } : { ok: false });
       return false;
 
     case 'VISOR_STATUS':

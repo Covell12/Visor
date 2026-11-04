@@ -48,6 +48,14 @@
       background: var(--surface-3);
       border: 1px solid var(--hairline);
     }
+    .p-btn-2 {
+      margin-top: 8px;
+      color: var(--accent-ink);
+      background: var(--surface);
+      border: 1px solid var(--accent-line);
+    }
+    .p-btn-2:hover { filter: none; background: var(--accent-soft); }
+    .p-btn[hidden] { display: none; }
 
     .p-facts { display: flex; flex-direction: column; gap: 7px; margin-top: 11px; }
     .p-fact { display: flex; gap: 8px; font-size: 11px; line-height: 1.45; color: var(--ink-2); }
@@ -73,6 +81,7 @@
   </div>
 
   <button id="open" class="p-btn" disabled>Open Visor</button>
+  <button id="drive" class="p-btn p-btn-2 classroom-only" hidden>Add Drive files to a Visor project</button>
 
   <div id="account" class="p-card glass classroom-only" style="margin-top:11px" hidden>
     <div class="p-status">

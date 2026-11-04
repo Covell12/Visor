@@ -32,7 +32,8 @@ const HOSTS = ['https://docs.google.com/document/*', 'https://docs.google.com/pr
 
 // What Docs history is made of. Everything else in the source tree belongs
 // to Visor Classroom (session-bg, lockdown, research, cite, site-bridge, the
-// session panel, the blocked and permission pages, config) or to development.
+// session panel, the blocked and permission pages, config, and adding Google
+// Drive files to a project: drive.js and drive-import.*) or to development.
 const FILES = [
   'background.js', 'page-probe.js', 'aware.js', 'changelog.js', 'shares.js', 'content.js', 'content.css',
   'sidepanel.html', 'sidepanel.js', 'sidepanel.css', 'glass.css', 'theme.js',
@@ -102,7 +103,8 @@ function missingFiles(OUT) {
 function check(OUT = OUT_DEFAULT) {
   const missing = missingFiles(OUT);
   if (missing.length) throw new Error(`the build is missing ${missing.join(', ')}`);
-  const leaked = ['session-bg.js', 'lockdown.js', 'research.js', 'research-capture.js', 'cite.js', 'sessionpanel.html', 'permission.html', ...CLASSROOM_ONLY]
+  const leaked = ['session-bg.js', 'lockdown.js', 'research.js', 'research-capture.js', 'cite.js', 'sessionpanel.html', 'permission.html',
+    'drive.js', 'drive-import.html', 'drive-import.js', 'drive-import.css', ...CLASSROOM_ONLY]
     .filter((f) => fs.existsSync(path.join(OUT, f)));
   if (leaked.length) throw new Error(`Visor Classroom files in the Docs build: ${leaked.join(', ')}`);
 }
