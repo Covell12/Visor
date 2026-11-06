@@ -73,7 +73,7 @@ The extension only talks to the Visor addresses it lists, in two places that mus
 1. `extension/config.js`: add `https://YOUR-PROJECT.web.app` (and the `firebaseapp.com` one) to `VISOR_WEB_ORIGINS`, and set `VISOR_DEFAULT_ORIGIN` to it.
 2. `extension/manifest.json`: add `https://YOUR-PROJECT.web.app/*` (and `https://YOUR-PROJECT.firebaseapp.com/*`) to the `matches` of the content script whose `js` is `site-bridge.js`.
 
-Raise the version in `manifest.json` and upload the update. In the Chrome Web Store listing, change the privacy policy URL to `https://YOUR-PROJECT.web.app/privacy`. The same applies to a custom domain: list it in both places. (The server needs nothing for this: `/api/ext/*` accepts any `chrome-extension://` origin, without cookies.)
+Raise the version in `manifest.json`, then make the upload in the extension folder with `node tools/build-release.js dist/visor-release dist/visor-release.zip` and upload `dist/visor-release.zip`. Never upload the source folder: it also trusts `http://localhost:3000` (for local testing), which the release build takes out. In the Chrome Web Store listing, change the privacy policy URL to `https://YOUR-PROJECT.web.app/privacy`. The same applies to a custom domain: list it in both places. (The server needs nothing for this: `/api/ext/*` accepts any `chrome-extension://` origin, without cookies.)
 
 ### Optional: shut off spending at a limit
 
@@ -118,7 +118,7 @@ Then open http://localhost:3000. Put `GEMINI_API_KEY` (and `SESSION_SECRET` if y
 ### With the extension
 
 1. Start the web app (above). For quick testing, `VISOR_DEV_LOGIN=1 npm start` and sign in at `http://localhost:3000/dev/login?email=…` (an account with that email must exist).
-2. In Chrome, open `chrome://extensions`, turn on **Developer mode**, **Load unpacked**, and choose the `extension/` folder (the repo next to this one). `http://localhost:3000` is already in its `config.js` and `manifest.json`.
+2. In Chrome, open `chrome://extensions`, turn on **Developer mode**, **Load unpacked**, and choose the `extension/` folder next to this one: a checkout of this repository's `extension` branch (from this folder, `git worktree add ../extension extension` makes one). `http://localhost:3000` is already in its `config.js` and `manifest.json`.
 3. Sign in to the web app as a student and open **Connect extension** on Home (`/extension/connect`).
 4. Open a writing assignment and start a session: the extension's icon shows **REC**, its side panel holds your essay, and **Cite this page** (or Alt+Shift+C) cites the page you're on.
 
@@ -142,7 +142,8 @@ npm test
 
 ### Keeping shared code in step
 
-- `npm run sync-engine` copies `../extension/changelog.js` (the one analysis engine) to `lib/engine/` and `public/engine/`, and `public/cite-format.js` to `lib/cite.js`. It runs before every deploy; without the extension next to this folder it keeps the committed copies. `test/engine-sync.test.js` and `test/cite.test.js` check the copies match.
+- `npm run sync-engine` copies `../extension/changelog.js` (the one analysis engine) to `lib/engine/` and `public/engine/`, and the browser modules the server shares (`cite-format.js` as `lib/cite.js`, `doc-format.js`, `assignment-text.js`, `source-grade.js`) from `public/` to `lib/`. It runs before every deploy; without the extension next to this folder it keeps the committed copies. `test/engine-sync.test.js` and `test/cite.test.js` check the copies match.
+- Two things are also kept by hand in the extension: the reliability grade (copy `public/source-grade.js` to the extension's `source-grade.js`) and the AI-site list (`lib/sites.js` here, `DEFAULT_AI_SITES` in the extension's `config.js`). With the extension next to this folder, `test/source-grade.test.js` and `test/engine-sync.test.js` fail if either differs.
 - `npm run vendor` copies Quill 2.0.3 from `node_modules` into `public/vendor/quill/` (committed: school filters often block CDNs).
 
 ## How it works: Visor Classroom

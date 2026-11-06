@@ -20,6 +20,14 @@ test('the browser copy and the server copy are the same file', () => {
   assert.strictEqual(lib, pub, 'run `npm run sync-engine`');
 });
 
+// The extension's session panel grades the page in front with its own copy
+test('the extension\'s copy is the same file too', t => {
+  const ext = path.join(__dirname, '..', '..', 'extension', 'source-grade.js');
+  if (!fs.existsSync(ext)) { t.skip('extension/ not next to web-app/; comparison skipped'); return; }
+  const pub = fs.readFileSync(path.join(__dirname, '..', 'public', 'source-grade.js'), 'utf8');
+  assert.strictEqual(fs.readFileSync(ext, 'utf8'), pub, 'copy public/source-grade.js to the extension');
+});
+
 test('the kind of site decides the grade', () => {
   const want = [
     ['A', page('https://www.cdc.gov/sleep/about.html'), 'gov'],
@@ -139,6 +147,12 @@ test('an archived copy is graded by the page it saved', () => {
   assert.strictEqual(g.kind, 'gov');
   assert.strictEqual(g.host, 'cdc.gov');
   assert.match(g.notes[0].text, /archived copy/);
+});
+
+test('an archived address with a % that isn\'t an escape is still graded by the page it saved', () => {
+  const g = grade(page('https://web.archive.org/web/20190101000000/https://www.cdc.gov/sleep/100%-rest.html'));
+  assert.strictEqual(g.kind, 'gov');
+  assert.strictEqual(g.host, 'cdc.gov');
 });
 
 test('every AI or answer site on the blocked-sites list grades D', () => {

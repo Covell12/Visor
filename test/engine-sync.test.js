@@ -38,3 +38,12 @@ test('lib/assignment-text.js is identical to public/assignment-text.js', () => {
   const b = fs.readFileSync(path.join(ROOT, 'public', 'assignment-text.js'));
   assert.ok(a.equals(b), 'run `npm run sync-engine`');
 });
+
+// The AI and answer sites a session blocks by default: lib/sites.js here, and
+// DEFAULT_AI_SITES in the extension's config.js, which enforces them
+test('the AI-site list matches the extension\'s config.js', t => {
+  const cfg = path.join(ROOT, '..', 'extension', 'config.js');
+  if (!fs.existsSync(cfg)) { t.skip('extension/ not next to web-app/; comparison skipped'); return; }
+  const { DEFAULT_AI_SITES } = require('../lib/sites');
+  assert.deepStrictEqual(require(cfg).VisorConfig.DEFAULT_AI_SITES, DEFAULT_AI_SITES, 'change lib/sites.js and the extension\'s config.js together');
+});
