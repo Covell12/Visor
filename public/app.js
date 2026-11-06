@@ -1046,6 +1046,7 @@ function showExtensionData() {
         <li>${code ? `Copy this project's code and paste it in: ${copyChipHtml(code, 'Copy this project’s code')}` : 'Enter this project’s code (ask your teacher for it).'}</li>
       </ol>
       <div class="muted small" style="margin-top:8px;">The <b>Send to Visor</b> box is on the extension's Overview tab, under Live replay. Connected students pick the project from a list; otherwise they type this code. If the teacher linked the group's Doc to a group project, the extension sends it automatically. Re-sending the same file just updates it.</div>
+      <div class="muted small" style="margin-top:8px;"><b>Several files at once</b> (extension 4.6.0 or newer): under <b>Send to Visor</b>, choose <b>Add other files from Google Drive…</b> (once the extension is connected, the Visor icon's <b>Add Drive files to a Visor project</b> does the same). Pick this project or type its code, then paste the files' links: in Google Drive, select them and press Ctrl+C (⌘C on a Mac). The extension reads each Google Doc or Slides file in a background tab and adds it here, up to 20 at a time.</div>
     </div>
     <div class="field"><label>Or paste the report JSON</label><textarea id="extJson" class="input mono" style="font-size:12px;min-height:110px;" placeholder='{ "schema": "visor-export-v1", "meta": { … }, "analysis": { … } }'></textarea></div>
     <div id="extErr" class="form-error hidden"></div>`,
@@ -1317,6 +1318,13 @@ function dvRender() {
 // Shown where a report was sent by an older extension and lacks this part
 const dvResend = what => `<div class="callout amber dv-note">${what} arrives with reports sent from Visor extension 3.1 or newer. Open the document in Chrome and use <b>Send to Visor</b> again to fill this in.</div>`;
 
+// The extension (4.0 and newer) names what every report covers, a whole
+// document included: "the whole document", or "all tabs" for a Doc with tabs,
+// which is how Add files from Google Drive sends each file. Only a part of a
+// document (one tab) gets the "only" note.
+const DV_WHOLE_SCOPES = ['the whole document', 'all tabs'];
+const dvPartialScope = scope => !!scope && !DV_WHOLE_SCOPES.includes(scope);
+
 /* ---------- Overview ---------- */
 function dvOverview(rep) {
   const isExt = rep.source === 'visor-extension', isDrive = rep.source === 'drive';
@@ -1324,7 +1332,7 @@ function dvOverview(rep) {
   const notes = [
     isDrive && rep.drive ? `Built from ${fmtN(rep.drive.analyzedRevisions)} of ${fmtN(rep.drive.totalRevisions)} saved versions in Google Drive. Changes between two versions are credited to whoever saved the later one, and pasting can't be told apart from typing.` : '',
     rep.collapsedRoster ? 'This document’s history doesn’t separate its authors, so all edits are shown together. Totals and timings are still exact.' : '',
-    rep.scope ? `Covers ${esc(rep.scope)} only.` : ''
+    dvPartialScope(rep.scope) ? `Covers ${esc(rep.scope)} only.` : ''
   ].filter(Boolean).map(n => `<div class="callout amber dv-note">${n}</div>`).join('');
 
   let tiles = '';

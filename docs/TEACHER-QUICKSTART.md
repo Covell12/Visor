@@ -110,7 +110,7 @@ Visor never says an essay was "written by AI" or gives a probability. It shows w
 
 ## Group projects and discussions
 
-- **Group project:** make groups (drag students in, or "auto-make groups of N"), and paste each group's Google Doc link. Each group gets its own project: recordings of their meetings, Drive history, and the history the extension sends automatically from their Doc. Run the analysis there; the measured numbers come first, then a clearly labelled AI-written summary.
+- **Group project:** make groups (drag students in, or "auto-make groups of N"), and paste each group's Google Doc link. Each group gets its own project: recordings of their meetings, Drive history, and the history the extension sends automatically from their Doc. Students can add the group's other Docs and Slides too, several at once, with **Add other files from Google Drive…** under the extension's **Send to Visor** (extension 4.6.0 or newer). Run the analysis there; the measured numbers come first, then a clearly labelled AI-written summary.
 - **Discussion:** on the assignment's **Recordings** tab, confirm once that students know they're being recorded, then **Record in the browser** (long discussions are saved in 10-minute parts) or upload a file. Name the voices, then **Analyze** for each student's talk time, turns, words, who spoke after whom, and who didn't speak. You choose whether students see their own numbers.
 
 ## Privacy in one line
