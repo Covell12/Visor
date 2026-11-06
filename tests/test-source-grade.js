@@ -7,7 +7,8 @@
 'use strict';
 
 const G = require('../source-grade.js');
-const { DEFAULT_AI_SITES } = require('../config.js');
+// config.js puts everything on VisorConfig (it also loads as a plain script)
+const { DEFAULT_AI_SITES } = require('../config.js').VisorConfig;
 
 const out = [];
 const ck = (name, got, want) => {
@@ -27,8 +28,12 @@ ck('Google results', g('https://www.google.com/search?q=sleep'), 'D search');
 ck('not a web page', g('chrome://newtab/'), null);
 // A cited page with its author and date does better than the bare address
 ck('cited with author and date', G.grade({ type: 'article', url: 'https://sleep-facts.example.com/x', authors: ['Jo Reyes'], published: '2025-01-02' }, { now: Date.parse('2026-11-01') }).letter, 'C');
-const notD = (DEFAULT_AI_SITES || []).filter((s) => !/^D /.test(g(`https://${s}/x`) || ''));
-ck('every AI site in config.js grades D', notD, []);
+// An archived copy is graded by the page it saved, even when that address has
+// a % that isn't an escape (the web app's copy had this fix first)
+const safe = (f) => { try { return f(); } catch (e) { return `threw ${e.name}`; } };
+ck('archived copy, address with a stray %', safe(() => g('https://web.archive.org/web/20190101000000/https://www.cdc.gov/sleep/100%-rest.html')), 'A gov');
+const notD = DEFAULT_AI_SITES.filter((s) => !/^D /.test(g(`https://${s}/x`) || ''));
+ck(`every AI site in config.js (${DEFAULT_AI_SITES.length}) grades D`, notD, []);
 
 const failed = out.filter((x) => !x).length;
 console.log(`\n${out.length - failed}/${out.length} passed`);

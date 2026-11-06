@@ -1,8 +1,10 @@
 /* Visor — a reliability grade for each source, A to D, with its reasons.
 
-   One file, three places: the web app's public/source-grade.js (the one to
-   edit), its lib/source-grade.js copy (`npm run sync-engine`), and this
-   extension's source-grade.js, copied by hand. Keep them identical.
+   One file, three places, all identical: the web app's public/source-grade.js
+   (the one to edit), its lib/source-grade.js copy (`npm run sync-engine`), and
+   the Visor extension's source-grade.js, copied by hand.
+   test/source-grade.test.js checks the web app's two, and the extension's too
+   when the extension is checked out next to the web app.
 
    No AI and no lookups: the grade comes from what kind of site the source is
    on (its address, or a DOI or ISBN) and what the source lists (an author, a
@@ -117,7 +119,8 @@
   function unarchive(u) {
     if (u.host !== 'web.archive.org' && u.host !== 'archive.org') return null;
     const m = /\/web\/[^/]+\/(.+)$/.exec(u.href);
-    return m ? parseUrl(decodeURIComponent(m[1])) : null;
+    if (!m) return null;
+    try { return parseUrl(decodeURIComponent(m[1])); } catch { return parseUrl(m[1]); } // a stray % isn't an escape
   }
 
   function yearOf(published) {
